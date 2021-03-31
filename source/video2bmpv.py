@@ -7,19 +7,20 @@ Command: python ./this.py sourceFileName destFileName [maxFrameCount], where:
 This simple mini program is used to convert common video file to readable plain bitmaps.
 '''
 programDesc = '''
+THIS PROGRAM IS NOT THE CORE PART OF THIS PROJECT! THIS PROGRAM IS USED TO PREPARE DATA FOR THIS PROJECT.
 A 1 minute long 1080p 30FPS RGB24 video contains about 10GB of data.
 Common video files (like .mp4, .avi, .mov) usually compress the video data to minimize storage space
-requirements. Compression and uncompressed (codec) algorithm are complex, and different format may
-use different algorithms. The codec is not what we are studying here, so we will not using codec or
+requirements. Compression and decompression (codec) algorithm are complex, and different format may
+use different algorithms. The codec is not what we are studying here. We do not want to deal with codec or
 compressed video in this project; instead, we will only deal with easy-to-read plain bitmaps.
 By "plain", it means:
 - A file contains multiple blocks, each block is a frame of the video. Frame 1 first, then frame 2, then frame 3...
 - A frame has width * height pixels. The order is left-to-right, top-to-bottom, like how we write English.
-- A pixel has 3/4 bytes, which is RGB(A). __Modify this line of code: colorFixed = ***__
+- A pixel has 3 or 4 bytes, which is RGB(A).
 So, a 1 minute long 1080p 30FPS RGB24 video is about 60MB in .mov format, but
-60s * 30fps * (1092*1080)pixel * 3Byte/pixel = 11,197,440,000 bytes in our plain bitmap video format.
-That's a lot of data need to put on the disk or in our memory. Since we are now verify the algorithm on a high-end
-platform, this is not a big issue for now. But, when we implement this in our product, we need to switch to
+60s * 30fps * (1920*1080)pixel/frame * 3byte/pixel = 11,197,440,000 bytes in our plain bitmap video format.
+That's a lot of data need to put on the disk or in our memory. Since we are now developing the algorithm on a high-end
+platform, this is not a big issue. But, when we implement this in our product, we need to switch to
 streaming mode (so there is only few frames in memory buffer).
 '''
 
@@ -27,10 +28,14 @@ import sys
 import cv2
 
 dataStructure = cv2.COLOR_BGR2RGB # COLOR_BGR2RGBA or COLOR_BGR2RGB
-''' RGBA consumes extra 25% space, but align pixels in 32-bit word
-This is a trade-off between memory size and computation speed (vector instruction sets friendly)
-Note: Smaller size has cache advantages, this is a really complex trade off, and the result may differ
-on different CPU, OS, compiler. '''
+'''
+RGBA consumes extra 25% space, but align pixels in 32-bit word.
+Generally speaking, this is a trade-off between memory size and computation speed.
+32-bit alignment is vector instruction sets friendly; but smaller data size has cache advantages.
+This is a really complex trade off, and the result may differ on different CPU (arch), OS (cache miss
+context switch strategy), compiler...
+Don't ask me for why BGR, the opencv guy decided so.
+'''
 
 if len(sys.argv) < 3:
 	print(programInfo)
