@@ -13,7 +13,7 @@
 
 /** Edge class object data structure
  */
-typedef struct Edge_ClassDataStructure Edge;
+typedef struct Edge_ClassDataStructure* Edge;
 
 /** Init a edge object. 
  * This filter has an input (buffer of sourcfe.class), with same width and height of this object; 
@@ -24,24 +24,24 @@ typedef struct Edge_ClassDataStructure Edge;
  * @param height Height of the input image
  * @return $this(Opaque) edge class object if success, null if fail
  */
-Edge* edge_init(void* source, size_t width, size_t height);
+Edge edge_init(void* source, size_t width, size_t height);
 
 /** Apply edge detection filter and save the result in the buffer. 
  * Use edge_getEdgeImage() to get pointer of the buffer. 
  * @param this This edge class object
  */
-void edge_process(Edge* this);
+void edge_process(Edge this);
 
 /** Get the pointer to buffer. 
  * Here is where the edge filtered image saved.
  * @param this This edge class object
  * @return A pointer to the filtered image saved in this object's buffer
  */
-luma_t* edge_getEdgeImage(Edge* this);
+luma_t* edge_getEdgeImage(Edge this);
 
 /** Destroy this edge class object. 
  * @param this This edge class object
  */
-void edge_destroy(Edge* this);
+void edge_destroy(Edge this);
 
 #endif /* #ifndef INCLUDE_EDGE_H */

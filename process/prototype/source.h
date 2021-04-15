@@ -13,7 +13,7 @@
 
 /** Source class object data structure
  */
-typedef struct Source_ClassDataStructure Source;
+typedef struct Source_ClassDataStructure* Source;
 
 /** Init a source object. 
  * Open the video file (source file) and create a buffer for reading frame. 
@@ -22,25 +22,25 @@ typedef struct Source_ClassDataStructure Source;
  * @param height Height of the image
  * @return $this(Opaque) source class object if success, null if fail
  */
-Source* source_init(const char* imageFile, size_t width, size_t height);
+Source source_init(const char* imageFile, size_t width, size_t height);
 
 /** Read one frame from the source file and save in buffer of this class object. 
  * Use source_getRawBitmap() to get pointer of the buffer. 
  * @param this This source class object
  * @return Number of bytes processed
  */
-size_t source_read(Source* this);
+size_t source_read(Source this);
 
 /** Get the pointer to buffer. 
  * Here is where the raw frame saved.
  * @param this This source class object
  * @return A pointer to the raw frame data saved in this object's buffer
  */
-void* source_getRawBitmap(Source* this);
+void* source_getRawBitmap(Source this);
 
 /** Destroy this source class object. 
  * @param this This source class object
  */
-void source_destroy(Source* this);
+void source_destroy(Source this);
 
 #endif /* #ifndef INCLUDE_SOURCE_H */

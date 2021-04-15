@@ -3,14 +3,14 @@
 
 #include "edge.h"
 
-typedef struct Edge_ClassDataStructure {
+struct Edge_ClassDataStructure {
 	luma_t* buffer;
 	void* source;
 	size_t width, height;
-} Edge;
+};
 
-Edge* edge_init(void* source, size_t width, size_t height) {
-	Edge* this = malloc(sizeof(Edge));
+Edge edge_init(void* source, size_t width, size_t height) {
+	Edge this = malloc(sizeof(struct Edge_ClassDataStructure));
 	if (!this)
 		return NULL;
 	
@@ -24,7 +24,7 @@ Edge* edge_init(void* source, size_t width, size_t height) {
 	return this;
 }
 
-void edge_process(Edge* this) {
+void edge_process(Edge this) {
 	size_t yLimit = this->height - 2, xLimit = this->width - 2; //Strip the edges
 	luma_t* dest = this->buffer;
 
@@ -59,11 +59,11 @@ void edge_process(Edge* this) {
 	}
 }
 
-luma_t* edge_getEdgeImage(Edge* this) {
+luma_t* edge_getEdgeImage(Edge this) {
 	return this->buffer;
 }
 
-void edge_destroy(Edge* this) {
+void edge_destroy(Edge this) {
 	free(this->buffer);
 	free(this);
 }

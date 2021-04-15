@@ -10,13 +10,13 @@ int main(int argc, char* argv[]) {
 	size_t width = atoi(argv[1]);
 	size_t height = atoi(argv[2]);
 
-	Source* source = source_init("../../bmpv.data", width, height);
+	Source source = source_init("../../bmpv.data", width, height);
 	if (!source) {
 		fputs("Fail to init source input.\n", stderr);
 		return EXIT_FAILURE;
 	}
 
-	Edge* edge = edge_init(source_getRawBitmap(source), width, height);
+	Edge edge = edge_init(source_getRawBitmap(source), width, height);
 	if (!edge) {
 		fputs("Fail to init edge filter.\n", stderr);
 		return EXIT_FAILURE;

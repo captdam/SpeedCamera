@@ -3,14 +3,14 @@
 
 #include "source.h"
 
-typedef struct Source_ClassDataStructure {
+struct Source_ClassDataStructure {
 	FILE* fp;
 	void* buffer;
 	size_t width, height;
-} Source;
+};
 
-Source* source_init(const char* imageFile, size_t width, size_t height) {
-	Source* this = malloc(sizeof(Source));
+Source source_init(const char* imageFile, size_t width, size_t height) {
+	Source this = malloc(sizeof(struct Source_ClassDataStructure));
 	if (!this)
 		return NULL;
 	
@@ -27,15 +27,15 @@ Source* source_init(const char* imageFile, size_t width, size_t height) {
 	return this;
 }
 
-size_t source_read(Source* this) {
+size_t source_read(Source this) {
 	return fread(this->buffer, SOURCE_PIXELSIZE, this->width * this->height, this->fp);
 }
 
-void* source_getRawBitmap(Source* this) {
+void* source_getRawBitmap(Source this) {
 	return this->buffer;
 }
 
-void source_destroy(Source* this) {
+void source_destroy(Source this) {
 	fclose(this->fp);
 	free(this->buffer);
 	free(this);
