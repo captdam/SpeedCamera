@@ -3,15 +3,38 @@
 
 #include "edge.h"
 
-void edge(void* source, luma_t* dest, size_t width, size_t height) {
-//	uint16_t* destPtr = dest; //Size of (width-2) * (height-2), edge stripped
-	for (size_t y = 0; y < height - 2; y++) { //Skip the edge
-		uint8_t* top = source + y * width * EDGE_SOURCEPIXELSIZE;
-		uint8_t* middle = source + (y+1) * width * EDGE_SOURCEPIXELSIZE;
-		uint8_t* bottom = source + (y+2) * width * EDGE_SOURCEPIXELSIZE;
+typedef struct Edge_ClassDataStructure {
+	luma_t* buffer;
+	void* source;
+	size_t width, height;
+} Edge;
+
+Edge* edge_init(void* source, size_t width, size_t height) {
+	Edge* this = malloc(sizeof(Edge));
+	if (!this)
+		return NULL;
+	
+	this->buffer = malloc(sizeof(luma_t) * (width-2) * (height-2));
+	if (!(this->buffer))
+		return NULL;
+
+	this->source = source;
+	this->width = width;
+	this->height = height;
+	return this;
+}
+
+void edge_process(Edge* this) {
+	size_t yLimit = this->height - 2, xLimit = this->width - 2; //Strip the edges
+	luma_t* dest = this->buffer;
+
+	for (size_t y = 0; y < yLimit; y++) {
+		uint8_t* top = this->source + y * this->width * EDGE_SOURCEPIXELSIZE;
+		uint8_t* middle = this->source + (y+1) * this->width * EDGE_SOURCEPIXELSIZE;
+		uint8_t* bottom = this->source + (y+2) * this->width * EDGE_SOURCEPIXELSIZE;
 		
-		for (size_t x = 0; x < width - 2; x++) {
-			int16_t luma = 0; //luma of edge, +/-32k is large enough for worst case
+		for (size_t x = 0; x < xLimit; x++) {
+			int16_t luma = 0; //luma of edge, +/- 32k is large enough for any filter mask
 //			luma += -1 * (top[0] + top[1] + top[2]); //top-left
 			luma += -1 * (top[EDGE_SOURCEPIXELSIZE + 0] + top[EDGE_SOURCEPIXELSIZE + 1] + top[EDGE_SOURCEPIXELSIZE + 2]); //top-center
 //			luma += -1 * (top[EDGE_SOURCEPIXELSIZE*2 + 0] + top[EDGE_SOURCEPIXELSIZE*2 + 1] + top[EDGE_SOURCEPIXELSIZE*2 + 2]); //top-right
@@ -24,7 +47,23 @@ void edge(void* source, luma_t* dest, size_t width, size_t height) {
 			top += EDGE_SOURCEPIXELSIZE;
 			middle += EDGE_SOURCEPIXELSIZE;
 			bottom += EDGE_SOURCEPIXELSIZE;
-			*(dest++) = abs(luma>>2); //Skip LSB to minimize noise
+			/* Range of luma is +/- 255 * 3 * middle-center coff = 3060 */
+			if (luma > 255)
+				*(dest++) = 255;
+			else if (luma < 0)
+				*(dest++) = 0;
+			else
+				*(dest++) = luma;
+			//*(dest++) = abs(luma>>4); //Skip LSB to minimize noise
 		}
 	}
+}
+
+luma_t* edge_getEdgeImage(Edge* this) {
+	return this->buffer;
+}
+
+void edge_destroy(Edge* this) {
+	free(this->buffer);
+	free(this);
 }

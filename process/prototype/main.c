@@ -6,31 +6,31 @@
 #include "source.h"
 #include "edge.h"
 
-#define WIDTH 1920
-#define HEIGHT 1080
+int main(int argc, char* argv[]) {
+	size_t width = atoi(argv[1]);
+	size_t height = atoi(argv[2]);
 
-int main() {
-	Source* source = source_init("../../bmpv.data", 1920, 1080);
+	Source* source = source_init("../../bmpv.data", width, height);
 	if (!source) {
 		fputs("Fail to init source input.\n", stderr);
 		return EXIT_FAILURE;
 	}
 
-	luma_t* edgeImg = malloc(sizeof(luma_t) * (1920-2) * (1080-2));
-	if (!edgeImg) {
-		fputs("Fail to init luma buffer.\n", stderr);
+	Edge* edge = edge_init(source_getRawBitmap(source), width, height);
+	if (!edge) {
+		fputs("Fail to init edge filter.\n", stderr);
 		return EXIT_FAILURE;
 	}
 
 	FILE* edgeImgFile = fopen("edge.data", "wb");
 
-	for (size_t i = 0; i < 30; i++) {
+	for (size_t i = 0; i < 150; i++) {
 		//Read frame from source
 		source_read(source);
 
 		//Apply edge detection filter
-		edge(source_getRawBitmap(source), edgeImg, 1920, 1080);
-		fwrite(edgeImg, sizeof(luma_t), (1920-2) * (1080-2), edgeImgFile);
+		edge_process(edge);
+		fwrite(edge_getEdgeImage(edge), sizeof(luma_t), (width-2) * (height-2), edgeImgFile);
 
 		//Project edges from camera window (clip-space) to screen-domain (sphere unclippe space) based on accele meter
 
@@ -38,6 +38,7 @@ int main() {
 	}
 
 	source_destroy(source);
+	edge_destroy(edge);
 	fclose(edgeImgFile);
 	return EXIT_SUCCESS;
-} 
+}

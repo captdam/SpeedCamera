@@ -17,7 +17,6 @@ typedef struct Source_ClassDataStructure Source;
 
 /** Init a source object. 
  * Open the video file (source file) and create a buffer for reading frame. 
- * Use source_initCheck() to verify the result of this call. 
  * @param imageFile Name of the video file
  * @param width Width of the image
  * @param height Height of the image
@@ -25,9 +24,8 @@ typedef struct Source_ClassDataStructure Source;
  */
 Source* source_init(const char* imageFile, size_t width, size_t height);
 
-/** Read one frame from the source file. 
- * Raw frame saved in buffer of this class object. 
- * Use source_getRawBitmap() to fetch the result. 
+/** Read one frame from the source file and save in buffer of this class object. 
+ * Use source_getRawBitmap() to get pointer of the buffer. 
  * @param this This source class object
  * @return Number of bytes processed
  */

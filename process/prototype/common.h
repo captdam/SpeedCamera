@@ -6,6 +6,6 @@
  */
 #define SOURCEFILEPIXELSZIE 3
 
-/** Internal data type used to store luma of each pixel
+/** Internal data type used to store luma value of the edge filtered image
  */
-typedef int16_t luma_t;
+typedef uint8_t luma_t;
