@@ -5,6 +5,7 @@
 #include "common.h"
 #include "source.h"
 #include "edge.h"
+#include "project.c"
 
 int main(int argc, char* argv[]) {
 	size_t width = atoi(argv[1]);
@@ -22,23 +23,33 @@ int main(int argc, char* argv[]) {
 		return EXIT_FAILURE;
 	}
 
-	FILE* edgeImgFile = fopen("edge.data", "wb");
+	Project project = project_init(width, height, 60.0f, 33.75f, 10.0f, 10.0f);
 
-	for (size_t i = 0; i < 150; i++) {
+	size_t proWidth, proHeight;
+	project_getProjectSize(project, &proWidth, &proHeight);
+	printf("Projection field is width %zu * height %zu", proWidth, proHeight);
+
+	FILE* debug = fopen("edge.data", "wb");
+
+	for (size_t i = 0; i < 1; i++) {
 		//Read frame from source
 		source_read(source);
 
 		//Apply edge detection filter
 		edge_process(edge);
-		fwrite(edge_getEdgeImage(edge), sizeof(luma_t), (width-2) * (height-2), edgeImgFile);
+//		fwrite(edge_getEdgeImage(edge), sizeof(luma_t), (width-2) * (height-2), edgeImgFile);
 
 		//Project edges from camera window (clip-space) to screen-domain (sphere unclippe space) based on accele meter
+		project_write(project, 20, 0, edge_getEdgeImage(edge));
+		fwrite(project_getProjectLuma(project), sizeof(luma_t), proWidth * proHeight, debug);
+		//TODO: Read gyro
 
 		//Analysis speed base on screen-domain--world-domain info and time of edge luma stay on slots of screen domain
 	}
 
 	source_destroy(source);
 	edge_destroy(edge);
-	fclose(edgeImgFile);
+	project_destroy(project);
+	fclose(debug);
 	return EXIT_SUCCESS;
 }
