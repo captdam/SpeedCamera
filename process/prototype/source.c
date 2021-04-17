@@ -6,29 +6,33 @@
 struct Source_ClassDataStructure {
 	FILE* fp;
 	void* buffer;
-	size_t width, height;
+	size_t frameSize;
 };
 
-Source source_init(const char* imageFile, size_t width, size_t height) {
+Source source_init(const char* imageFile, size2d_t resolution, size_t bytePerPixel) {
 	Source this = malloc(sizeof(struct Source_ClassDataStructure));
 	if (!this)
 		return NULL;
 	
 	this->fp = fopen(imageFile, "rb");
-	if (!(this->fp))
+	if (!(this->fp)) {
+		free(this);
 		return NULL;
-	
-	this->buffer = malloc(SOURCE_PIXELSIZE * width * height);
-	if (!(this->buffer))
-		return NULL;
+	}
 
-	this->width = width;
-	this->height = height;
+	this->frameSize = bytePerPixel * resolution.width * resolution.height;
+	this->buffer = malloc(this->frameSize);
+	if (!(this->buffer)) {
+		fclose(this->fp);
+		free(this);
+		return NULL;
+	}
+
 	return this;
 }
 
 size_t source_read(Source this) {
-	return fread(this->buffer, SOURCE_PIXELSIZE, this->width * this->height, this->fp);
+	return fread(this->buffer, 1, this->frameSize, this->fp);
 }
 
 void* source_getRawBitmap(Source this) {

@@ -9,8 +9,6 @@
 
 #include "common.h"
 
-#define SOURCE_PIXELSIZE SOURCEFILEPIXELSZIE
-
 /** Source class object data structure
  */
 typedef struct Source_ClassDataStructure* Source;
@@ -18,11 +16,11 @@ typedef struct Source_ClassDataStructure* Source;
 /** Init a source object. 
  * Open the video file (source file) and create a buffer for reading frame. 
  * @param imageFile Name of the video file
- * @param width Width of the image
- * @param height Height of the image
+ * @param resolution Size of camera, image resolution
+ * @param bytePerPixel Bytes per pixel, 1 (mono gray), 2 (RGB565), 3 (RGB) or 4 (RGBA)
  * @return $this(Opaque) source class object if success, null if fail
  */
-Source source_init(const char* imageFile, size_t width, size_t height);
+Source source_init(const char* imageFile, size2d_t resolution, size_t bytePerPixel);
 
 /** Read one frame from the source file and save in buffer of this class object. 
  * Use source_getRawBitmap() to get pointer of the buffer. 
