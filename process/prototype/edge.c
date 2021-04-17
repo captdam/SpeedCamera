@@ -1,3 +1,15 @@
+/* Edge of the input is stripped, so the size of the result is (width-2) * (height-2). */
+
+#define WEIGHT_TL 0
+#define WEIGHT_TC -1
+#define WEIGHT_TR 0
+#define WEIGHT_ML -1
+#define WEIGHT_MC 4
+#define WEIGHT_MR -1
+#define WEIGHT_BL 0
+#define WEIGHT_BC -1
+#define WEIGHT_BR 0
+
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -6,21 +18,24 @@
 struct Edge_ClassDataStructure {
 	luma_t* buffer;
 	void* source;
-	size_t width, height;
+	size_t width, height, bytePerPixel;
 };
 
-Edge edge_init(void* source, size_t width, size_t height) {
+Edge edge_init(void* source, size2d_t resolution, size_t bytePerPixel) {
 	Edge this = malloc(sizeof(struct Edge_ClassDataStructure));
 	if (!this)
 		return NULL;
 	
-	this->buffer = malloc(sizeof(luma_t) * (width-2) * (height-2));
-	if (!(this->buffer))
+	this->buffer = malloc(sizeof(luma_t) * (resolution.width-2) * (resolution.height-2));
+	if (!(this->buffer)) {
+		free(this);
 		return NULL;
+	}
 
 	this->source = source;
-	this->width = width;
-	this->height = height;
+	this->width = resolution.width;
+	this->height = resolution.height;
+	this->bytePerPixel = bytePerPixel;
 	return this;
 }
 
@@ -29,24 +44,42 @@ void edge_process(Edge this) {
 	luma_t* dest = this->buffer;
 
 	for (size_t y = 0; y < yLimit; y++) {
-		uint8_t* top = this->source + y * this->width * EDGE_SOURCEPIXELSIZE;
-		uint8_t* middle = this->source + (y+1) * this->width * EDGE_SOURCEPIXELSIZE;
-		uint8_t* bottom = this->source + (y+2) * this->width * EDGE_SOURCEPIXELSIZE;
+		uint8_t* top = this->source + y * this->width * this->bytePerPixel;
+		uint8_t* middle = this->source + (y+1) * this->width * this->bytePerPixel;
+		uint8_t* bottom = this->source + (y+2) * this->width * this->bytePerPixel;
 		
 		for (size_t x = 0; x < xLimit; x++) {
 			int16_t luma = 0; //luma of edge, +/- 32k is large enough for any filter mask
-//			luma += -1 * (top[0] + top[1] + top[2]); //top-left
-			luma += -1 * (top[EDGE_SOURCEPIXELSIZE + 0] + top[EDGE_SOURCEPIXELSIZE + 1] + top[EDGE_SOURCEPIXELSIZE + 2]); //top-center
-//			luma += -1 * (top[EDGE_SOURCEPIXELSIZE*2 + 0] + top[EDGE_SOURCEPIXELSIZE*2 + 1] + top[EDGE_SOURCEPIXELSIZE*2 + 2]); //top-right
-			luma += -1 * (middle[0] + middle[1] + middle[2]); //middle-top
-			luma += +4 * (middle[EDGE_SOURCEPIXELSIZE + 0] + middle[EDGE_SOURCEPIXELSIZE + 1] + middle[EDGE_SOURCEPIXELSIZE + 2]); //middle-center
-			luma += -1 * (middle[EDGE_SOURCEPIXELSIZE*2 + 0] + middle[EDGE_SOURCEPIXELSIZE*2 + 1] + middle[EDGE_SOURCEPIXELSIZE*2 + 2]); //middle-right
-//			luma += -1 * (bottom[0] + bottom[1] + bottom[2]); //bottom-left
-			luma += -1 * (bottom[EDGE_SOURCEPIXELSIZE + 0] + bottom[EDGE_SOURCEPIXELSIZE + 1] + bottom[EDGE_SOURCEPIXELSIZE + 2]); //bottom-center
-//			luma += -1 * (bottom[EDGE_SOURCEPIXELSIZE*2 + 0] + bottom[EDGE_SOURCEPIXELSIZE*2 + 1] + bottom[EDGE_SOURCEPIXELSIZE*2 + 2]); //bottom-right
-			top += EDGE_SOURCEPIXELSIZE;
-			middle += EDGE_SOURCEPIXELSIZE;
-			bottom += EDGE_SOURCEPIXELSIZE;
+#if WEIGHT_TL != 0 //top-left
+			luma += WEIGHT_TL * (top[0] + top[1] + top[2]);
+#endif
+#if WEIGHT_TC != 0 //top-center
+			luma += WEIGHT_TC * (top[this->bytePerPixel + 0] + top[this->bytePerPixel + 1] + top[this->bytePerPixel + 2]);
+#endif
+#if WEIGHT_TR != 0 //top-right
+			luma += WEIGHT_TR * (top[this->bytePerPixel*2 + 0] + top[this->bytePerPixel*2 + 1] + top[this->bytePerPixel*2 + 2]);
+#endif
+#if WEIGHT_ML != 0 //middle-top
+			luma += WEIGHT_ML * (middle[0] + middle[1] + middle[2]);
+#endif
+#if WEIGHT_MC != 0 //middle-center
+			luma += WEIGHT_MC * (middle[this->bytePerPixel + 0] + middle[this->bytePerPixel + 1] + middle[this->bytePerPixel + 2]);
+#endif
+#if WEIGHT_MR != 0 //middle-right
+			luma += WEIGHT_MR * (middle[this->bytePerPixel*2 + 0] + middle[this->bytePerPixel*2 + 1] + middle[this->bytePerPixel*2 + 2]);
+#endif
+#if WEIGHT_BL != 0 //bottom-left
+			luma += WEIGHT_BL * (bottom[0] + bottom[1] + bottom[2]);
+#endif
+#if WEIGHT_BC != 0 //bottom-center
+			luma += WEIGHT_BC * (bottom[this->bytePerPixel + 0] + bottom[this->bytePerPixel + 1] + bottom[this->bytePerPixel + 2]);
+#endif
+#if WEIGHT_BR != 0 //bottom-right
+			luma += WEIGHT_BR * (bottom[this->bytePerPixel*2 + 0] + bottom[this->bytePerPixel*2 + 1] + bottom[this->bytePerPixel*2 + 2]);
+#endif
+			top += this->bytePerPixel;
+			middle += this->bytePerPixel;
+			bottom += this->bytePerPixel;
 			/* Range of luma is +/- 255 * 3 * middle-center coff = 3060 */
 			if (luma > 255)
 				*(dest++) = 255;
@@ -67,3 +100,13 @@ void edge_destroy(Edge this) {
 	free(this->buffer);
 	free(this);
 }
+
+#undef WEIGHT_TL
+#undef WEIGHT_TC
+#undef WEIGHT_TR
+#undef WEIGHT_ML
+#undef WEIGHT_MC
+#undef WEIGHT_MR
+#undef WEIGHT_BL
+#undef WEIGHT_BC
+#undef WEIGHT_BR

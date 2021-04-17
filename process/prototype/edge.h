@@ -9,8 +9,6 @@
 
 #include "common.h"
 
-#define EDGE_SOURCEPIXELSIZE SOURCEFILEPIXELSZIE
-
 /** Edge class object data structure
  */
 typedef struct Edge_ClassDataStructure* Edge;
@@ -18,13 +16,12 @@ typedef struct Edge_ClassDataStructure* Edge;
 /** Init a edge object. 
  * This filter has an input (buffer of sourcfe.class), with same width and height of this object; 
  * and a output buffer build into this object used to store the result. 
- * Edge of the input is stripped, so the size of the result is (width-2) * (height-2). 
  * @param source Pointer to source object's buffer
- * @param width Width of the input image
- * @param height Height of the input image
+ * @param resolution Size of camera, image resolution
+ * @param bytePerPixel Bytes per pixel, 1 (mono gray), 2 (RGB565), 3 (RGB) or 4 (RGBA)
  * @return $this(Opaque) edge class object if success, null if fail
  */
-Edge edge_init(void* source, size_t width, size_t height);
+Edge edge_init(void* source, size2d_t resolution, size_t bytePerPixel);
 
 /** Apply edge detection filter and save the result in the buffer. 
  * Use edge_getEdgeImage() to get pointer of the buffer. 
