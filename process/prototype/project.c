@@ -22,8 +22,10 @@ Project project_init(luma_t* edge, size2d_t cameraSize, float fovH, float fovV, 
 	this->projectSize.height = cameraSize.height + 2 * (this->marginSize).height;
 	
 	this->buffer = malloc((this->projectSize).width * (this->projectSize).height * sizeof(luma_t));
-	if (!(this->buffer))
+	if (!(this->buffer)) {
+		free(this);
 		return NULL;
+	}
 	
 	this->edge = edge;
 	this->cameraSize = cameraSize;
