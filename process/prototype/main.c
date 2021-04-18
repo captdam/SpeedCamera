@@ -51,6 +51,8 @@ int main(int argc, char* argv[]) {
 		project_process(project, 20, -15);
 		fwrite(project_getProjectImage(project), sizeof(luma_t), projectSize.width * projectSize.height, debug);
 		//TODO: Read gyro
+		//NOTE: Pass the project limit to compare object. When camera shifting, edge of frme may becomes 0, this will trigger a
+		//mistake "object-duration-move-out" event
 
 		//Analysis speed base on screen-domain--world-domain info and time of edge luma stay on slots of screen domain
 	}
