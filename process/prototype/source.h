@@ -25,7 +25,7 @@ Source source_init(const char* imageFile, size2d_t resolution, size_t bytePerPix
 /** Read one frame from the source file and save in buffer of this class object. 
  * Use source_getRawBitmap() to get pointer of the buffer. 
  * @param this This source class object
- * @return Number of bytes processed
+ * @return Number of bytes fetched from source file
  */
 size_t source_read(Source this);
 

@@ -8,39 +8,45 @@
 #include "project.h"
 
 int main(int argc, char* argv[]) {
+	int status = EXIT_SUCCESS;
+	size_t frameCount = 0;
+	FILE* debug = fopen("edge.data", "wb");
+
+	const char* sourceFile = argv[3];
 	size2d_t cameraSize = {
 		.width = atoi(argv[1]),
 		.height = atoi(argv[2])
 	};
 
-	Source source = source_init("../../bmpv.data", cameraSize, 3);
+	Source source = NULL;
+	Edge edge = NULL;
+	Project project = NULL;
+
+	fprintf(stderr, "Init source object\n");
+	source = source_init(sourceFile, cameraSize, 3);
 	if (!source) {
 		fputs("Fail to init source input.\n", stderr);
-		return EXIT_FAILURE;
+		goto label_initfail;
 	}
 
-	Edge edge = edge_init(source_getRawBitmap(source), cameraSize, 3);
+	fprintf(stderr, "Init edge object\n");
+	edge = edge_init(source_getRawBitmap(source), cameraSize, 3);
 	if (!edge) {
 		fputs("Fail to init edge filter.\n", stderr);
-		source_destroy(source);
-		return EXIT_FAILURE;
+		goto label_initfail;
 	}
 
-	Project project = project_init(edge_getEdgeImage(edge), cameraSize, 60.0f, 33.75f, 10.0f, 10.0f);
+	fprintf(stderr, "Init project object\n");
+	project = project_init(edge_getEdgeImage(edge), cameraSize, 60.0f, 33.75f, 10.0f, 10.0f);
 	if (!project) {
 		fputs("Fail to init image projecter.\n", stderr);
-		source_destroy(source);
-		edge_destroy(edge);
-		return EXIT_FAILURE;
+		goto label_initfail;
 	}
 
 	size2d_t projectSize = project_getProjectSize(project);
-	printf("Projection field is width %zu * height %zu", projectSize.width, projectSize.height);
+	printf("Projection field is width %zu * height %zu\n", projectSize.width, projectSize.height);
 
-	FILE* debug = fopen("edge.data", "wb");
-
-	for (size_t i = 0; i < 10; i++) {
-		//Read frame from source
+	for (;frameCount < 10; frameCount++) { //Read frame from source
 		source_read(source);
 
 		//Apply edge detection filter
@@ -55,11 +61,17 @@ int main(int argc, char* argv[]) {
 		//mistake "object-duration-move-out" event
 
 		//Analysis speed base on screen-domain--world-domain info and time of edge luma stay on slots of screen domain
+
 	}
 
+	goto label_exit;
+label_initfail:
+	status = EXIT_FAILURE;
+label_exit:
 	source_destroy(source);
 	edge_destroy(edge);
 	project_destroy(project);
 	fclose(debug);
-	return EXIT_SUCCESS;
+	fprintf(stdout, "%zu frames processed.\n\n", frameCount);
+	return status;
 }

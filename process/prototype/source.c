@@ -14,17 +14,19 @@ Source source_init(const char* imageFile, size2d_t resolution, size_t bytePerPix
 	if (!this)
 		return NULL;
 	
+	this->fp = NULL;
+	this->buffer = NULL;
+	this->frameSize = bytePerPixel * resolution.width * resolution.height;
+
 	this->fp = fopen(imageFile, "rb");
 	if (!(this->fp)) {
-		free(this);
+		source_destroy(this);
 		return NULL;
 	}
 
-	this->frameSize = bytePerPixel * resolution.width * resolution.height;
 	this->buffer = malloc(this->frameSize);
 	if (!(this->buffer)) {
-		fclose(this->fp);
-		free(this);
+		source_destroy(this);
 		return NULL;
 	}
 
@@ -40,7 +42,10 @@ void* source_getRawBitmap(Source this) {
 }
 
 void source_destroy(Source this) {
-	fclose(this->fp);
-	free(this->buffer);
+	if (!this)
+		return;
+	
+	if (this->fp) fclose(this->fp); //fclose(NULL) is undefined
+	free(this->buffer); //free(NULL) is safe
 	free(this);
 }

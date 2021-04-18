@@ -1,14 +1,13 @@
 #include <stdlib.h>
-#include <math.h>
 #include <string.h>
 
 #include "project.h"
 
 struct Project_ClassDataStructure {
-	size2d_t cameraSize, marginSize, projectSize;
-	float fovH, fovV;
 	luma_t* edge;
 	luma_t* buffer;
+	size2d_t cameraSize, marginSize, projectSize;
+	float fovH, fovV;
 };
 
 Project project_init(luma_t* edge, size2d_t cameraSize, float fovH, float fovV, float marginH, float marginV) {
@@ -16,21 +15,22 @@ Project project_init(luma_t* edge, size2d_t cameraSize, float fovH, float fovV, 
 	if (!this)
 		return NULL;
 	
+	this->edge = edge;
+	this->buffer = NULL;
+	this->cameraSize = cameraSize;
 	this->marginSize.width =  cameraSize.width / fovH * marginH;
 	this->marginSize.height = cameraSize.height / fovV * marginV;
 	this->projectSize.width =  cameraSize.width + 2 * (this->marginSize).width;
 	this->projectSize.height = cameraSize.height + 2 * (this->marginSize).height;
+	this->fovH = fovH;
+	this->fovV = fovV;
 	
 	this->buffer = malloc((this->projectSize).width * (this->projectSize).height * sizeof(luma_t));
 	if (!(this->buffer)) {
-		free(this);
+		project_destroy(this);
 		return NULL;
 	}
 	
-	this->edge = edge;
-	this->cameraSize = cameraSize;
-	this->fovH = fovH;
-	this->fovV = fovV;
 	return this;
 }
 
@@ -63,6 +63,9 @@ luma_t* project_getProjectImage(Project this) {
 }
 
 void project_destroy(Project this) {
+	if (!this)
+		return;
+
 	free(this->buffer);
 	free(this);
 }

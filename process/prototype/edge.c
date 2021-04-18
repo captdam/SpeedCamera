@@ -11,13 +11,12 @@
 #define WEIGHT_BR 0
 
 #include <stdlib.h>
-#include <stdio.h>
 
 #include "edge.h"
 
 struct Edge_ClassDataStructure {
-	luma_t* buffer;
 	void* source;
+	luma_t* buffer;
 	size_t width, height, bytePerPixel;
 };
 
@@ -26,16 +25,18 @@ Edge edge_init(void* source, size2d_t resolution, size_t bytePerPixel) {
 	if (!this)
 		return NULL;
 	
-	this->buffer = malloc(sizeof(luma_t) * (resolution.width-2) * (resolution.height-2));
-	if (!(this->buffer)) {
-		free(this);
-		return NULL;
-	}
-
 	this->source = source;
+	this->buffer = NULL;
 	this->width = resolution.width;
 	this->height = resolution.height;
 	this->bytePerPixel = bytePerPixel;
+
+	this->buffer = malloc(sizeof(luma_t) * (resolution.width-2) * (resolution.height-2));
+	if (!(this->buffer)) {
+		edge_destroy(this);
+		return NULL;
+	}
+	
 	return this;
 }
 
@@ -97,6 +98,9 @@ luma_t* edge_getEdgeImage(Edge this) {
 }
 
 void edge_destroy(Edge this) {
+	if (!this)
+		return;
+
 	free(this->buffer);
 	free(this);
 }
