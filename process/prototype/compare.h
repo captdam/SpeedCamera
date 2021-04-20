@@ -36,7 +36,7 @@ void compare_process(Compare this);
  * @param this This compare class object
  * @return A pointer to the filtered image saved in this object's buffer
  */
-uint16_t* compare_getSpeedMap(Compare this);
+uint8_t* compare_getSpeedMap(Compare this);
 
 /** Destroy this compare class object. 
  * @param this This compare class object
