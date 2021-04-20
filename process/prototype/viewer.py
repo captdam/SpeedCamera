@@ -44,7 +44,7 @@ if len(sys.argv) >= 7:
 
 print('Read bitmaps from {}, resolution {} * {} {}, FPS = {}'.format(sys.argv[1], sys.argv[2], sys.argv[3], colorSchemeDesc, sys.argv[4]))
 if outputFile:
-	print('Render result save in file: {}.avi', sys.argv[6])
+	print('Render result save in file: {}.avi'.format(sys.argv[6]))
 else:
 	print('Render result shown in pop-up window.')
 	
