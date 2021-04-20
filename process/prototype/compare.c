@@ -1,9 +1,11 @@
 #include <stdlib.h>
 #include <math.h>
+#include <stdio.h>
 
 #include "compare.h"
 
 #define LUMA_THRESHOLD 10
+#define DISTANCE_THRESHOLD 100
 
 struct Compare_ClassDataStructure {
 	size2d_t size;
@@ -48,40 +50,31 @@ void compare_process(Compare this) {
 	luma_t* newProject = this->projectSource;
 	luma_t* oldProject = this->projectBuffer;
 	uint8_t* duration = this->duration;
-	for (size_t i = (this->size).width * (this->size).height; i > 0; i--) {
-		int new = *(newProject++);
-		int old = *(oldProject++);
-
-//		if (new < 0x20 && old > 0x20) { //Leave
-//			*(duration++) = 0;
-//		}
-//		else if (new > 0x20 && old < 0x20) { //Enter
-//			*duration = *duration + 20;
-//			duration++;
-//		}
-//		else if (new > 0x20 && old > 0x20) { //Stay
-//			*duration = *duration + 20;
-//			duration++;
-//		}
-//		else /*new < 0x20 && old < 0x20*/ { //Empty
-//			*(duration++) = 0;
-//		}
-
-		if (new < LUMA_THRESHOLD && old >= LUMA_THRESHOLD) { //Leave
-			*duration = 0; //Reset
+	for (size_t y = 0; y < (this->size).height; y++) {
+		for (size_t x = 0; x < (this->size).width; x++) {
+			*duration = 0;
+			if (*(newProject++) > LUMA_THRESHOLD) {
+				for (size_t d = 1; d < DISTANCE_THRESHOLD; d++) {
+					if (
+						oldProject[y*(this->size).width+x + d] > LUMA_THRESHOLD || 
+						oldProject[y*(this->size).width+x - d] > LUMA_THRESHOLD || 
+						oldProject[(y+d)*(this->size).width+x] > LUMA_THRESHOLD || 
+						oldProject[(y-d)*(this->size).width+x] > LUMA_THRESHOLD
+					) {
+						*duration = d * 30;
+//						printf("(%zu,%zu) on: d = %zu\n", x, y, d);
+						break;
+					}
+				}
+			}
+			duration++;
 		}
-		else if (new >= LUMA_THRESHOLD && old < LUMA_THRESHOLD) { //Enter
-			*duration = -30;
-		}
-		else if (new >= LUMA_THRESHOLD && old >= LUMA_THRESHOLD) { //Stay
-			*duration = *duration - 30;
-		}
-		else /*new < LUMA_THRESHOLD && old < LUMA_THRESHOLD*/ { //Empty
-			*duration = 0; //Reset
-		}
-
-		duration++;
 	}
+
+	newProject = this->projectSource;
+	oldProject = this->projectBuffer;
+	for (size_t i = (this->size).height * (this->size).width; i > 0; i--)
+		*(oldProject++) = *(newProject++);
 }
 
 uint8_t* compare_getSpeedMap(Compare this) {
@@ -99,3 +92,4 @@ void compare_destroy(Compare this) {
 }
 
 #undef LUMA_THRESHOLD
+#undef DISTANCE_THRESHOLD
