@@ -9,6 +9,7 @@
 #define WEIGHT_BL 0
 #define WEIGHT_BC -1
 #define WEIGHT_BR 0
+#define WEIGHT_TOTAL abs(WEIGHT_TL)+abs(WEIGHT_TC)+abs(WEIGHT_TR)+abs(WEIGHT_ML)+abs(WEIGHT_MC)+abs(WEIGHT_MR)+abs(WEIGHT_BL)+abs(WEIGHT_BC)+abs(WEIGHT_BR)
 
 #include <stdlib.h>
 
@@ -81,13 +82,8 @@ void edge_process(Edge this) {
 			top += this->bytePerPixel;
 			middle += this->bytePerPixel;
 			bottom += this->bytePerPixel;
-			/* Range of luma is +/- 255 * 3 * middle-center coff = 3060 */
-			if (luma > 255)
-				*(dest++) = 255;
-			else if (luma < 0)
-				*(dest++) = 0;
-			else
-				*(dest++) = luma;
+			luma /= WEIGHT_TOTAL;
+			*(dest++) = luma < 0 ? 0 : luma;
 			//*(dest++) = abs(luma>>4); //Skip LSB to minimize noise
 		}
 	}
@@ -114,3 +110,4 @@ void edge_destroy(Edge this) {
 #undef WEIGHT_BL
 #undef WEIGHT_BC
 #undef WEIGHT_BR
+#undef WEIGHT_TOTAL
