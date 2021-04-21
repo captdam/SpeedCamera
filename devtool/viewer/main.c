@@ -228,6 +228,8 @@ int main(int argc, char* argv[]) {
 	glDeleteVertexArrays(1, &vao);
 	glDeleteBuffers(1, &vbo);
 	glDeleteBuffers(1, &ebo);
+	glDeleteTextures(1, &glBitmap);
+	glDeleteProgram(shader);
 
 	fclose(fp);
 	free(bitmap);
