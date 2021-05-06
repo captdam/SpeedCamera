@@ -1,0 +1,1 @@
+./a.out ../../process/prototype/edge.data 2560 1720 30 1
