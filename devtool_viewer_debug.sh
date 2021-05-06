@@ -1,0 +1,1 @@
+gnome-terminal -- "./devtool/viewer/a.out ./debugspace/debug.data"

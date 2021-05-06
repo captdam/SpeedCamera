@@ -14,13 +14,17 @@
 int main(int argc, char* argv[]) {
 	int status = EXIT_FAILURE;
 	size_t frameCount;
-	FILE* debug = fopen(DEBUG_FILENAME, "wb");
 
-	const char* sourceFile = argv[3];
+#if DEBUG_STAGE != 0
+	FILE* debug = fopen(DEBUG_FILENAME, "wb");
+#endif
+
+	const char* sourceFile = argv[1];
 	size2d_t cameraSize = {
-		.width = atoi(argv[1]),
-		.height = atoi(argv[2])
+		.width = atoi(argv[2]),
+		.height = atoi(argv[3])
 	};
+	size_t fps = atoi(argv[4]);
 
 	Source source = NULL;
 	Edge edge = NULL;
@@ -55,10 +59,16 @@ int main(int argc, char* argv[]) {
 
 #if DEBUG_STAGE == 1
 	fprintf(stdout, "Saving debug data: edge. Size %zu * %zu\n", edgeSize.width, edgeSize.height);
+	uint16_t debugFileHeader[4] = {edgeSize.width, edgeSize.height, 30, 1};
+	fwrite(debugFileHeader, 1, sizeof(debugFileHeader), debug);
 #elif DEBUG_STAGE == 2
 	fprintf(stdout, "Saving debug data: project. Size %zu * %zu\n", projectSize.width, projectSize.height);
-#elif DEBUG_STAGE == 2
+	uint16_t debugFileHeader[4] = {projectSize.width, projectSize.height, 30, 1};
+	fwrite(debugFileHeader, 1, sizeof(debugFileHeader), debug);
+#elif DEBUG_STAGE == 3
 	fprintf(stdout, "Saving debug data: projectCompare. Size %zu * %zu\n", projectSize.width, projectSize.height);
+	uint16_t debugFileHeader[4] = {projectSize.width, projectSize.height, 30, 1};
+	fwrite(debugFileHeader, 1, sizeof(debugFileHeader), debug);
 #endif
 
 	for (frameCount = 0; source_read(source); frameCount++) { //Read frame from source
@@ -96,7 +106,9 @@ label_exit:
 	edge_destroy(edge);
 	project_destroy(project);
 	compare_destroy(compare);
+#if DEBUG_STAGE != 0
 	fclose(debug);
+#endif
 	fprintf(stdout, "%zu frames processed.\n\n", frameCount);
 	return status;
 }

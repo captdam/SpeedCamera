@@ -22,15 +22,11 @@ Place ```glew.c``` in the current directory before compiling.
 
 To execute this program, use this command:
 
-```./this inputFileName width height fps colorScheme```
+```./this inputFileName```
 
 
 where:
 - ```./this``` is path to the executable;
 - ```inputFileName``` is path to the video file;
-- ```width``` Width of the video file in pixel;
-- ```height``` Height of the video file in pixel;
-- ```fps``` Frame per second of the video file in pixel. In some case, the actual FPS may be lower. For example, the acyual FPS may be 30 when this argument is 90;
-- ```colorScheme``` Color scheme of this video, can be 1(mono/gray), 3(RGB) or 4(RGBA)
 
-Example: Executing ```./a.out ../myVideo.data 1920 1080 30 1``` is used to display the video saved in file ```../myVideo.data```, the resolution is 1920 * 1080, color format is mono (grayscale), and the frame rate is 30 FPS.
+Example: Executing ```./a.out ../myVideo.data``` is used to display the video saved in file ```../myVideo.data```.

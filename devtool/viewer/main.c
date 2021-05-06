@@ -33,30 +33,32 @@ void main() {\n\
 ";
 
 int main(int argc, char* argv[]) {
-	if (argc < 6) {
-		fputs("Bad command, use: ./this inputFileName width height fps colorScheme", stderr);
+	if (argc < 2) {
+		fputs("Bad command, use: ./this inputFileName", stderr);
 		return EXIT_FAILURE;
 	}
-
 	const char* inputFileName = argv[1];
-	const size_t width = atoi(argv[2]);
-	const size_t height = atoi(argv[3]);
-	const size_t fps = atoi(argv[4]);
-	const size_t colorScheme = atoi(argv[5]);
-
-	const char* colorSchemeDesc[] = {"Mono/Gray","","RGB","RGBA"};
-	if (colorScheme != 1 && colorScheme != 3 && colorScheme != 4) {
-		fputs("Bad command, bad color scheme", stderr);
-		return EXIT_FAILURE;
-	}
-
-	fprintf(stdout, "Read bitmap from '%s', resolution = %zu * %zu %s, FPS = %zu\n", inputFileName, width, height, colorSchemeDesc[colorScheme], fps);
 
 	FILE* fp = fopen(inputFileName, "rb");
 	if (!fp) {
 		fputs("Cannot open input file.\n", stderr);
 		return EXIT_FAILURE;
 	}
+
+	uint16_t header[4];
+	int iDontCareYourResult = fread(header, 1, sizeof(header), fp);
+	const size_t width = header[0];
+	const size_t height = header[1];
+	const size_t fps = header[2];
+	const size_t colorScheme = header[3];
+
+	const char* colorSchemeDesc[] = {"Mono/Gray","","RGB","RGBA"};
+	if (colorScheme != 1 && colorScheme != 3 && colorScheme != 4) {
+		fputs("Bad file header: bad color scheme", stderr);
+		return EXIT_FAILURE;
+	}
+
+	fprintf(stdout, "Read bitmap from '%s', resolution = %zu * %zu %s, FPS = %zu\n", inputFileName, width, height, colorSchemeDesc[colorScheme], fps);
 
 	uint8_t* bitmap = malloc(width * height * colorScheme);
 	if (!bitmap) {
