@@ -1,0 +1,1 @@
+./devtool/viewer/a.out ./debugspace/debug.data 1918 1078 30 1
