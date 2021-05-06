@@ -32,7 +32,8 @@ Compare compare_init(luma_t* project, size2d_t projectSize, float* distance);
 void compare_process(Compare this);
 
 /** Get the pointer to speed map. 
- * This map marks the speed of object in world-domain.
+ * Here is where the speed map saved. This address will not change. 
+ * This map marks the speed of object in world-domain. 
  * @param this This compare class object
  * @return A pointer to the filtered image saved in this object's buffer
  */

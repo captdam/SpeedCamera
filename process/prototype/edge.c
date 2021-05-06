@@ -1,14 +1,14 @@
 /* Edge of the input is stripped, so the size of the result is (width-2) * (height-2). */
 
-#define WEIGHT_TL 0
+#define WEIGHT_TL -1
 #define WEIGHT_TC -1
-#define WEIGHT_TR 0
+#define WEIGHT_TR -1
 #define WEIGHT_ML -1
-#define WEIGHT_MC 4
+#define WEIGHT_MC +8
 #define WEIGHT_MR -1
-#define WEIGHT_BL 0
+#define WEIGHT_BL -1
 #define WEIGHT_BC -1
-#define WEIGHT_BR 0
+#define WEIGHT_BR -1
 #define WEIGHT_TOTAL abs(WEIGHT_TL)+abs(WEIGHT_TC)+abs(WEIGHT_TR)+abs(WEIGHT_ML)+abs(WEIGHT_MC)+abs(WEIGHT_MR)+abs(WEIGHT_BL)+abs(WEIGHT_BC)+abs(WEIGHT_BR)
 
 #include <stdlib.h>
@@ -84,9 +84,16 @@ void edge_process(Edge this) {
 			bottom += this->bytePerPixel;
 			luma /= WEIGHT_TOTAL;
 			*(dest++) = luma < 0 ? 0 : luma;
-			//*(dest++) = abs(luma>>4); //Skip LSB to minimize noise
 		}
 	}
+}
+
+size2d_t edge_getEdgeSize(Edge this) {
+	size2d_t x = {
+		.width = this->width - 2,
+		.height = this->height - 2
+	};
+	return x;
 }
 
 luma_t* edge_getEdgeImage(Edge this) {

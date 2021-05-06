@@ -29,8 +29,15 @@ Edge edge_init(void* source, size2d_t resolution, size_t bytePerPixel);
  */
 void edge_process(Edge this);
 
+/** Get the size of the buffer. 
+ * Here is size of the edge filtered image.
+ * @param this This edge class object
+ * @return Size of the buffer in pixel
+ */
+size2d_t edge_getEdgeSize(Edge this);
+
 /** Get the pointer to buffer. 
- * Here is where the edge filtered image saved.
+ * Here is where the edge filtered image saved. This address will not change. 
  * @param this This edge class object
  * @return A pointer to the filtered image saved in this object's buffer
  */

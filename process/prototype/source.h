@@ -30,7 +30,7 @@ Source source_init(const char* imageFile, size2d_t resolution, size_t bytePerPix
 size_t source_read(Source this);
 
 /** Get the pointer to buffer. 
- * Here is where the raw frame saved.
+ * Here is where the raw frame saved. This address will not change. 
  * @param this This source class object
  * @return A pointer to the raw frame data saved in this object's buffer
  */

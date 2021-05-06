@@ -38,14 +38,14 @@ Project project_init(luma_t* edge, size2d_t cameraSize, float fovH, float fovV, 
 void project_process(Project this, float yaw, float pitch);
 
 /** Get the size of the buffer. 
- * Here is size of the projected image.
+ * Here is size of the projected image, it is based on the camera size, camera FOV and margin.
  * @param this This project class object
  * @return Size of the buffer in pixel
  */
 size2d_t project_getProjectSize(Project this);
 
 /** Get the pointer to buffer. 
- * Here is where the projected image saved.
+ * Here is where the projected image saved. This address will not change. 
  * @param this This project class object
  * @return A pointer to the filtered image saved in this object's buffer
  */
