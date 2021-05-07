@@ -18,7 +18,8 @@
 struct Edge_ClassDataStructure {
 	void* source;
 	luma_t* buffer;
-	size_t width, height, bytePerPixel;
+	size_t bytePerPixel;
+	size2d_t cameraSize, edgeSize;
 };
 
 Edge edge_init(void* source, size2d_t resolution, size_t bytePerPixel) {
@@ -28,11 +29,11 @@ Edge edge_init(void* source, size2d_t resolution, size_t bytePerPixel) {
 	
 	this->source = source;
 	this->buffer = NULL;
-	this->width = resolution.width;
-	this->height = resolution.height;
 	this->bytePerPixel = bytePerPixel;
+	this->cameraSize = resolution;
+	this->edgeSize = (size2d_t){.width = resolution.width - 2, .height = resolution.height - 2}; //Strip the edges
 
-	this->buffer = malloc(sizeof(luma_t) * (resolution.width-2) * (resolution.height-2));
+	this->buffer = malloc(sizeof(luma_t) * this->edgeSize.width * this->edgeSize.height);
 	if (!(this->buffer)) {
 		edge_destroy(this);
 		return NULL;
@@ -42,15 +43,13 @@ Edge edge_init(void* source, size2d_t resolution, size_t bytePerPixel) {
 }
 
 void edge_process(Edge this) {
-	size_t yLimit = this->height - 2, xLimit = this->width - 2; //Strip the edges
 	luma_t* dest = this->buffer;
-
-	for (size_t y = 0; y < yLimit; y++) {
-		uint8_t* top = this->source + y * this->width * this->bytePerPixel;
-		uint8_t* middle = this->source + (y+1) * this->width * this->bytePerPixel;
-		uint8_t* bottom = this->source + (y+2) * this->width * this->bytePerPixel;
+	for (size_t y = 0; y < this->edgeSize.height; y++) {
+		uint8_t* top = this->source + y * this->cameraSize.width * this->bytePerPixel;
+		uint8_t* middle = this->source + (y+1) * this->cameraSize.width * this->bytePerPixel;
+		uint8_t* bottom = this->source + (y+2) * this->cameraSize.width * this->bytePerPixel;
 		
-		for (size_t x = 0; x < xLimit; x++) {
+		for (size_t x = 0; x < this->edgeSize.width; x++) {
 			int16_t luma = 0; //luma of edge, +/- 32k is large enough for any filter mask
 #if WEIGHT_TL != 0 //top-left
 			luma += WEIGHT_TL * (top[0] + top[1] + top[2]);
@@ -89,11 +88,7 @@ void edge_process(Edge this) {
 }
 
 size2d_t edge_getEdgeSize(Edge this) {
-	size2d_t x = {
-		.width = this->width - 2,
-		.height = this->height - 2
-	};
-	return x;
+	return this->edgeSize;
 }
 
 luma_t* edge_getEdgeImage(Edge this) {

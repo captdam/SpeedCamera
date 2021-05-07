@@ -14,8 +14,8 @@
 typedef struct Edge_ClassDataStructure* Edge;
 
 /** Init a edge object. 
- * This filter has an input (buffer of sourcfe.class), with same width and height of this object; 
- * and a output buffer build into this object used to store the result. 
+ * This filter has an input, which is a frame of uncompressed video (buffer of source.class); 
+ * and an output buffer build into this object used to store the result. 
  * @param source Pointer to source object's buffer
  * @param resolution Size of camera, image resolution
  * @param bytePerPixel Bytes per pixel, 1 (mono gray), 2 (RGB565), 3 (RGB) or 4 (RGBA)

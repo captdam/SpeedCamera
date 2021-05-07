@@ -1,3 +1,5 @@
+#include <stdlib.h>
+
 #include "denoise.h"
 
 void denoise_lowpass3(luma_t* image, size2d_t size) {

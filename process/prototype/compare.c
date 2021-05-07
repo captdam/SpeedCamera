@@ -61,7 +61,7 @@ void compare_process(Compare this) {
 						oldProject[(y+d)*(this->size).width+x] > LUMA_THRESHOLD || 
 						oldProject[(y-d)*(this->size).width+x] > LUMA_THRESHOLD
 					) {
-						*duration = d * 30;
+						*duration = d << 5;
 //						printf("(%zu,%zu) on: d = %zu\n", x, y, d);
 						break;
 					}
