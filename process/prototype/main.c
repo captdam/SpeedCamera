@@ -5,11 +5,12 @@
 #include "common.h"
 #include "source.h"
 #include "edge.h"
+#include "denoise.h"
 #include "project.h"
 #include "compare.h"
 
 #define DEBUG_FILENAME "../../debugspace/debug.data"
-#define DEBUG_STAGE 1
+#define DEBUG_STAGE 3
 
 int main(int argc, char* argv[]) {
 	int status = EXIT_FAILURE;
@@ -74,7 +75,6 @@ int main(int argc, char* argv[]) {
 	for (frameCount = 0; source_read(source); frameCount++) { //Read frame from source
 		fprintf(stdout, "\rProgress: %zu", frameCount);
 		fflush(stdout);
-//		source_read(source);
 
 		//Apply edge detection filter
 		edge_process(edge);
@@ -93,6 +93,7 @@ int main(int argc, char* argv[]) {
 
 		//Analysis speed base on screen-domain--world-domain info and time of edge luma stay on slots of screen domain
 		compare_process(compare);
+		denoise_lowpass3(compare_getSpeedMap(compare), projectSize);
 #if DEBUG_STAGE == 3
 		fwrite(compare_getSpeedMap(compare), sizeof(uint8_t), projectSize.width * projectSize.height, debug);
 #endif
