@@ -1,5 +1,5 @@
 /** Class - compare.class. 
- * By comparing the speed of pixel changing, we can know the speed of the object in viewer-domain. 
+ * By comparing the displacement of edge, we can know the speed of the object in viewer-domain. 
  * Then apply triagmitry, we can find the object's speed in world-domain. 
  */
 
@@ -15,21 +15,27 @@
 typedef struct Compare_ClassDataStructure* Compare;
 
 /** Init a compare object. 
- * This object has 3 buffers: 
- * One is used to store project frame from project object;
- * One is used to store project frame of last frame (for comparing);
- * One is used to mark the duration of the object stay in that pixel. 
- * @param project Pointer to project object's buffer
- * @param projectSize Width and height of the project buffer
- * @param distance Distance of that pixel, speed = distance/duration
+ * @param input Pointer to previous stage's buffer
+ * @param size Width and height of the input image
+ * @param maxSpeed Highest possible speed, in km/h
+ * @param fps FPS of the video
  * @return $this(Opaque) compare class object if success, null if fail
  */
-Compare compare_init(luma_t* project, size2d_t projectSize, float* distance);
+Compare compare_init(luma_t* input, size2d_t size, float maxSpeed, float fps);
 
-/** Fetch frame from project object into this object's buffer, then compare new and old buffer. 
+/** Setup location map. 
+ * Use this function to pass world information to this object. 
+ */
+void compare_setLocationMap(Compare this, loc3d_t* location);
+
+/** Fetch frame from previous stage (new frame), then compare new and old frame. 
  * @param this This edge class object
  */
 void compare_process(Compare this);
+
+/** Get size of the buffer. This value will not change. 
+ */
+size2d_t compare_getMapSize(Compare this);
 
 /** Get the pointer to speed map. 
  * Here is where the speed map saved. This address will not change. 
