@@ -1,31 +1,33 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <stdio.h>
+
 #include "project.h"
 
 struct Project_ClassDataStructure {
-	luma_t* edge;
+	luma_t* input;
 	luma_t* buffer;
-	size2d_t cameraSize, marginSize, projectSize;
+	size2d_t inputSize, marginSize, projectSize;
 	float fovH, fovV;
 };
 
-Project project_init(luma_t* edge, size2d_t cameraSize, float fovH, float fovV, float marginH, float marginV) {
+Project project_init(luma_t* input, size2d_t inputSize, float fovH, float fovV, float marginH, float marginV) {
 	Project this = malloc(sizeof(struct Project_ClassDataStructure));
 	if (!this)
 		return NULL;
 	
-	this->edge = edge;
+	this->input = input;
 	this->buffer = NULL;
-	this->cameraSize = cameraSize;
-	this->marginSize.width =  cameraSize.width / fovH * marginH;
-	this->marginSize.height = cameraSize.height / fovV * marginV;
-	this->projectSize.width =  cameraSize.width + 2 * (this->marginSize).width;
-	this->projectSize.height = cameraSize.height + 2 * (this->marginSize).height;
+	this->inputSize = inputSize;
+	this->marginSize.width =  inputSize.width / fovH * marginH;
+	this->marginSize.height = inputSize.height / fovV * marginV;
+	this->projectSize.width =  inputSize.width + 2 * this->marginSize.width;
+	this->projectSize.height = inputSize.height + 2 * this->marginSize.height;
 	this->fovH = fovH;
 	this->fovV = fovV;
 	
-	this->buffer = malloc((this->projectSize).width * (this->projectSize).height * sizeof(luma_t));
+	this->buffer = malloc(this->projectSize.width * this->projectSize.height * sizeof(luma_t));
 	if (!(this->buffer)) {
 		project_destroy(this);
 		return NULL;
@@ -34,23 +36,33 @@ Project project_init(luma_t* edge, size2d_t cameraSize, float fovH, float fovV, 
 	return this;
 }
 
-void project_process(Project this, float yaw, float pitch) {
-	luma_t* edge = this->edge;
-	memset(this->buffer, 0, (this->projectSize).width * (this->projectSize).height);
-	for (size_t imgY = 1; imgY < (this->cameraSize).height - 1; imgY++) {
-		for (size_t imgX = 1; imgX < (this->cameraSize).width - 1; imgX++) {
-			luma_t luma = *(edge++);
+void project_process(Project this, float yaw, float pitch, float roll) {
+	luma_t* input = this->input;
+	memset(this->buffer, 0, this->projectSize.width * this->projectSize.height);
 
-			//TODO: Use transformation matrix
-			//TODO: Consider roll
-			long int y = (this->marginSize).height + pitch / this->fovV * (this->cameraSize).height + imgY;
-			long int x = (this->marginSize).width + yaw / this->fovH * (this->cameraSize).width + imgX;
-			if ( y < 0 || y >= (this->projectSize).height || x < 0 || x >= (this->projectSize).width )
-				continue; //Out of viewer-domain
-			
-			this->buffer[ y * (this->projectSize).width + x ] = luma;
+	int offsetY = this->marginSize.height + pitch / this->fovV * this->inputSize.height; //May be nagative, int is large enough, even for AVR's 16-bit int (anyone get video wider than 32k?)
+	int offsetX = this->marginSize.width + yaw / this->fovH * this->inputSize.width;
+
+	for (int y = offsetY; y < (int)this->inputSize.height + offsetY; y++) {
+		if (y < 0) { //Higher than upper boundary, input advance for one line
+			input += this->inputSize.width;
 		}
-		
+		else if (y > this->projectSize.height) { //Lower than bottom boundary, end
+			break;
+		}
+		else {
+			for (int x = offsetX; x < (int)this->inputSize.width + offsetX; x++) {
+				if (x < 0) {
+					input++;
+				}
+				else if (x > this->projectSize.width) {
+					input++;
+				}
+				else {
+					this->buffer[y * this->projectSize.width + x] = *(input++);
+				}
+			}
+		}
 	}
 }
 
