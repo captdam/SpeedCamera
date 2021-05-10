@@ -98,3 +98,27 @@ Consider the following image, the strength of luma represents the speed of objec
 We have the displacement of object on the screen in unit of pixel. When we install the camera, we know the each pixel of the camera represents a actual coordnate in real world. It is quite easy for us to convert the coordnates on screen to coordnates in real world.
 
 Assume the edge was at screen position A (SAx, SAy), which represents real world position location A (WAx, WAy, WAz); and is now at screen position B (SBx, SBy), which represents real world position location B (WBx, WBy, WBz). So, speed is ```[ (WBx - WAx) ^ 2 + (WBy - WAy) ^ 2 + (WBz - WAz) ^ 2 ] ^ 0.5```
+
+I mapped the speed to luma. It may be hard to see the speed of object for human because our eyes are not good at differentiate the intensity of luma. For demonstration purpose, I apply a filter on the video frame.
+
+![Process::WorldSpeed@40](/docs/worldspeed-40.jpg)
+
+This picture shows objects moving fater than 40 km/h.
+
+![Process::WorldSpeed@60](/docs/worldspeed-60.jpg)
+
+This picture shows object moving faster than 60 km/h. You may need to zoom to clearly see this picture. It is clear to see that most people driving slower than 60 at this day.
+
+## Issues
+
+### Far object
+
+When the object is far from the camera, the camera cannot measure the speed of the object. This is due to limitation on hardware resolution.
+
+### Height of object
+
+The program measuring the speed of the object by measuring the speed if edge of object. When the object is high, we will get error. Consider the following example.
+
+![Process::HeightIssue](/docs/issue-height.jpg)
+
+The object moved from blue position to red position. The measured speed of bottom edge of the object has no error; but for upper edge, the program determines the upper edge moved with higher displacement hence faster speed.
