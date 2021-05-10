@@ -23,14 +23,14 @@ typedef struct Edge_ClassDataStructure* Edge;
  */
 Edge edge_init(void* source, size2d_t resolution, size_t bytePerPixel);
 
-/** Apply edge detection filter and save the result in the buffer. 
+/** Apply edge detection filter to previous stage's buffer, and save the result in this object's buffer. 
  * Use edge_getEdgeImage() to get pointer of the buffer. 
  * @param this This edge class object
  */
 void edge_process(Edge this);
 
 /** Get the size of the buffer. 
- * Here is size of the edge filtered image.
+ * Here is size of the edge filtered image. This value will not change. 
  * @param this This edge class object
  * @return Size of the buffer in pixel
  */

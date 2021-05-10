@@ -22,7 +22,7 @@ typedef struct Source_ClassDataStructure* Source;
  */
 Source source_init(const char* imageFile, size2d_t resolution, size_t bytePerPixel);
 
-/** Read one frame from the source file and save in buffer of this class object. 
+/** Read one frame from the source file and save the frame data in buffer of this class object. 
  * Use source_getRawBitmap() to get pointer of the buffer. 
  * @param this This source class object
  * @return Number of bytes fetched from source file
