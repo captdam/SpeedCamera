@@ -16,6 +16,15 @@
  * @param image Pointer to a 2D gray-scale image
  * @param size Size of that image
  */
-void denoise_lowpass3(luma_t* image, size2d_t size);
+void denoise_lowpass34(luma_t* image, size2d_t size);
+
+/** High-value pass filter [STATIC] 
+ * This filter is used to remove low-value component in the image. 
+ * This function will overwrite the given buffer. 
+ * @param buffer Pointer to a 2D buffer
+ * @param size Size of that buffer
+ * @param min Cut-off value
+ */
+void denoise_highValuePass8(uint8_t* buffer, size2d_t size, uint8_t min);
 
 #endif /* #ifndef INCLUDE_DENOISE_H */
