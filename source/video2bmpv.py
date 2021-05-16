@@ -26,6 +26,7 @@ streaming mode (so there is only few frames in memory buffer).
 
 import sys
 import cv2
+import numpy
 
 dataStructure = cv2.COLOR_BGR2RGB # COLOR_BGR2RGBA or COLOR_BGR2RGB
 '''
@@ -36,6 +37,8 @@ This is a really complex trade off, and the result may differ on different CPU (
 context switch strategy), compiler...
 Don't ask me for why BGR, the opencv guy decided so.
 '''
+if dataStructure != cv2.COLOR_BGR2RGB:
+	dataStructure = cv2.COLOR_BGR2RGBA
 
 if len(sys.argv) < 3:
 	print(programInfo)
@@ -53,6 +56,12 @@ while video.isOpened():
 		width = video.get(cv2.CAP_PROP_FRAME_WIDTH)
 		height = video.get(cv2.CAP_PROP_FRAME_HEIGHT)
 		print('Processing start. Resolution = {}*{}, {}FPS'.format(width, height, fps))
+		if dataStructure == cv2.COLOR_BGR2RGB:
+			header = numpy.array([width, height, fps, 3], dtype=numpy.uint16)
+			outputFile.write(header)
+		else:
+			header = numpy.array([width, height, fps, 4], dtype=numpy.uint16)
+			outputFile.write(header)
 	if frame is None:
 		print('Done, end of video reached, {} frames processed.'.format(video.get(cv2.CAP_PROP_FRAME_COUNT)))
 		break

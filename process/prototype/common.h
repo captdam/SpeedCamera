@@ -6,6 +6,15 @@
 
 #include <inttypes.h>
 
+/** Video file header
+ */
+typedef struct VideoHeader_t {
+	uint16_t width;
+	uint16_t height;
+	uint16_t fps;
+	uint16_t colorScheme;
+} vh_t;
+
 /** Internal data type used to store luma value of the edge filtered image 
  */
 typedef uint8_t luma_t;
