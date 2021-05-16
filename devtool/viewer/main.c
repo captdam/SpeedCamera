@@ -58,7 +58,7 @@ int main(int argc, char* argv[]) {
 		return EXIT_FAILURE;
 	}
 
-	fprintf(stdout, "Read bitmap from '%s', resolution = %zu * %zu %s, FPS = %zu\n", inputFileName, width, height, colorSchemeDesc[colorScheme], fps);
+	fprintf(stdout, "Read bitmap from '%s', resolution = %zu * %zu %s, FPS = %zu\n", inputFileName, width, height, colorSchemeDesc[colorScheme-1], fps);
 
 	uint8_t* bitmap = malloc(width * height * colorScheme);
 	if (!bitmap) {
