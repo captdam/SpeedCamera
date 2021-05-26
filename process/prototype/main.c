@@ -2,86 +2,108 @@
 #include <stdlib.h>
 #include <inttypes.h>
 #include <math.h>
+#include <string.h>
 
 #include "common.h"
-#include "denoise.h"
 #include "source.h"
-#include "edge.h"
-#include "project.h"
+#include "filter.h"
 #include "compare.h"
 
-#define DEBUG_FILENAME "../../debugspace/debug.data"
-#define DEBUG_STAGE 1
+#define DEBUG_STAGE 3
 
-#define FOV_H 57.5f
-#define FOV_V 32.3f
-#define FOV_MH 5.0f
-#define FOV_MV 5.0f
-#define INSTALL_HEIGHT 7.0f
-#define INSTALL_PITCH 0.0f //0 = horizon; 90 = sky; -90 = ground;
-#define SPEED_MAX 120 //Max possible speed in km/h
-#define SPEED_ALERT 85 //Only show speed faster than this/255 of the SPEED_MAX, should be less than 256. Write 0 to show all
+#define FOV_H 57.5
+#define FOV_V 32.3
+#define INSTALL_HEIGHT 10.0
+#define INSTALL_PITCH -14.0 //0 = horizon; 90 = sky; -90 = ground;
+#define SPEED_MAX 120.0 //Max possible speed in km/h
+
+void __swapBuffer(void** a, void** b) {
+	void* temp = *a;
+	*a = *b;
+	*b = temp;
+}
+#define swapBuffer(a, b) __swapBuffer((void*)a, (void*)b)
+
+#if DEBUG_STAGE != 0
+FILE* debug;
+void dumpFrame(uint8_t* frame, size2d_t size, int hue) {
+	size_t area = size.width * size.height;
+	if (hue) {
+		for (size_t i = area; i; i--) {
+			uint8_t d = *(frame++);
+			if (!d) {
+				putc(0, debug);
+				putc(0, debug);
+				putc(0, debug);
+				continue;
+			}
+			if (d < 128)
+				putc(0, debug);
+			else if (d < 192)
+				putc((d - 128) << 2, debug);
+			else
+				putc(255, debug);
+			if (d < 64)
+				putc(d << 2, debug);
+			else if (d < 192)
+				putc(255, debug);
+			else
+				putc((255 - d) << 2, debug);
+			if (d < 64)
+				putc(255, debug);
+			else if (d < 128)
+				putc((128 - d) << 2, debug);
+			else
+				putc(0, debug);
+		}
+	}
+	else {
+		for (size_t i = area; i; i--) {
+			uint8_t d = *(frame++);
+			fputc(d, debug);
+			fputc(d, debug);
+			fputc(d, debug);
+		}
+	}
+}
+#endif
 
 int main(int argc, char* argv[]) {
 	int status = EXIT_FAILURE;
 	size_t frameCount;
-
-#if DEBUG_STAGE != 0
-	FILE* debug = fopen(DEBUG_FILENAME, "wb");
-	vh_t debugHeader;
-#endif
-
-	const char* sourceFile = argv[1];
-
 	vh_t videoInfo;
+	size2d_t size;
+	
 	Source source = NULL;
-	Edge edge = NULL;
-	Project project = NULL;
 	Compare compare = NULL;
 
-	source = source_init(sourceFile, &videoInfo);
+	source = source_init(argv[1], &videoInfo);
 	if (!source) {
 		fputs("Fail to init source input.\n", stderr);
 		goto label_exit;
 	}
-
-	edge = edge_init(source_getRawBitmap(source), (size2d_t){.width=videoInfo.width, .height=videoInfo.height}, videoInfo.colorScheme);
-	if (!edge) {
-		fputs("Fail to init edge filter.\n", stderr);
+	if (videoInfo.colorScheme != 1 && videoInfo.colorScheme != 3) {
+		fprintf(stderr, "Bad color scheme, support 1 or 3 only, got %"PRIu16".\n", videoInfo.colorScheme);
 		goto label_exit;
 	}
-	size2d_t edgeSize = edge_getEdgeSize(edge);
+	size = (size2d_t){.width=videoInfo.width, .height=videoInfo.height};
 
-	project = project_init(edge_getEdgeImage(edge), edgeSize, FOV_H, FOV_V, FOV_MH, FOV_MV); //edge image is slightly smaller than the actual FOV, but we can ignor it
-	if (!project) {
-		fputs("Fail to init image projecter.\n", stderr);
-		goto label_exit;
-	}
-	size2d_t projectSize = project_getProjectSize(project);
-
-	compare = compare_init(project_getProjectImage(project), projectSize, SPEED_MAX, videoInfo.fps);
-	if (!compare) {
-		fputs("Fail to init comparator.\n", stderr);
-		goto label_exit;
-	}
-	size2d_t compareSize = compare_getMapSize(compare);
-
-	loc3d_t* locationMap = malloc(sizeof(loc3d_t) * compareSize.width * compareSize.height);
+	loc3d_t* locationMap = malloc(sizeof(loc3d_t) * size.width * size.height);
 	if (!locationMap) {
 		fputs("Fail to init location map.\n", stderr);
 		goto label_exit;
 	}
 	loc3d_t* locationMapWritePtr = locationMap;
-	double pitchTop = (90.0 - INSTALL_PITCH + 0.5*FOV_V + FOV_MV) * M_PI / 180;
-	double pitchBottom = (90.0 - INSTALL_PITCH - 0.5*FOV_V + FOV_MV) * M_PI / 180;
-	double pitchStep = (pitchBottom - pitchTop) / (compareSize.height - 1);
+	double pitchTop = (90.0 + INSTALL_PITCH + 0.5*FOV_V) * M_PI / 180;
+	double pitchBottom = (90.0 + INSTALL_PITCH - 0.5*FOV_V) * M_PI / 180;
+	double pitchStep = (pitchBottom - pitchTop) / (size.height - 1);
 	double pitchCurrent = pitchTop;
-	for (size_t y = 0; y < compareSize.height; y++) {
-		double yawSpan = INSTALL_HEIGHT / cos(pitchCurrent) * sin((0.5*FOV_H + FOV_MH) * M_PI / 180); //Half
-		double yawStep = 2 * yawSpan / (compareSize.width - 1);
+	for (size_t y = 0; y < size.height; y++) {
+		double yawSpan = INSTALL_HEIGHT / cos(pitchCurrent) * sin(0.5 * FOV_H * M_PI / 180); //Half
+		double yawStep = 2 * yawSpan / (size.width - 1);
 		double yawCurrent = -yawSpan;
 		float posY = tan(pitchCurrent) * INSTALL_HEIGHT;
-		for (size_t x = 0; x < compareSize.width; x++) {
+		for (size_t x = 0; x < size.width; x++) {
 			*(locationMapWritePtr++) = (loc3d_t){
 				.x = yawCurrent,
 				.y = posY,
@@ -91,79 +113,62 @@ int main(int argc, char* argv[]) {
 		}
 		pitchCurrent += pitchStep;
 	}
-	compare_setLocationMap(compare, locationMap);
+	compare = compare_init(size, locationMap, SPEED_MAX / (3.6 * videoInfo.fps));
 	free(locationMap);
 
-#if DEBUG_STAGE == 1
-	fprintf(stdout, "Saving debug data: edge. Size %zu * %zu\n", edgeSize.width, edgeSize.height);
-	debugHeader = (vh_t){
-		.width = edgeSize.width,
-		.height = edgeSize.height,
-		.fps = videoInfo.fps,
-		.colorScheme = 1
-	};
-	fwrite(&debugHeader, 1, sizeof(debugHeader), debug);
-#elif DEBUG_STAGE == 2
-	fprintf(stdout, "Saving debug data: project. Size %zu * %zu\n", projectSize.width, projectSize.height);
-	debugHeader = (vh_t){
-		.width = projectSize.width,
-		.height = projectSize.height,
-		.fps = videoInfo.fps,
-		.colorScheme = 1
-	};
-	fwrite(&debugHeader, 1, sizeof(debugHeader), debug);
-#elif DEBUG_STAGE == 3
-	fprintf(stdout, "Saving debug data: compare. Size %zu * %zu\n", projectSize.width, projectSize.height);
-	debugHeader = (vh_t){
-		.width = compareSize.width,
-		.height = compareSize.height,
-		.fps = videoInfo.fps,
-		.colorScheme = 1
-	};
-	fwrite(&debugHeader, 1, sizeof(debugHeader), debug);
+	uint8_t* bufferNew = malloc(size.height * size.width);
+	uint8_t* bufferOld = malloc(size.height * size.width);
+
+#if DEBUG_STAGE != 0
+	debug = fopen("../../debugspace/debug.data", "wb");
+	if (!debug) {
+		fputs("Error, cannot init debug file.\n", stderr);
+		goto label_exit;
+	}
+	fprintf(stdout, "Debug stage %d, see result in file\n", DEBUG_STAGE);
+	fprintf(stdout, "Media info: %"PRIu16" * %"PRIu16", %"PRIu16"\n", videoInfo.width, videoInfo.height, videoInfo.fps);
+	vh_t debugInfo = {.width=videoInfo.width, .height=videoInfo.height, .fps=videoInfo.fps, .colorScheme=3};
+	fwrite(&debugInfo, sizeof(debugInfo), 1, debug);
 #endif
 
-	for (frameCount = 0; source_read(source); frameCount++) { //Read frame from source
+	for (frameCount = 0; source_read(source, bufferNew); frameCount++) { //Read frame from source
+#if DEBUG_STAGE != 0
 		fprintf(stdout, "\rProgress: %zu", frameCount);
 		fflush(stdout);
-
-		//Apply edge detection filter
-		edge_process(edge);
+#endif
+		/* Load frame from source */
 #if DEBUG_STAGE == 1
-		fwrite(edge_getEdgeImage(edge), debugHeader.colorScheme, debugHeader.width * debugHeader.height, debug);
+		dumpFrame(bufferOld, size, 0);
 #endif
 
-		//Project edges from camera-domain (clip-space, shifted by wind) to viewer-domain (stable) based on accelerometer
-		project_process(project, 0, 0, 0);
-		//TODO: Read gyro
-		//NOTE: Pass the project limit to compare object. When camera shifting, edge of frme may becomes 0, this will trigger a
-		//mistake "object-duration-move-out" event
+		/* Apply edge detection */
+		swapBuffer(&bufferNew, &bufferOld);
+		filter_kernel3(bufferNew, bufferOld, size, filter_kernel3_edge4);
+//		swapBuffer(&bufferNew, &bufferOld);
+//		filter_kernel3(bufferNew, bufferOld, size, filter_kernel3_blur);
 #if DEBUG_STAGE == 2
-		fwrite(project_getProjectImage(project), debugHeader.colorScheme, debugHeader.width * debugHeader.height, debug);
+		dumpFrame(bufferNew, size, 0);
 #endif
 
-		//Analysis speed base on screen-domain--world-domain info and time of edge luma stay on slots of screen domain
-		compare_process(compare);
-		denoise_lowpass34(compare_getSpeedMap(compare), projectSize);
-#if SPEED_ALERT
-		denoise_highValuePass8(compare_getSpeedMap(compare), projectSize, SPEED_ALERT);
-#endif
+		/* Compare new and old frame to detect moving */
+		swapBuffer(&bufferNew, &bufferOld);
+		compare_process(compare, bufferNew, bufferOld);
 #if DEBUG_STAGE == 3
-		fwrite(compare_getSpeedMap(compare), debugHeader.colorScheme, debugHeader.width * debugHeader.height, debug);
+		dumpFrame(bufferNew, size, 1);
 #endif
 	}
-	fputs("\rProgress: Done!\n", stdout);
-	fflush(stdout);
 
+
+
+	
 	status = EXIT_SUCCESS;
 label_exit:
-	source_destroy(source);
-	edge_destroy(edge);
-	project_destroy(project);
-	compare_destroy(compare);
 #if DEBUG_STAGE != 0
-	fclose(debug);
+	if (debug) fclose(debug);
 #endif
-	fprintf(stdout, "%zu frames processed.\n\n", frameCount);
+	source_destroy(source);
+	compare_destroy(compare);
+
+	fprintf(stdout, "\r%zu frames processed.\n\n", frameCount);
 	return status;
 }
