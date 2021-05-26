@@ -32,6 +32,14 @@ void main() {\n\
 }\n\
 ";
 
+/* Video file header */
+typedef struct VideoHeader_t {
+	uint16_t width;
+	uint16_t height;
+	uint16_t fps;
+	uint16_t colorScheme;
+} vh_t;
+
 int main(int argc, char* argv[]) {
 	if (argc < 2) {
 		fputs("Bad command, use: ./this inputFileName", stderr);
@@ -44,13 +52,12 @@ int main(int argc, char* argv[]) {
 		fputs("Cannot open input file.\n", stderr);
 		return EXIT_FAILURE;
 	}
-
-	uint16_t header[4];
-	int iDontCareYourResult = fread(header, 1, sizeof(header), fp);
-	const size_t width = header[0];
-	const size_t height = header[1];
-	const size_t fps = header[2];
-	const size_t colorScheme = header[3];
+	vh_t header;
+	int iDontCareYourResult = fread(&header, 1, sizeof(header), fp);
+	const size_t width = header.width;
+	const size_t height = header.height;
+	const size_t fps = header.fps;
+	const size_t colorScheme = header.colorScheme;
 
 	const char* colorSchemeDesc[] = {"Mono/Gray","","RGB","RGBA"};
 	if (colorScheme != 1 && colorScheme != 3 && colorScheme != 4) {
@@ -193,14 +200,45 @@ int main(int argc, char* argv[]) {
 	glBindTexture(GL_TEXTURE_2D, 0);
 
 	size_t frame = 0;
+	double lastFrameTime = 0;
 	glfwSetWindowTitle(window, "Viewer - frame 0");
 	while(!glfwWindowShouldClose(window)) {
 		glfwPollEvents();
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
 
-		if (!fread(bitmap, 1, width * height * colorScheme, fp))
-			glfwSetWindowShouldClose(window, GLFW_TRUE);
+		double cursorX, cursorY;
+		uint8_t r, g, b;
+		glfwGetCursorPos(window, &cursorX, &cursorY);
+		if (cursorX >= 0 && cursorX < width && cursorY >= 0 && cursorY < height && frame > 0) { //Get pixel info if cursor in window
+			if (colorScheme == 1) {
+				size_t i = cursorY * width + cursorX;
+				r = bitmap[i];
+				g = r;
+				b = r;
+			}
+			else if (colorScheme == 3) {
+				size_t i = (cursorY * width + cursorX) * 3;
+				r = bitmap[i+0];
+				g = bitmap[i+1];
+				b = bitmap[i+2];
+			}
+			else if (colorScheme == 4) {
+				size_t i = (cursorY * width + cursorX) * 4;
+				r = bitmap[i+0];
+				g = bitmap[i+1];
+				b = bitmap[i+2];
+			}
+		}
+		else { //Read next frame wehn cursor out of window
+			r = 0;
+			g = 0;
+			b = 0;
+			frame++;
+			int notEndOfVideo = fread(bitmap, 1, width * height * colorScheme, fp);
+			if (!notEndOfVideo)
+				glfwSetWindowShouldClose(window, GLFW_TRUE);
+		}
 
 		glUseProgram(shader);
 		glBindTexture(GL_TEXTURE_2D, glBitmap);
@@ -217,14 +255,15 @@ int main(int argc, char* argv[]) {
 		glBindVertexArray(0);
 		glBindTexture(GL_TEXTURE_2D, 0);
 
-		char title[20];
-		sprintf(title, "Viewer - frame %zu", frame);
+		char title[40];
+		sprintf(title, "Viewer - frame %zu, RGB = %"PRIu8" ,%"PRIu8" ,%"PRIu8, frame, r, g, b);
 		glfwSetWindowTitle(window, title);
 		glfwSwapBuffers(window);
 
-		double wait = (double)(++frame) / fps - glfwGetTime();
+		double wait = 1.0 / fps - (glfwGetTime() - lastFrameTime);
 		if (wait > 0)
 			usleep(wait * 1000000);
+		lastFrameTime = glfwGetTime();
 	}
 
 	glDeleteVertexArrays(1, &vao);

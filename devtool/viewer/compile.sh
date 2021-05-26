@@ -1,0 +1,1 @@
+gcc main.c glew.c -lGL -lglfw3 -lpthread -lm -ldl -O3
