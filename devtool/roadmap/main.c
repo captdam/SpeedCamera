@@ -4,6 +4,7 @@
  * This program should be run for once before launch the main program.
  * This program is intended to be run on dev machine.
  * This program doest not free resource on error termination, the OS takes care of it.
+ * Our dev machine has a powerful and reliable OS.
  */
 
 #include <stdio.h>
@@ -11,20 +12,19 @@
 #include <math.h>
 #include <inttypes.h>
 
-#define FOV_H 57.5
-#define FOV_V 32.3
-#define INSTALL_HEIGHT 10.0
-#define INSTALL_PITCH -14.0 //0 = horizon; 90 = sky; -90 = ground;
-#define SPEED_MAX 120.0 //Max possible speed in km/h
-
 typedef struct Location3D {
 	double x, y, z;
 } loc3d_t;
 
-typedef struct Roadmap {
+typedef struct RoadPixel {
+	uint32_t base;
+	uint32_t count;
+} road_t;
+
+typedef struct RoadNeighbor {
 	unsigned int distance: 8;
 	unsigned int pos: 24;
-} map_t;
+} neighbor_t;
 #define ROADMAP_DIS_MAX 255
 #define ROADMAP_POS_MAX 16777215
 
@@ -63,6 +63,13 @@ int main(int argc, char* argv[]) {
 		return EXIT_FAILURE;
 	}
 
+	/* Road data */
+	road_t* road = malloc(width * height * sizeof(road_t));
+	if (!road) {
+		fputs("Cannot create road info buffer.", stdout);
+		return EXIT_FAILURE;
+	}
+
 	/* Create road info */
 	loc3d_t* locationMap = malloc(sizeof(loc3d_t) * width * height);
 	if (!locationMap) {
@@ -91,15 +98,14 @@ int main(int argc, char* argv[]) {
 	}
 
 	/* Find neighbor points */
-	uint32_t mapCount = 0;
-	map_t* map = malloc(0);
+	uint32_t neighborCount = 0;
+	neighbor_t* neighbor = malloc(0);
 	for (int y = 0; y < height; y++) {
 		for (int x = 0; x < width; x++) {
-			uint32_t currentBase = mapCount;
+			uint32_t currentBase = neighborCount;
 			loc3d_t selfPos = locationMap[y * width + x];
-			fprintf(stdout, "\rMap size = %09"PRIu32"\t\tCurrent (%04d,%04d) pos (%03.5f,%03.5f,%03.5f)", mapCount, x, y, selfPos.x, selfPos.y, selfPos.z);
+			fprintf(stdout, "\rMap size = %09"PRIu32"\t\tCurrent (%04d,%04d) pos (%09.2lf,%09.2lf,%09.2lf)", neighborCount, x, y, selfPos.x, selfPos.y, selfPos.z);
 			fflush(stdout);
-			fwrite(&currentBase, 1, sizeof(currentBase), fp);
 
 			//Search up/down/left/right
 			for (int cx = x - 1;; cx--) {
@@ -108,12 +114,12 @@ int main(int argc, char* argv[]) {
 				double distance = distanceLoc3d(selfPos, locationMap[pos]);
 				if (distance > distanceThreshold) //Excess threshold
 					break;
-				map = realloc(map, (mapCount+1) * sizeof(map_t)); //Resize array and push
-				if (!map) {
+				neighbor = realloc(neighbor, (neighborCount+1) * sizeof(neighbor_t)); //Resize array and push
+				if (!neighbor) {
 					fputs("\nHalt! Out of memory!\n", stderr);
 					return EXIT_FAILURE;
 				}
-				map[mapCount++] = (map_t){
+				neighbor[neighborCount++] = (neighbor_t){
 					.distance = distance / distanceThreshold * ROADMAP_DIS_MAX,
 					.pos = pos
 				};
@@ -124,12 +130,12 @@ int main(int argc, char* argv[]) {
 				double distance = distanceLoc3d(selfPos, locationMap[pos]);
 				if (distance > distanceThreshold) //Excess threshold
 					break;
-				map = realloc(map, (mapCount+1) * sizeof(map_t));
-				if (!map) {
+				neighbor = realloc(neighbor, (neighborCount+1) * sizeof(neighbor_t));
+				if (!neighbor) {
 					fputs("\nHalt! Out of memory!\n", stderr);
 					return EXIT_FAILURE;
 				}
-				map[mapCount++] = (map_t){
+				neighbor[neighborCount++] = (neighbor_t){
 					.distance = distance / distanceThreshold * ROADMAP_DIS_MAX,
 					.pos = pos
 				};
@@ -140,12 +146,12 @@ int main(int argc, char* argv[]) {
 				double distance = distanceLoc3d(selfPos, locationMap[pos]);
 				if (distance > distanceThreshold) //Excess threshold
 					break;
-				map = realloc(map, (mapCount+1) * sizeof(map_t));
-				if (!map) {
+				neighbor = realloc(neighbor, (neighborCount+1) * sizeof(neighbor_t));
+				if (!neighbor) {
 					fputs("\nHalt! Out of memory!\n", stderr);
 					return EXIT_FAILURE;
 				}
-				map[mapCount++] = (map_t){
+				neighbor[neighborCount++] = (neighbor_t){
 					.distance = distance / distanceThreshold * ROADMAP_DIS_MAX,
 					.pos = pos
 				};
@@ -156,28 +162,31 @@ int main(int argc, char* argv[]) {
 				double distance = distanceLoc3d(selfPos, locationMap[pos]);
 				if (distance > distanceThreshold) //Excess threshold
 					break;
-				map = realloc(map, (mapCount+1) * sizeof(map_t));
-				if (!map) {
+				neighbor = realloc(neighbor, (neighborCount+1) * sizeof(neighbor_t));
+				if (!neighbor) {
 					fputs("\nHalt! Out of memory!\n", stderr);
 					return EXIT_FAILURE;
 				}
-				map[mapCount++] = (map_t){
+				neighbor[neighborCount++] = (neighbor_t){
 					.distance = distance / distanceThreshold * ROADMAP_DIS_MAX,
 					.pos = pos
 				};
 			}
 
-			uint32_t currentCount = mapCount - currentBase;
-			fwrite(&currentCount, 1, sizeof(currentCount), fp);
+			uint32_t currentCount = neighborCount - currentBase;
+			road[y * width + x] = (road_t){
+				.base = currentBase,
+				.count = neighborCount
+			};
 
 			//Sort candidate array by distance
 			if (currentCount > 1) {
-				for (size_t i = currentBase; i < mapCount - 1; i++) {
-					for (size_t j = i + 1; j < mapCount; j++) {
-						if (map[j].distance < map[i].distance) {
-							map_t temp = map[i];
-							map[i] = map[j];
-							map[j] = temp;
+				for (size_t i = currentBase; i < neighborCount - 1; i++) {
+					for (size_t j = i + 1; j < neighborCount; j++) {
+						if (neighbor[j].distance < neighbor[i].distance) {
+							neighbor_t temp = neighbor[i];
+							neighbor[i] = neighbor[j];
+							neighbor[j] = temp;
 						}
 					}
 				}
@@ -185,13 +194,15 @@ int main(int argc, char* argv[]) {
 		}
 	}
 	free(locationMap);
-	fprintf(stdout, "\rMap size = %09"PRIu32"\t\tSearch done!\n", mapCount);
+	fprintf(stdout, "\rMap size = %09"PRIu32"\t\tSearch done!\n", neighborCount);
 	fflush(stdout);
 	
 	fputs("Write map to file.\n", stdout);
-	fwrite(&mapCount, 1, sizeof(mapCount), fp);
-	fwrite(map, sizeof(*map), mapCount, fp);
-	free(map);
+	fwrite(&neighborCount, 1, sizeof(neighborCount), fp);
+	fwrite(neighbor, sizeof(*neighbor), neighborCount, fp);
+	free(neighbor);
+	fwrite(road, sizeof(*road), width * height, fp);
+	free(road);
 
 	fclose(fp);
 	return EXIT_SUCCESS;
