@@ -9,7 +9,7 @@
 #include "filter.h"
 #include "compare.h"
 
-#define DEBUG_STAGE 3
+#define DEBUG_STAGE 0
 
 #define FOV_H 57.5
 #define FOV_V 32.3
@@ -70,7 +70,7 @@ void dumpFrame(uint8_t* frame, size2d_t size, int hue) {
 
 int main(int argc, char* argv[]) {
 	int status = EXIT_FAILURE;
-	size_t frameCount;
+	size_t frameCount = 0;
 	vh_t videoInfo;
 	size2d_t size;
 	
@@ -88,33 +88,11 @@ int main(int argc, char* argv[]) {
 	}
 	size = (size2d_t){.width=videoInfo.width, .height=videoInfo.height};
 
-	loc3d_t* locationMap = malloc(sizeof(loc3d_t) * size.width * size.height);
-	if (!locationMap) {
-		fputs("Fail to init location map.\n", stderr);
+	compare = compare_init(size, argv[2]);
+	if (!compare) {
+		fputs("Fail to init compare module.\n", stderr);
 		goto label_exit;
 	}
-	loc3d_t* locationMapWritePtr = locationMap;
-	double pitchTop = (90.0 + INSTALL_PITCH + 0.5*FOV_V) * M_PI / 180;
-	double pitchBottom = (90.0 + INSTALL_PITCH - 0.5*FOV_V) * M_PI / 180;
-	double pitchStep = (pitchBottom - pitchTop) / (size.height - 1);
-	double pitchCurrent = pitchTop;
-	for (size_t y = 0; y < size.height; y++) {
-		double yawSpan = INSTALL_HEIGHT / cos(pitchCurrent) * sin(0.5 * FOV_H * M_PI / 180); //Half
-		double yawStep = 2 * yawSpan / (size.width - 1);
-		double yawCurrent = -yawSpan;
-		float posY = tan(pitchCurrent) * INSTALL_HEIGHT;
-		for (size_t x = 0; x < size.width; x++) {
-			*(locationMapWritePtr++) = (loc3d_t){
-				.x = yawCurrent,
-				.y = posY,
-				.z = 0
-			};
-			yawCurrent += yawStep;
-		}
-		pitchCurrent += pitchStep;
-	}
-	compare = compare_init(size, locationMap, SPEED_MAX / (3.6 * videoInfo.fps));
-	free(locationMap);
 
 	uint8_t* bufferNew = malloc(size.height * size.width);
 	uint8_t* bufferOld = malloc(size.height * size.width);
@@ -131,7 +109,7 @@ int main(int argc, char* argv[]) {
 	fwrite(&debugInfo, sizeof(debugInfo), 1, debug);
 #endif
 
-	for (frameCount = 0; source_read(source, bufferNew); frameCount++) { //Read frame from source
+	for (; source_read(source, bufferNew); frameCount++) { //Read frame from source
 #if DEBUG_STAGE != 0
 		fprintf(stdout, "\rProgress: %zu", frameCount);
 		fflush(stdout);

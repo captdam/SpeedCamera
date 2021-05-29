@@ -13,12 +13,10 @@ typedef struct Compare_ClassDataStructure* Compare;
 
 /** Init a compare object, create buffer and analysis location map. 
  * @param size Size of buffer, uint of pixel by pixel
- * @param bufferDepth Number of buffer
- * @param positionMap 2D map indicates the projected road-domain point's xyz position of each pixel
- * @param distanceThreshold Max distance the object can travel in one frame
+ * @param mapfile Name of file that indicates whcih pixel to look
  * @return $this(Opaque) compare class object if success, null if fail
  */
-Compare compare_init(size2d_t size, loc3d_t* positionMap, float distanceThreshold);
+Compare compare_init(const size2d_t size, const char* mapfile);
 
 /** Read a frame from the source file, save the gray scale image to the dest. 
  * @param this This source class object
