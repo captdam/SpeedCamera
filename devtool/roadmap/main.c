@@ -176,7 +176,7 @@ int main(int argc, char* argv[]) {
 			uint32_t currentCount = neighborCount - currentBase;
 			road[y * width + x] = (road_t){
 				.base = currentBase,
-				.count = neighborCount
+				.count = currentCount
 			};
 
 			//Sort candidate array by distance
@@ -199,10 +199,10 @@ int main(int argc, char* argv[]) {
 	
 	fputs("Write map to file.\n", stdout);
 	fwrite(&neighborCount, 1, sizeof(neighborCount), fp);
-	fwrite(neighbor, sizeof(*neighbor), neighborCount, fp);
-	free(neighbor);
 	fwrite(road, sizeof(*road), width * height, fp);
 	free(road);
+	fwrite(neighbor, sizeof(*neighbor), neighborCount, fp);
+	free(neighbor);
 
 	fclose(fp);
 	return EXIT_SUCCESS;
