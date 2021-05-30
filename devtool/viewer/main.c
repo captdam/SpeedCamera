@@ -255,8 +255,8 @@ int main(int argc, char* argv[]) {
 		glBindVertexArray(0);
 		glBindTexture(GL_TEXTURE_2D, 0);
 
-		char title[40];
-		sprintf(title, "Viewer - frame %zu, RGB = %"PRIu8" ,%"PRIu8" ,%"PRIu8, frame, r, g, b);
+		char title[60];
+		sprintf(title, "Viewer - frame %zu, Pos(%d, %d) RGB = (%"PRIu8", %"PRIu8", %"PRIu8")", frame, (int)cursorX, (int)cursorY, r, g, b);
 		glfwSetWindowTitle(window, title);
 		glfwSwapBuffers(window);
 
