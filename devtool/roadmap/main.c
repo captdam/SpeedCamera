@@ -28,33 +28,91 @@ typedef struct RoadNeighbor {
 #define ROADMAP_DIS_MAX 255
 #define ROADMAP_POS_MAX 16777215
 
+/* == Modify following values and functions to generate road map file for a specific scene == */
+
+//Screen resolution in pixel
+#define WIDTH 1920
+#define HEIGHT 1080
+
+//Camera field of view (Horizontal and Veritcal) in degree
+#define FOVH 57.5
+#define FOVV 32.3
+
+//Position of camera: height in meter, pitch in degree, 0 = horizontal, 90 = sky, -90 = ground
+#define INSTALL_HEIGHT 10.0
+#define INSTALL_PITCH -14.0
+
+//Max speed of object in km/h, Video FPS. Thes two value also used as threshold for searching neighbor points
+#define MAX_SPEED 120.0
+#define FPS 30.0
+
+/** Road location generation
+ * @param x screen coordnate x in pixel of a road point
+ * @param y screen coordnate y in pixel of a road point
+ * @return x,y,z geographical coordnate of a road point
+ */
+loc3d_t getLocation(int x, int y) {
+	double pitchTop = (90.0 + INSTALL_PITCH + 0.5*FOVV) * M_PI / 180;
+	double pitchBottom = (90.0 + INSTALL_PITCH - 0.5*FOVV) * M_PI / 180;
+	double pitchStep = (pitchBottom - pitchTop) / (HEIGHT - 1);
+	double pitchCurrent = pitchTop + pitchStep * y;
+
+	double yawSpan = INSTALL_HEIGHT / cos(pitchCurrent) * sin(0.5 * FOVH * M_PI / 180); //Half
+	double yawStep = 2 * yawSpan / (WIDTH - 1);
+	double yawCurrent = -yawSpan + yawStep * x;
+
+	return (loc3d_t){
+		.x = yawCurrent,
+		.y = tan(pitchCurrent) * INSTALL_HEIGHT,
+		.z = 0
+	};
+}
+
+/** Focus region, movement outside of the focus region will be ignored
+ * @param x screen coordnate x in pixel of a road point
+ * @param y screen coordnate y in pixel of a road point
+ * @return 1 if in focus region , 0 if out
+ */
+int isFocused(int x, int y) {
+	int x1, x2, y1, y2;
+
+	if (y < 400 || y > 1060)
+		return 0;
+	
+	x1 = 940;
+	y1 = 400;
+	x2 = 410;
+	y2 = 1060;
+	if ( x < x1 + (y-y1) * (x1-x2)/(y1-y2) )
+		return 0;
+	
+	x1 = 1060;
+	y1 = 400;
+	x2 = 1496;
+	y2 = 656;
+	if ( x > x1 + (y-y1) * (x1-x2)/(y1-y2) )
+		return 0;
+	
+	if (x > 1496)
+		return 0;
+
+	return 1;
+}
+
+/* == Modify above values and functions to generate road map file for a specific scene == */
+
+#if WIDTH * HEIGHT > ROADMAP_POS_MAX
+#error "Resolution to large (Limit 24-bit)"
+#endif
+
+#define DISTANCE_THRESHOLD (MAX_SPEED / 3.6 / FPS)
+
 double distanceLoc3d(loc3d_t a, loc3d_t b) {
 	return sqrt( powf(a.x-b.x,2) + powf(a.y-b.y,2) + powf(a.z-b.z,2) );
 }
 
 int main(int argc, char* argv[]) {
-	const char* outputFilename = argv[1];
-	const int width = atoi(argv[2]); //Use int, even int16 (+/-32k) is large enough.
-	const int height = atoi(argv[3]); //Plus, our target machine is 32-bit machine
-	const double fovH = atof(argv[4]);
-	const double fovV = atof(argv[5]);
-	const double installHeight = atof(argv[6]);
-	const double installPitch = atof(argv[7]);
-	const double maxSpeed = atof(argv[8]);
-	const double fps = atof(argv[9]);
-	fprintf(stdout, "Export roadmap to file %s\n", outputFilename);
-	fprintf(stdout, "Screen width = %d, height = %d\n", width, height);
-	fprintf(stdout, "Camera FOV = horizontal %.2lf deg * vertical %.2lf deg\n", fovH, fovV);
-	fprintf(stdout, "Install height %.2lf m, pitch %.2lf deg\n", installHeight, installPitch);
-	fprintf(stdout, "Max speed %.2lf km/h, FPS = %.2lf\n", maxSpeed, fps);
-
-	if (width * height > ROADMAP_POS_MAX) {
-		fprintf(stderr, "Resolution too large! (Limit = %llu)\n", (unsigned long long)ROADMAP_POS_MAX);
-		return EXIT_FAILURE;
-	}
-
-	double distanceThreshold = maxSpeed / 3.6 / fps;
-	fprintf(stdout, "Max speed is %.2lf m/s, so threshold is %.2lf/frame at %.2f FPS\n", maxSpeed/3.6, distanceThreshold, fps);
+	fprintf(stdout, "Max speed is %.2lf km/h, so threshold is %.2lf/frame at %.2f FPS\n", MAX_SPEED, DISTANCE_THRESHOLD, FPS);
 
 	/* Create map file */
 	FILE* fp = fopen(argv[1], "wb");
@@ -64,122 +122,137 @@ int main(int argc, char* argv[]) {
 	}
 
 	/* Road data */
-	road_t* road = malloc(width * height * sizeof(road_t));
+	road_t* road = malloc(WIDTH * HEIGHT * sizeof(road_t));
 	if (!road) {
 		fputs("Cannot create road info buffer.", stdout);
 		return EXIT_FAILURE;
 	}
 
 	/* Create road info */
-	loc3d_t* locationMap = malloc(sizeof(loc3d_t) * width * height);
+	loc3d_t* locationMap = malloc(WIDTH * HEIGHT * sizeof(loc3d_t));
 	if (!locationMap) {
 		fputs("Fail to init location map.\n", stderr);
 		return EXIT_FAILURE;
 	}
 	loc3d_t* locationMapWritePtr = locationMap;
-	double pitchTop = (90.0 + installPitch + 0.5*fovV) * M_PI / 180;
-	double pitchBottom = (90.0 + installPitch - 0.5*fovV) * M_PI / 180;
-	double pitchStep = (pitchBottom - pitchTop) / (height - 1);
-	double pitchCurrent = pitchTop;
-	for (int y = 0; y < height; y++) {
-		double yawSpan = installHeight / cos(pitchCurrent) * sin(0.5 * fovH * M_PI / 180); //Half
-		double yawStep = 2 * yawSpan / (width - 1);
-		double yawCurrent = -yawSpan;
-		double posY = tan(pitchCurrent) * installHeight;
-		for (int x = 0; x < width; x++) {
-			*(locationMapWritePtr++) = (loc3d_t){
-				.x = yawCurrent,
-				.y = posY,
-				.z = 0
-			};
-			yawCurrent += yawStep;
+	for (int y = 0; y < HEIGHT; y++) {
+		for (int x = 0; x < WIDTH; x++) {
+			*(locationMapWritePtr++) = getLocation(x, y);
 		}
-		pitchCurrent += pitchStep;
 	}
 
 	/* Find neighbor points */
 	uint32_t neighborCount = 0;
 	neighbor_t* neighbor = malloc(0);
-	for (int y = 0; y < height; y++) {
-		for (int x = 0; x < width; x++) {
+	for (int y = 0; y < HEIGHT; y++) {
+		for (int x = 0; x < WIDTH; x++) {
+			//Get info about current road point
 			uint32_t currentBase = neighborCount;
-			loc3d_t selfPos = locationMap[y * width + x];
-			fprintf(stdout, "\rMap size = %09"PRIu32"\t\tCurrent (%04d,%04d) pos (%09.2lf,%09.2lf,%09.2lf)", neighborCount, x, y, selfPos.x, selfPos.y, selfPos.z);
+			loc3d_t selfPos = locationMap[y * WIDTH + x];
+			fprintf(stdout, "\rMap size = %09"PRIu32"\tCurrent (%04d,%04d) pos (%08.2lf, %08.2lf, %08.2lf)", neighborCount, x, y, selfPos.x, selfPos.y, selfPos.z);
 			fflush(stdout);
 
-			//Search up/down/left/right
-			for (int cx = x - 1;; cx--) {
-				if (cx < 0) break;
-				uint32_t pos = y * width + cx;
-				double distance = distanceLoc3d(selfPos, locationMap[pos]);
-				if (distance > distanceThreshold) //Excess threshold
-					break;
-				neighbor = realloc(neighbor, (neighborCount+1) * sizeof(neighbor_t)); //Resize array and push
-				if (!neighbor) {
-					fputs("\nHalt! Out of memory!\n", stderr);
-					return EXIT_FAILURE;
+			if (isFocused(x, y)) { //Make sure current road point is in focus region
+
+				//Search up/down/left/right for neighbor points
+				for (int cx = x - 1;; cx--) {
+					if (cx < 0) //Make sure we are not going out of the frame edge
+						break;
+					
+					uint32_t pos = y * WIDTH + cx;
+					double distance = distanceLoc3d(selfPos, locationMap[pos]);
+					if (distance > DISTANCE_THRESHOLD) //Stop if excess threshold (further will have greater distance)
+						break;
+					
+					if (!isFocused(cx, y)) //Also make sure we are still in the focus region
+						continue; //Focus region may be discontinue, so we continue to check next neighbor point
+					
+					neighbor = realloc(neighbor, (neighborCount+1) * sizeof(neighbor_t)); //Resize array and push
+					if (!neighbor) {
+						fputs("\nHalt! Out of memory!\n", stderr);
+						return EXIT_FAILURE;
+					}
+					neighbor[neighborCount++] = (neighbor_t){
+						.distance = distance / DISTANCE_THRESHOLD * ROADMAP_DIS_MAX,
+						.pos = pos
+					};
 				}
-				neighbor[neighborCount++] = (neighbor_t){
-					.distance = distance / distanceThreshold * ROADMAP_DIS_MAX,
-					.pos = pos
-				};
-			}
-			for (int cx = x + 1;; cx++) {
-				if (cx >= width) break;
-				uint32_t pos = y * width + cx;
-				double distance = distanceLoc3d(selfPos, locationMap[pos]);
-				if (distance > distanceThreshold) //Excess threshold
-					break;
-				neighbor = realloc(neighbor, (neighborCount+1) * sizeof(neighbor_t));
-				if (!neighbor) {
-					fputs("\nHalt! Out of memory!\n", stderr);
-					return EXIT_FAILURE;
+				for (int cx = x + 1;; cx++) {
+					if (cx >= WIDTH)
+						break;
+					
+					uint32_t pos = y * WIDTH + cx;
+					double distance = distanceLoc3d(selfPos, locationMap[pos]);
+					if (distance > DISTANCE_THRESHOLD)
+						break;
+					
+					if (!isFocused(cx, y))
+						continue;
+					
+					neighbor = realloc(neighbor, (neighborCount+1) * sizeof(neighbor_t));
+					if (!neighbor) {
+						fputs("\nHalt! Out of memory!\n", stderr);
+						return EXIT_FAILURE;
+					}
+					neighbor[neighborCount++] = (neighbor_t){
+						.distance = distance / DISTANCE_THRESHOLD * ROADMAP_DIS_MAX,
+						.pos = pos
+					};
 				}
-				neighbor[neighborCount++] = (neighbor_t){
-					.distance = distance / distanceThreshold * ROADMAP_DIS_MAX,
-					.pos = pos
-				};
-			}
-			for (int cy = y - 1;; cy--) {
-				if (cy < 0) break;
-				uint32_t pos = cy * width + x;
-				double distance = distanceLoc3d(selfPos, locationMap[pos]);
-				if (distance > distanceThreshold) //Excess threshold
-					break;
-				neighbor = realloc(neighbor, (neighborCount+1) * sizeof(neighbor_t));
-				if (!neighbor) {
-					fputs("\nHalt! Out of memory!\n", stderr);
-					return EXIT_FAILURE;
+				for (int cy = y - 1;; cy--) {
+					if (cy < 0)
+						break;
+					
+					uint32_t pos = cy * WIDTH + x;
+					double distance = distanceLoc3d(selfPos, locationMap[pos]);
+					if (distance > DISTANCE_THRESHOLD)
+						break;
+					
+					if (!isFocused(x, cy))
+						continue;
+
+					neighbor = realloc(neighbor, (neighborCount+1) * sizeof(neighbor_t));
+					if (!neighbor) {
+						fputs("\nHalt! Out of memory!\n", stderr);
+						return EXIT_FAILURE;
+					}
+					neighbor[neighborCount++] = (neighbor_t){
+						.distance = distance / DISTANCE_THRESHOLD * ROADMAP_DIS_MAX,
+						.pos = pos
+					};
 				}
-				neighbor[neighborCount++] = (neighbor_t){
-					.distance = distance / distanceThreshold * ROADMAP_DIS_MAX,
-					.pos = pos
-				};
-			}
-			for (int cy = y + 1;; cy++) {
-				if (cy >= height) break;
-				uint32_t pos = cy * width + x;
-				double distance = distanceLoc3d(selfPos, locationMap[pos]);
-				if (distance > distanceThreshold) //Excess threshold
-					break;
-				neighbor = realloc(neighbor, (neighborCount+1) * sizeof(neighbor_t));
-				if (!neighbor) {
-					fputs("\nHalt! Out of memory!\n", stderr);
-					return EXIT_FAILURE;
+				for (int cy = y + 1;; cy++) {
+					if (cy >= HEIGHT)
+						break;
+					
+					uint32_t pos = cy * WIDTH + x;
+					double distance = distanceLoc3d(selfPos, locationMap[pos]);
+					if (distance > DISTANCE_THRESHOLD)
+						break;
+					
+					if (!isFocused(x, cy))
+						continue;
+
+					neighbor = realloc(neighbor, (neighborCount+1) * sizeof(neighbor_t));
+					if (!neighbor) {
+						fputs("\nHalt! Out of memory!\n", stderr);
+						return EXIT_FAILURE;
+					}
+					neighbor[neighborCount++] = (neighbor_t){
+						.distance = distance / DISTANCE_THRESHOLD * ROADMAP_DIS_MAX,
+						.pos = pos
+					};
+					double sss = DISTANCE_THRESHOLD;
 				}
-				neighbor[neighborCount++] = (neighbor_t){
-					.distance = distance / distanceThreshold * ROADMAP_DIS_MAX,
-					.pos = pos
-				};
 			}
 
 			uint32_t currentCount = neighborCount - currentBase;
-			road[y * width + x] = (road_t){
+			road[y * WIDTH + x] = (road_t){
 				.base = currentBase,
 				.count = currentCount
 			};
 
-			//Sort candidate array by distance
+			//Sort neighbor points base on distance, closest first
 			if (currentCount > 1) {
 				for (size_t i = currentBase; i < neighborCount - 1; i++) {
 					for (size_t j = i + 1; j < neighborCount; j++) {
@@ -199,7 +272,7 @@ int main(int argc, char* argv[]) {
 	
 	fputs("Write map to file.\n", stdout);
 	fwrite(&neighborCount, 1, sizeof(neighborCount), fp);
-	fwrite(road, sizeof(*road), width * height, fp);
+	fwrite(road, sizeof(*road), WIDTH * HEIGHT, fp);
 	free(road);
 	fwrite(neighbor, sizeof(*neighbor), neighborCount, fp);
 	free(neighbor);
