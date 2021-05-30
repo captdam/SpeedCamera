@@ -9,7 +9,7 @@
 #include "filter.h"
 #include "compare.h"
 
-#define DEBUG_STAGE 0
+#define DEBUG_STAGE 1
 
 #define FOV_H 57.5
 #define FOV_V 32.3
@@ -37,19 +37,19 @@ void dumpFrame(uint8_t* frame, size2d_t size, int hue) {
 				putc(0, debug);
 				continue;
 			}
-			if (d < 128)
+			if (d < 128) //R
 				putc(0, debug);
 			else if (d < 192)
 				putc((d - 128) << 2, debug);
 			else
 				putc(255, debug);
-			if (d < 64)
+			if (d < 64) //G
 				putc(d << 2, debug);
 			else if (d < 192)
 				putc(255, debug);
 			else
 				putc((255 - d) << 2, debug);
-			if (d < 64)
+			if (d < 64) //B
 				putc(255, debug);
 			else if (d < 128)
 				putc((128 - d) << 2, debug);
@@ -116,7 +116,7 @@ int main(int argc, char* argv[]) {
 #endif
 		/* Load frame from source */
 #if DEBUG_STAGE == 1
-		dumpFrame(bufferOld, size, 0);
+		dumpFrame(bufferNew, size, 0);
 #endif
 
 		/* Apply edge detection */
