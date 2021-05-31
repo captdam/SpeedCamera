@@ -117,14 +117,14 @@ int main(int argc, char* argv[]) {
 	/* Create map file */
 	FILE* fp = fopen(argv[1], "wb");
 	if (!fp) {
-		fputs("Cannot create file.", stdout);
+		fputs("Cannot create file.", stderr);
 		return EXIT_FAILURE;
 	}
 
 	/* Road data */
 	road_t* road = malloc(WIDTH * HEIGHT * sizeof(road_t));
 	if (!road) {
-		fputs("Cannot create road info buffer.", stdout);
+		fputs("Cannot create road info buffer.", stderr);
 		return EXIT_FAILURE;
 	}
 
@@ -149,8 +149,10 @@ int main(int argc, char* argv[]) {
 			//Get info about current road point
 			uint32_t currentBase = neighborCount;
 			loc3d_t selfPos = locationMap[y * WIDTH + x];
+#ifdef VERBOSE
 			fprintf(stdout, "\rMap size = %09"PRIu32"\tCurrent (%04d,%04d) pos (%08.2lf, %08.2lf, %08.2lf)", neighborCount, x, y, selfPos.x, selfPos.y, selfPos.z);
 			fflush(stdout);
+#endif
 
 			if (isFocused(x, y)) { //Make sure current road point is in focus region
 

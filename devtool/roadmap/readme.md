@@ -97,6 +97,8 @@ int isFocused(int x, int y) {
 
 Then, compile with this command:
 ```gcc main.c -lm -O3```
+or
+```gcc main.c -lm -O3 -DVERBOSE``` (print the progress of generation, not recommended for remote console)
 
 ...and excute with:
 ```./a.out some_place/whatever_you_want_to_call_it.data```

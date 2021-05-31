@@ -10,6 +10,7 @@
 #include "compare.h"
 
 #define DEBUG_STAGE 1
+#define DEBUG_FILE_DIR "../../debugspace/debug.data"
 
 #define FOV_H 57.5
 #define FOV_V 32.3
@@ -98,7 +99,7 @@ int main(int argc, char* argv[]) {
 	uint8_t* bufferOld = malloc(size.height * size.width);
 
 #if DEBUG_STAGE != 0
-	debug = fopen("../../debugspace/debug.data", "wb");
+	debug = fopen(DEBUG_FILE_DIR, "wb");
 	if (!debug) {
 		fputs("Error, cannot init debug file.\n", stderr);
 		goto label_exit;
@@ -110,7 +111,7 @@ int main(int argc, char* argv[]) {
 #endif
 
 	for (; source_read(source, bufferNew); frameCount++) { //Read frame from source
-#if DEBUG_STAGE != 0
+#ifdef VERBOSE
 		fprintf(stdout, "\rProgress: %zu", frameCount);
 		fflush(stdout);
 #endif
