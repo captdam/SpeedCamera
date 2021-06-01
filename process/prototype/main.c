@@ -9,7 +9,7 @@
 #include "filter.h"
 #include "compare.h"
 
-#define DEBUG_STAGE 1
+#define DEBUG_STAGE 3
 #define DEBUG_FILE_DIR "../../debugspace/debug.data"
 
 #define FOV_H 57.5
@@ -83,8 +83,8 @@ int main(int argc, char* argv[]) {
 		fputs("Fail to init source input.\n", stderr);
 		goto label_exit;
 	}
-	if (videoInfo.colorScheme != 1 && videoInfo.colorScheme != 3) {
-		fprintf(stderr, "Bad color scheme, support 1 or 3 only, got %"PRIu16".\n", videoInfo.colorScheme);
+	if (videoInfo.colorScheme != 1 && videoInfo.colorScheme != 3 && videoInfo.colorScheme != 4) {
+		fprintf(stderr, "Bad color scheme, support 1, 3 and 4 only, got %"PRIu16".\n", videoInfo.colorScheme);
 		goto label_exit;
 	}
 	size = (size2d_t){.width=videoInfo.width, .height=videoInfo.height};

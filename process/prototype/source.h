@@ -23,7 +23,7 @@ Source source_init(const char* videoFile, vh_t* info);
  * @param dest Destination of the content
  * @return Number of bytes fetched from source file
  */
-size_t source_read(Source this, uint8_t* dest);
+uint32_t source_read(Source this, uint8_t* dest);
 
 /** Destroy this source class object, close the source file 
  * @param this This source class object

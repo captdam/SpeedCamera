@@ -96,16 +96,15 @@ void compare_process(Compare this, uint8_t* dest, uint8_t* src) {
 	memset(dest, 0, area * sizeof(*dest));
 
 	for (size_t i = area; i; i--) {
-//		dest[i] = this->locationMap[i].neighborCount;
-		if (src[i] < LUMA_THRESHOLD)
+		if (!src[i])
 			continue;
-		if (this->previousFrame[i] > LUMA_THRESHOLD)
+		if (this->previousFrame[i])
 			continue;
-		if (src[i] - this->previousFrame[i] < LUMA_THRESHOLD)
-			continue;
+//		if (src[i] - this->previousFrame[i] < LUMA_THRESHOLD)
+//			continue;
 
 		for (neighbor_t* x = this->roadPoint[i].neighborStart; x < this->roadPoint[i].neighborEnd; x++) {
-			if ( this->previousFrame[ x->pos ] > LUMA_THRESHOLD ) {
+			if (this->previousFrame[ x->pos ]) {
 				dest[i] = x->distance;
 				break;
 			}

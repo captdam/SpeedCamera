@@ -7,7 +7,12 @@ struct Source_ClassDataStructure {
 	FILE* fp;
 	uint8_t* buffer;
 	vh_t info;
+	uint32_t (*readFunction)(Source, uint8_t*);
 };
+
+uint32_t source_read1(Source this, uint8_t* dest);
+uint32_t source_read3(Source this, uint8_t* dest);
+uint32_t source_read4(Source this, uint8_t* dest);
 
 Source source_init(const char* videoFile, vh_t* info) {
 	Source this = malloc(sizeof(struct Source_ClassDataStructure));
@@ -34,22 +39,42 @@ Source source_init(const char* videoFile, vh_t* info) {
 		return NULL;
 	}
 
+	switch (this->info.colorScheme) {
+		case 1:	this->readFunction = source_read1; break;
+		case 3: this->readFunction = source_read3; break;
+		case 4: this->readFunction = source_read4; break;
+		default: this->readFunction = NULL;
+	}
+
 	*info = this->info;
 	return this;
 }
 
-size_t source_read(Source this, uint8_t* dest) {
-	if (this->info.colorScheme == 1) {
-		return fread(dest, 1, this->info.height * this->info.width, this->fp);
-	}
-
-	size_t c = 0;
+uint32_t source_read(Source this, uint8_t* dest) {
+	return this->readFunction(this, dest);
+}
+uint32_t source_read1(Source this, uint8_t* dest) {
+	return fread(dest, 1, this->info.height * this->info.width, this->fp);
+}
+uint32_t source_read3(Source this, uint8_t* dest) {
+	uint32_t c = 0;
 	for (size_t i = this->info.height; i; i--) {
 		c += fread(this->buffer, this->info.colorScheme, this->info.width, this->fp);
 		uint8_t* p = this->buffer;
 		for (size_t j = this->info.width; j; j--) {
-			uint8_t l = ( *(p++) + *(p++) + *(p++) ) / 3;
-			*(dest++) = l;
+			*(dest++) = ( *(p++) + *(p++) + *(p++) ) / 3;
+		}
+	}
+	return c;
+}
+uint32_t source_read4(Source this, uint8_t* dest) {
+	uint32_t c = 0;
+	for (size_t i = this->info.height; i; i--) {
+		c += fread(this->buffer, this->info.colorScheme, this->info.width, this->fp);
+		uint8_t* p = this->buffer;
+		for (size_t j = this->info.width; j; j--) {
+			*(dest++) = ( *(p++) + *(p++) + *(p++) ) / 3;
+			p++;
 		}
 	}
 	return c;

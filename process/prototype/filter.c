@@ -2,6 +2,8 @@
 
 #include "filter.h"
 
+#define LUMA_THRESHOLD 32
+
 #define N_FRAC 4
 const int8_t filter_kernel3_mask[][9] = { //Fixed point number
 	{ /* 0: sharpen */ 
@@ -26,7 +28,7 @@ void filter_kernel3(uint8_t* dest, uint8_t* src, size2d_t size, enum filter_kern
 	const int8_t* filter = filter_kernel3_mask[filter_kernel3_mode];
 
 	memset(dest, 0, size.width * sizeof(*dest));
-	
+
 	dest += size.width;
 	uint8_t* oprand[] = {
 		src - 1, src, src + 1,
@@ -45,7 +47,8 @@ void filter_kernel3(uint8_t* dest, uint8_t* src, size2d_t size, enum filter_kern
 				l += *oprand[--k] * filter[k];
 				oprand[k]++;
 			}
-			*(dest++) = l > 0 ? l >> N_FRAC : 0;
+//			*(dest++) = l > 0 ? (l >> N_FRAC : 0;
+			*(dest++) = l > (LUMA_THRESHOLD << N_FRAC) ? -1 : 0;
 		}
 
 		*(dest++) = 0;
