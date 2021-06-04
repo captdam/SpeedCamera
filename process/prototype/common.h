@@ -34,4 +34,20 @@ typedef struct Location3D_t {
 	float z;
 } loc3d_t;
 
+/** Neighbor point of a road point
+ */
+typedef struct RoadNeighbor {
+	unsigned int distance: 8;
+	unsigned int pos: 24;
+} neighbor_t;
+#define ROADMAP_DIS_MAX 255
+#define ROADMAP_POS_MAX 16777215
+
+/** A road point
+ */
+typedef struct RoadPoint {
+	neighbor_t* neighborStart;
+	neighbor_t* neighborEnd;
+} road_t;
+
 #endif /* #ifndef INCLUDE_COMMON_H */

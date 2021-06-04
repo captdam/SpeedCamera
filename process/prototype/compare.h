@@ -11,16 +11,17 @@
  */
 typedef struct Compare_ClassDataStructure* Compare;
 
-/** Init a compare object, create buffer and analysis location map. 
- * @param size Size of buffer, uint of pixel by pixel
- * @param mapfile Name of file that indicates whcih pixel to look
+/** Init a compare object, create buffer. 
+ * @param size Size of buffer, same as size of the frame, in uint of pixel by pixel
+ * @param roadPoint Pointer to the road points list (contains absolute address to neighbor points)
  * @return $this(Opaque) compare class object if success, null if fail
  */
-Compare compare_init(const size2d_t size, const char* mapfile);
+Compare compare_init(const size2d_t size, road_t* roadPoint);
 
-/** Read a frame from the source file, save the gray scale image to the dest. 
+/** Compare the frame in buffer and src, ave speed map in dest. 
  * @param this This source class object
- * @return Number of bytes fetched from source file
+ * @param dest Where to save the speed map
+ * @param src Where is the frame data
  */
 void compare_process(Compare this, uint8_t* dest, uint8_t* src);
 

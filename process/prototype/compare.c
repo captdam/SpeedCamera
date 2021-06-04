@@ -8,86 +8,39 @@
 
 #define LUMA_THRESHOLD 40
 
-typedef struct RoadNeighbor {
-	unsigned int distance: 8;
-	unsigned int pos: 24;
-} neighbor_t;
-#define NEIGHBOR_DIS_MAX 255
-#define NEIGHBOR_POS_MAX 16777215
-
-typedef struct RoadPoint {
-	neighbor_t* neighborStart;
-	neighbor_t* neighborEnd;
-} road_t;
-
 struct Compare_ClassDataStructure {
 	size2d_t size;
 	uint8_t* previousFrame;
 	road_t* roadPoint;
-	neighbor_t* neighborMap;
 };
 
-Compare compare_init(const size2d_t size, const char* mapfile) {
+Compare compare_init(const size2d_t size, road_t* roadPoint) {
+#ifdef VERBOSE
+	fputs("Init compare class object\n", stdout);
+	fflush(stdout);
+#endif
+
 	Compare this = malloc(sizeof(struct Compare_ClassDataStructure));
-	if (!this)
+	if (!this) {
+#ifdef VERBOSE
+		fputs("\tFail to create compare class object data structure\n", stderr);
+#endif
 		return NULL;
+	}
 	
 	this->size = size;
 	this->previousFrame = NULL;
-	this->roadPoint = NULL;
-	this->neighborMap = NULL;
+	this->roadPoint = roadPoint;
 
-	//Open neighbor map
-	FILE* fp = fopen(mapfile, "rb");
-	if (!fp) {
-		compare_destroy(this);
-		return NULL;
-	}
-	uint32_t neighborCount;
-	if(!fread(&neighborCount, 1, sizeof(neighborCount), fp)) {
-		compare_destroy(this);
-		return NULL;
-	}
-
-	//Allocate memory
-	size_t area = size.width * size.height;
-	this->previousFrame = malloc(area * sizeof(*this->previousFrame)); 
+	this->previousFrame = malloc(size.width * size.height * sizeof(*this->previousFrame)); 
 	if (!this->previousFrame) {
-		compare_destroy(this);
-		return NULL;
-	}
-	this->roadPoint = malloc(area * sizeof(*this->roadPoint)); 
-	if (!this->roadPoint) {
-		compare_destroy(this);
-		return NULL;
-	}
-	this->neighborMap = malloc((size_t)neighborCount * sizeof(*this->neighborMap)); 
-	if (!this->neighborMap) {
+#ifdef VERBOSE
+		fputs("\tCannot allocate buffer for previous frame\n", stderr);
+#endif
 		compare_destroy(this);
 		return NULL;
 	}
 
-	//Init road point map (pointer to neighbor points)
-	road_t* roadPointWritePtr = this->roadPoint;
-	for (size_t i = area; i; i--) {
-		uint32_t neighborIndex[2];
-		if(!fread(&neighborIndex, 1, sizeof(neighborIndex), fp)) {
-			compare_destroy(this);
-			return NULL;
-		}
-		*(roadPointWritePtr++) = (road_t){
-			.neighborStart = &this->neighborMap[ neighborIndex[0] ],
-			.neighborEnd = &this->neighborMap[ neighborIndex[0] + neighborIndex[1] ]
-		};
-	}
-
-	//Load neighbor map
-	if (fread(this->neighborMap, sizeof(*this->neighborMap), neighborCount, fp) != neighborCount) {
-		compare_destroy(this);
-		return NULL;
-	}
-
-	fclose(fp);
 	return this;
 }
 
@@ -95,13 +48,15 @@ void compare_process(Compare this, uint8_t* dest, uint8_t* src) {
 	size_t area = this->size.height * this->size.width;
 	memset(dest, 0, area * sizeof(*dest));
 
-	for (size_t i = area; i; i--) {
-		if (!src[i])
+	for (size_t i = 0; i < area; i++) {
+		if (!this->roadPoint[i].neighborStart)
 			continue;
-		if (this->previousFrame[i])
+		if (src[i] < LUMA_THRESHOLD)
 			continue;
-//		if (src[i] - this->previousFrame[i] < LUMA_THRESHOLD)
-//			continue;
+		if (this->previousFrame[i] > LUMA_THRESHOLD)
+			continue;
+		if (src[i] - this->previousFrame[i] < LUMA_THRESHOLD)
+			continue;
 
 		for (neighbor_t* x = this->roadPoint[i].neighborStart; x < this->roadPoint[i].neighborEnd; x++) {
 			if (this->previousFrame[ x->pos ]) {
@@ -118,8 +73,10 @@ void compare_destroy(Compare this) {
 	if (!this)
 		return;
 	
+#ifdef VERBOSE
+	fputs("Destroy compare class object\n", stdout);
+	fflush(stdout);
+#endif
 	free(this->previousFrame);
-	free(this->roadPoint);
-	free(this->neighborMap);
 	free(this);
 }
