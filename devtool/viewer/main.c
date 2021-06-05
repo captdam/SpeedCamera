@@ -4,11 +4,12 @@
 #include <string.h>
 #include <math.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include <GL/glew.h>
 #include <GL/glfw3.h>
 
-const char* vs = "#version 330 core\n\
+const char* vs = "#version 310 es\n\
 \n\
 layout (location = 0) in vec4 position;\n\
 \n\
@@ -19,7 +20,8 @@ void main() {\n\
 	textpos = vec2(position.z, position.w);\n\
 }\n\
 ";
-const char* fs = "#version 330 core\n\
+const char* fs = "#version 310 es\n\
+precision mediump float;\n\
 \n\
 in vec2 textpos;\n\
 \n\
@@ -49,7 +51,7 @@ int main(int argc, char* argv[]) {
 
 	FILE* fp = fopen(inputFileName, "rb");
 	if (!fp) {
-		fputs("Cannot open input file.\n", stderr);
+		fprintf(stderr, "Cannot open input file (%d).\n", errno);
 		return EXIT_FAILURE;
 	}
 	vh_t header;
@@ -80,10 +82,12 @@ int main(int argc, char* argv[]) {
 		free(bitmap);
 		return EXIT_FAILURE;
 	}
+	glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-	glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
+	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+//	glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
 	
 	GLFWwindow* window = glfwCreateWindow(width, height, "Viewer", NULL, NULL);
 	if (!window){
@@ -123,9 +127,6 @@ int main(int argc, char* argv[]) {
 	}
 	glDebugMessageCallback(glErrorCallback, 0);
 
-	glViewport(0, 0, width, height); //glfwSetWindowSize at graph_frame 1 will trigger windowResize event which calls this
-//	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-
 	GLuint shaderV, shaderF, shader;
 	GLint shaderCompileStatus;
 	shaderV = glCreateShader(GL_VERTEX_SHADER);
@@ -133,7 +134,9 @@ int main(int argc, char* argv[]) {
 	glCompileShader(shaderV);
 	glGetShaderiv(shaderV, GL_COMPILE_STATUS, &shaderCompileStatus);
 	if (!shaderCompileStatus) {
-		fputs("GL vertex shader error.\n", stderr);
+		char compileMsg[500];
+		glGetShaderInfoLog(shaderV, 500, NULL, compileMsg);
+		fprintf(stderr, "GL vertex shader error: %s\n", compileMsg);
 		fclose(fp);
 		free(bitmap);
 		glfwTerminate();
@@ -144,7 +147,9 @@ int main(int argc, char* argv[]) {
 	glCompileShader(shaderF);
 	glGetShaderiv(shaderF, GL_COMPILE_STATUS, &shaderCompileStatus);
 	if (!shaderCompileStatus) {
-		fputs("GL fragment shader error.\n", stderr);
+		char compileMsg[500];
+		glGetShaderInfoLog(shaderF, 500, NULL, compileMsg);
+		fprintf(stderr, "GL fragment shader error: %s\n", compileMsg);
 		fclose(fp);
 		free(bitmap);
 		glfwTerminate();
@@ -155,6 +160,7 @@ int main(int argc, char* argv[]) {
 	glAttachShader(shader, shaderF);
 	glLinkProgram(shader);
 	glGetShaderiv(shader, GL_LINK_STATUS, &shaderCompileStatus);
+	fprintf(stderr, "Shader P - LinkStatus - %d\n", glGetError());
 	if (!shaderCompileStatus) {
 		fputs("GL shader link error.\n", stderr);
 		fclose(fp);
@@ -187,17 +193,27 @@ int main(int argc, char* argv[]) {
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindVertexArray(0);
 
+	glUseProgram(shader);
 	GLuint glBitmap;
 	glGenTextures(1, &glBitmap);
 	glBindTexture(GL_TEXTURE_2D, glBitmap);
+//	glUniform1i(glGetUniformLocation(shader, "bitmap"), 0); //Uniform 0
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST); //Window is not resizeable
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RED, GL_UNSIGNED_BYTE, bitmap);
+	if (colorScheme == 1)
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, bitmap);
+	else if (colorScheme == 3)
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, bitmap);
+	else
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, bitmap);
 	glGenerateMipmap(GL_TEXTURE_2D);
 	glBindTexture(GL_TEXTURE_2D, 0);
+
+	glViewport(0, 0, width, height);
+//	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
 	size_t frame = 0;
 	double lastFrameTime = 0;
@@ -241,17 +257,20 @@ int main(int argc, char* argv[]) {
 		}
 
 		glUseProgram(shader);
+
+		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, glBitmap);
+
 		if (colorScheme == 1)
 			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_LUMINANCE, GL_UNSIGNED_BYTE, bitmap);
 		else if (colorScheme == 3)
 			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, bitmap);
 		else
 			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, bitmap);
+		
 		glGenerateMipmap(GL_TEXTURE_2D);
 		glBindVertexArray(vao);
 		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-
 		glBindVertexArray(0);
 		glBindTexture(GL_TEXTURE_2D, 0);
 
