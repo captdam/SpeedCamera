@@ -32,24 +32,26 @@ void gl_glfwErrorCallback(int code, const char* desc);
 void GLAPIENTRY gl_glErrorCallback(GLenum src, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar* message, const void* userParam);
 
 GL gl_init(size2d_t frameSize, unsigned int windowRatio) {
-#ifdef VERBOSE
-	fputs("Init GL class object\n", stdout);
-	fflush(stdout);
-#endif
+	#ifdef VERBOSE
+		fputs("Init GL class object\n", stdout);
+		fflush(stdout);
+	#endif
 
 	GL this = malloc(sizeof(struct GL_ClassDataStructure));
 	if (!this) {
-#ifdef VERBOSE
-		fputs("\tFail to create gl class object data structure\n", stderr);
-#endif
+		#ifdef VERBOSE
+				fputs("\tFail to create gl class object data structure\n", stderr);
+		#endif
+
 		return NULL;
 	}
 	this->window = NULL;
 
 	if (!glfwInit()) {
-#ifdef VERBOSE
-		fputs("\tFail to init GLFW\n", stderr);
-#endif
+		#ifdef VERBOSE
+				fputs("\tFail to init GLFW\n", stderr);
+		#endif
+
 		gl_destroy(this);
 		return NULL;
 	}
@@ -62,9 +64,10 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio) {
 //	glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
 	this->window = glfwCreateWindow(frameSize.width / windowRatio, frameSize.height / windowRatio, "Viewer", NULL, NULL);
 	if (!this->window){
-#ifdef VERBOSE
-		fputs("\tFail to open window\n", stderr);
-#endif
+		#ifdef VERBOSE
+				fputs("\tFail to open window\n", stderr);
+		#endif
+
 		gl_destroy(this);
 		return NULL;
 	}
@@ -72,9 +75,10 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio) {
 
 	GLenum glewInitError = glewInit();
 	if (glewInitError != GLEW_OK) {
-#ifdef VERBOSE
-		fprintf(stderr, "\tFail init GLEW: %s\n", glewGetErrorString(glewInitError));
-#endif
+		#ifdef VERBOSE
+				fprintf(stderr, "\tFail init GLEW: %s\n", glewGetErrorString(glewInitError));
+		#endif
+
 		gl_destroy(this);
 		return NULL;
 	}
@@ -93,17 +97,15 @@ GLFWwindow* gl_getWindow(GL this) {
 	return this->window;
 }
 
-void gl_drawStart(GL this) {
+size2d_t gl_drawStart(GL this) {
 	clock_gettime(CLOCK_REALTIME_COARSE, &this->renderLoopStartTime);
-
-	glfwPollEvents();
 
 	int width, height;
 	glfwGetWindowSize(this->window, &width, &height);
-	glViewport(0, 0, width, height);
 
-	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-	glClear(GL_COLOR_BUFFER_BIT);
+	glfwPollEvents();
+
+	return (size2d_t){.width = width, .height = height};
 }
 
 uint64_t gl_drawEnd(GL this, const char* title) {
@@ -130,10 +132,11 @@ void gl_destroy(GL this) {
 	if (!this)
 		return;
 
-#ifdef VERBOSE
-	fputs("Destroy GL class object\n", stdout);
-	fflush(stdout);
-#endif
+	#ifdef VERBOSE
+		fputs("Destroy GL class object\n", stdout);
+		fflush(stdout);
+	#endif
+
 	if (this->window) glfwTerminate();
 	free(this);
 }
@@ -144,10 +147,10 @@ void gl_destroy(GL this) {
 char* gl_loadFileToMemory(const char* filename, long int* length);
 
 gl_obj gl_loadShader(const char* shaderVertexFile, const char* shaderFragmentFile) {
-#ifdef VERBOSE
-	fprintf(stdout, "Load shader: V=%s F=%s\n", shaderVertexFile, shaderFragmentFile);
-	fflush(stdout);
-#endif
+	#ifdef VERBOSE
+		fprintf(stdout, "Load shader: V=%s F=%s\n", shaderVertexFile, shaderFragmentFile);
+		fflush(stdout);
+	#endif
 
 	GLuint shaderV = 0, shaderF = 0, shader = 0;
 	char* shaderSrc = NULL;
@@ -158,14 +161,15 @@ gl_obj gl_loadShader(const char* shaderVertexFile, const char* shaderFragmentFil
 
 	shaderSrc = gl_loadFileToMemory(shaderVertexFile, &length);
 	if (!shaderSrc) {
-#ifdef VERBOSE
-		if (length == 0)
-			fprintf(stderr, "\tFail to open vertex shader file: %s (errno = %d)\n", shaderVertexFile, errno);
-		else if (length < 0)
-			fprintf(stderr, "\tFail to get vertex shader length: %s (errno = %d)\n", shaderVertexFile, errno);
-		else
-			fputs("\tCannot allocate buffer for vertex shader code\n", stderr);
-#endif
+		#ifdef VERBOSE
+			if (length == 0)
+				fprintf(stderr, "\tFail to open vertex shader file: %s (errno = %d)\n", shaderVertexFile, errno);
+			else if (length < 0)
+				fprintf(stderr, "\tFail to get vertex shader length: %s (errno = %d)\n", shaderVertexFile, errno);
+			else
+				fputs("\tCannot allocate buffer for vertex shader code\n", stderr);
+		#endif
+
 		goto gl_loadShader_error;
 	}
 
@@ -174,11 +178,12 @@ gl_obj gl_loadShader(const char* shaderVertexFile, const char* shaderFragmentFil
 	glCompileShader(shaderV);
 	glGetShaderiv(shaderV, GL_COMPILE_STATUS, &shaderCompileStatus);
 	if (!shaderCompileStatus) {
-#ifdef VERBOSE
-		char compileMsg[255];
-		glGetShaderInfoLog(shaderV, 255, NULL, compileMsg);
-		fprintf(stderr, "\tGL vertex shader error: %s\n", compileMsg);
-#endif
+		#ifdef VERBOSE
+			char compileMsg[255];
+			glGetShaderInfoLog(shaderV, 255, NULL, compileMsg);
+			fprintf(stderr, "\tGL vertex shader error: %s\n", compileMsg);
+		#endif
+
 		goto gl_loadShader_error;
 	}
 	free(shaderSrc);
@@ -187,14 +192,15 @@ gl_obj gl_loadShader(const char* shaderVertexFile, const char* shaderFragmentFil
 
 	shaderSrc = gl_loadFileToMemory(shaderFragmentFile, &length);
 	if (!shaderSrc) {
-#ifdef VERBOSE
-		if (length == 0)
-			fprintf(stderr, "\tFail to open fragment shader file: %s (errno = %d)\n", shaderFragmentFile, errno);
-		else if (length < 0)
-			fprintf(stderr, "\tFail to get fragment shader length: %s (errno = %d)\n", shaderFragmentFile, errno);
-		else
-			fputs("\tCannot allocate buffer for fragment shader code\n", stderr);
-#endif
+		#ifdef VERBOSE
+			if (length == 0)
+				fprintf(stderr, "\tFail to open fragment shader file: %s (errno = %d)\n", shaderFragmentFile, errno);
+			else if (length < 0)
+				fprintf(stderr, "\tFail to get fragment shader length: %s (errno = %d)\n", shaderFragmentFile, errno);
+			else
+				fputs("\tCannot allocate buffer for fragment shader code\n", stderr);
+		#endif
+
 		goto gl_loadShader_error;
 	}
 
@@ -203,11 +209,12 @@ gl_obj gl_loadShader(const char* shaderVertexFile, const char* shaderFragmentFil
 	glCompileShader(shaderF);
 	glGetShaderiv(shaderF, GL_COMPILE_STATUS, &shaderCompileStatus);
 	if (!shaderCompileStatus) {
-#ifdef VERBOSE
-		char compileMsg[255];
-		glGetShaderInfoLog(shaderV, 255, NULL, compileMsg);
-		fprintf(stderr, "\tGL fragment shader error: %s\n", compileMsg);
-#endif
+		#ifdef VERBOSE
+			char compileMsg[255];
+			glGetShaderInfoLog(shaderV, 255, NULL, compileMsg);
+			fprintf(stderr, "\tGL fragment shader error: %s\n", compileMsg);
+		#endif
+
 		goto gl_loadShader_error;
 	}
 	free(shaderSrc);
@@ -220,11 +227,12 @@ gl_obj gl_loadShader(const char* shaderVertexFile, const char* shaderFragmentFil
 	glLinkProgram(shader);
 	glGetShaderiv(shader, GL_LINK_STATUS, &shaderCompileStatus);
 	if (!shaderCompileStatus) {
-#ifdef VERBOSE
-		char compileMsg[255];
-		glGetShaderInfoLog(shader, 255, NULL, compileMsg);
-		fprintf(stderr, "\tGL shader link error: %s\n", compileMsg);
-#endif
+		#ifdef VERBOSE
+			char compileMsg[255];
+			glGetShaderInfoLog(shader, 255, NULL, compileMsg);
+			fprintf(stderr, "\tGL shader link error: %s\n", compileMsg);
+		#endif
+		
 		goto gl_loadShader_error;
 	}
 
@@ -240,12 +248,13 @@ gl_obj gl_loadShader(const char* shaderVertexFile, const char* shaderFragmentFil
 	return 0;
 }
 
-void gl_useProgram(gl_obj shader) {
-	glUseProgram(shader);
+void gl_useShader(gl_obj* shader) {
+	glUseProgram(*shader);
 }
 
-void gl_unloadShader(gl_obj shader) {
-	glDeleteProgram(shader);
+void gl_unloadShader(gl_obj* shader) {
+	glDeleteProgram(*shader);
+	*shader = 0;
 }
 
 gl_mesh gl_createMesh(size2d_t vertexSize, size_t indexCount, gl_index_t* elementsSize, gl_vertex_t* vertices, gl_index_t* indices) {
@@ -279,16 +288,19 @@ gl_mesh gl_createMesh(size2d_t vertexSize, size_t indexCount, gl_index_t* elemen
 	};
 }
 
-void gl_drawMesh(gl_mesh mesh) {
-	glBindVertexArray(mesh.vao);
-	glDrawElements(GL_TRIANGLES, mesh.drawSize, GL_UNSIGNED_INT, 0);
+void gl_drawMesh(gl_mesh* mesh) {
+	glBindVertexArray(mesh->vao);
+	glDrawElements(GL_TRIANGLES, mesh->drawSize, GL_UNSIGNED_INT, 0);
 	glBindVertexArray(0);
 }
 
-void gl_deleteMesh(gl_mesh mesh) {
-	glDeleteVertexArrays(1, &mesh.vao);
-	glDeleteBuffers(1, &mesh.vbo);
-	glDeleteBuffers(1, &mesh.ebo);
+void gl_deleteMesh(gl_mesh* mesh) {
+	glDeleteVertexArrays(1, &mesh->vao);
+	glDeleteBuffers(1, &mesh->vbo);
+	glDeleteBuffers(1, &mesh->ebo);
+	mesh->vao = 0;
+	mesh->vbo = 0;
+	mesh->ebo = 0;
 }
 
 gl_obj gl_createTexture(vh_t info, void* data) {
@@ -316,8 +328,8 @@ gl_obj gl_createTexture(vh_t info, void* data) {
 	return glBitmap;
 }
 
-void gl_updateTexture(gl_obj texture, vh_t info, void* data) {
-	glBindTexture(GL_TEXTURE_2D, texture);
+void gl_updateTexture(gl_obj* texture, vh_t info, void* data) {
+	glBindTexture(GL_TEXTURE_2D, *texture);
 
 	if (info.colorScheme == 1)
 		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, info.width, info.height, GL_LUMINANCE, GL_UNSIGNED_BYTE, data);
@@ -330,16 +342,55 @@ void gl_updateTexture(gl_obj texture, vh_t info, void* data) {
 	glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-void gl_bindTexture(gl_obj texture, unsigned int unit) {
+void gl_bindTexture(gl_obj* texture, unsigned int unit) {
 	glActiveTexture(GL_TEXTURE0 + unit);
-	glBindTexture(GL_TEXTURE_2D, texture);
+	glBindTexture(GL_TEXTURE_2D, *texture);
 }
 
-void gl_deleteTexture(gl_obj texture) {
-	glDeleteTextures(1, &texture);
+void gl_deleteTexture(gl_obj* texture) {
+	glDeleteTextures(1, texture);
 }
 
-/* Private functions */
+gl_fb gl_createFrameBuffer(vh_t info) {
+	GLuint frameBuffer;
+	glGenFramebuffers(1, &frameBuffer);
+	glBindFramebuffer(GL_FRAMEBUFFER, frameBuffer);
+
+	GLuint textureBuffer;
+	glGenTextures(1, &textureBuffer);
+	glBindTexture(GL_TEXTURE_2D, textureBuffer);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, info.width, info.height, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textureBuffer, 0);
+
+	return (gl_fb){
+		.frame = frameBuffer,
+		.texture = textureBuffer
+	};
+}
+
+void gl_bindFrameBuffer(gl_fb* this, size2d_t size, int clear) {
+	glBindFramebuffer(GL_FRAMEBUFFER, this->frame);
+
+	if (size.height != 0 && size.width != 0) {
+		glViewport(0, 0, size.width, size.height);
+	}
+
+	if (clear) {
+		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+		glClear(GL_COLOR_BUFFER_BIT);
+	}
+}
+
+void gl_deleteFrameBuffer(gl_fb* this) {
+	glDeleteTextures(1, &this->texture);
+	glDeleteFramebuffers(1, &this->frame);
+	*this = (gl_fb){0, 0};
+}
+
+/* == Private functions ===================================================================== */
 
 void gl_windowCloseCallback(GLFWwindow* window) {
 	fputs("Window close event fired.\n", stdout);

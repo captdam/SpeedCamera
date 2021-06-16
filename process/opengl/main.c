@@ -7,61 +7,49 @@
 #include <errno.h>
 
 #include "common.h"
-#include "gl.h" 
+#include "gl.h"
+
+#include "source.h"
 
 #define WINDOW_RATIO 1
 
+#define DEBUG_STAGE 1
+#define DEBUG_FILE_DIR "./debugspace/debug.data"
+
 int main(int argc, char* argv[]) {
-	if (argc < 2) {
-		fputs("Bad command, use: ./this inputFileName", stderr);
-		return EXIT_FAILURE;
+	int status = EXIT_FAILURE;
+	size_t frameCount = 0;
+	vh_t videoInfo;
+	size2d_t size;
+
+	Source source = NULL;
+	GL gl = NULL;
+
+	gl_obj shaderDirectRender = 0;
+	gl_mesh meshStdRect = {0, 0, 0, 0};
+	gl_obj texture = 0;
+
+	source = source_init(argv[1], &videoInfo);
+	if (!source) {
+		fputs("Fail to init source input.\n", stderr);
+		goto label_exit;
 	}
-	const char* inputFileName = argv[1];
-
-	FILE* fp = fopen(inputFileName, "rb");
-	if (!fp) {
-		fprintf(stderr, "Cannot open input file (%d).\n", errno);
-		return EXIT_FAILURE;
+	if (videoInfo.colorScheme != 1 && videoInfo.colorScheme != 3 && videoInfo.colorScheme != 4) {
+		fprintf(stderr, "Bad color scheme, support 1, 3 and 4 only, got %"PRIu16".\n", videoInfo.colorScheme);
+		goto label_exit;
 	}
-	vh_t header;
-	int iDontCareYourResult = fread(&header, 1, sizeof(header), fp);
-	const size_t width = header.width;
-	const size_t height = header.height;
-	const size_t fps = header.fps;
-	const size_t colorScheme = header.colorScheme;
-//	const size_t width = 1920;
-//	const size_t height = 1080;
-//	const size_t fps = 30;
-//	const size_t colorScheme = 4;
+	size = (size2d_t){.width=videoInfo.width, .height=videoInfo.height};
 
-	const char* colorSchemeDesc[] = {"Mono/Gray","","RGB","RGBA"};
-	if (colorScheme != 1 && colorScheme != 3 && colorScheme != 4) {
-		fputs("Bad file header: bad color scheme", stderr);
-		return EXIT_FAILURE;
-	}
-
-	fprintf(stdout, "Read bitmap from '%s', resolution = %zu * %zu %s, FPS = %zu\n", inputFileName, width, height, colorSchemeDesc[colorScheme-1], fps);
-
-	uint8_t* bitmap = malloc(width * height * colorScheme);
-	if (!bitmap) {
-		fputs("Cannot allocate memory for bitmap buffer.\n", stderr);
-		fclose(fp);
-		return EXIT_FAILURE;
-	}
-
-	GL gl = gl_init((size2d_t){.width=width, .height=height}, WINDOW_RATIO);
+	gl = gl_init(size, WINDOW_RATIO);
 	if (!gl) {
 		fputs("Cannot init OpenGL.\n", stderr);
-		fclose(fp);
-		return EXIT_FAILURE;
+		goto label_exit;
 	}
 
-	gl_obj shader = gl_loadShader("reg_2d.glsl", "1.fs.glsl");
-	if (!shader) {
+	shaderDirectRender = gl_loadShader("shader/stdRect.vs.glsl", "shader/directRender.fs.glsl");
+	if (!shaderDirectRender) {
 		fputs("Cannot load program.\n", stderr);
-		fclose(fp);
-		gl_destroy(gl);
-		return EXIT_FAILURE;
+		goto label_exit;
 	}
 
 	gl_vertex_t vertices[] = {
@@ -72,38 +60,41 @@ int main(int argc, char* argv[]) {
 	};
 	gl_index_t attributes[] = {4};
 	gl_index_t indices[] = {0, 3, 2, 0, 2, 1};
-	gl_mesh mesh = gl_createMesh((size2d_t){.height=4, .width=4}, 6, attributes, vertices, indices);
+	meshStdRect = gl_createMesh((size2d_t){.height=4, .width=4}, 6, attributes, vertices, indices);
 
-	gl_obj texture = gl_createTexture(header, bitmap);
+	texture = gl_createTexture(videoInfo, NULL);
 
 
-	size_t frame = 0;
+	gl_fb defaultFrame = {.frame = 0, .texture = 0};
 	double lastFrameTime = 0;
 	while(!gl_close(gl, -1)) {
-		if (!fread(bitmap, 1, width * height * colorScheme, fp))
+		if (!source_read(source, texture))
 			gl_close(gl, 1);
+		size2d_t windowSize = gl_drawStart(gl);
 
-		gl_drawStart(gl);
+		gl_bindFrameBuffer(&defaultFrame, windowSize, 0);
 
-		gl_updateTexture(texture, header, bitmap);
-
-		gl_useProgram(shader);
-		gl_bindTexture(texture, 0);
-		gl_drawMesh(mesh);
+		gl_useShader(&shaderDirectRender);
+		gl_bindTexture(&texture, 0);
+		gl_drawMesh(&meshStdRect);
 
 		char title[60];
-		sprintf(title, "Viewer - frame %zu", frame++);
+		sprintf(title, "Viewer - frame %zu", frameCount++);
 		gl_drawEnd(gl, title);
 	}
 
-	gl_deleteMesh(mesh);
-	gl_deleteTexture(texture);
-	gl_unloadShader(shader);
 
-	fclose(fp);
-	free(bitmap);
 
+
+	status = EXIT_SUCCESS;
+label_exit:
+	gl_deleteTexture(&texture);
+	gl_deleteMesh(&meshStdRect);
+	gl_unloadShader(&shaderDirectRender);
+
+	gl_close(gl, 1);
 	gl_destroy(gl);
-	fprintf(stdout, "%zu frames displayed.\n\n", frame);
+	source_destroy(source);
+	fprintf(stdout, "%zu frames displayed.\n\n", frameCount);
 	return EXIT_SUCCESS;
 }
