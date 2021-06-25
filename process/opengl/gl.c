@@ -18,6 +18,8 @@
 struct GL_ClassDataStructure {
 	GLFWwindow* window;
 	struct timespec renderLoopStartTime;
+	gl_mesh windowDefaultBufferMesh;
+	gl_obj windowDefaultBufferProgram;
 };
 
 /* == Window management and driver init == [Object] ========================================= */
@@ -90,6 +92,44 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio) {
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 //	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
+	gl_vertex_t vertices[] = {
+		+1.0f, +1.0f, 1.0f, 0.0f,
+		+1.0f, -1.0f, 1.0f, 1.0f,
+		-1.0f, -1.0f, 0.0f, 1.0f,
+		-1.0f, +1.0f, 0.0f, 0.0f
+	};
+	gl_index_t attributes[] = {4};
+	gl_index_t indices[] = {0, 3, 2, 0, 2, 1};
+	this->windowDefaultBufferMesh = gl_createMesh((size2d_t){.height=4, .width=4}, 6, attributes, vertices, indices);
+
+	const char* vs = "#version 310 es\n" /* Tested, so we do not need to check the compile status */
+	"layout (location = 0) in vec4 position;\n"
+	"out vec2 textpos;\n"
+	"void main() {\n"
+	"	gl_Position = vec4(position.x, position.y, 0.0f, 1.0f);\n"
+	"	textpos = vec2(position.z, position.w);\n"
+	"}\n";
+	const char* fs = "#version 310 es\n"
+	"precision mediump float;\n"
+	"in vec2 textpos;\n"
+	"uniform sampler2D bitmap;\n"
+	"out vec4 color;\n"
+	"void main() {\n"
+	"	color = texture(bitmap, textpos);\n"
+	"}\n";
+	GLuint shaderV = glCreateShader(GL_VERTEX_SHADER);
+	glShaderSource(shaderV, 1, (const GLchar * const*)&vs, NULL);
+	glCompileShader(shaderV);
+	GLuint shaderF = glCreateShader(GL_FRAGMENT_SHADER);
+	glShaderSource(shaderF, 1, (const GLchar * const*)&fs, NULL);
+	glCompileShader(shaderF);
+	this->windowDefaultBufferProgram = glCreateProgram();
+	glAttachShader(this->windowDefaultBufferProgram, shaderV);
+	glAttachShader(this->windowDefaultBufferProgram, shaderF);
+	glLinkProgram(this->windowDefaultBufferProgram);
+	glDeleteShader(shaderV);
+	glDeleteShader(shaderF);
+
 	return this;
 }
 
@@ -106,6 +146,18 @@ size2d_t gl_drawStart(GL this) {
 	glfwPollEvents();
 
 	return (size2d_t){.width = width, .height = height};
+}
+
+void gl_drawWindow(GL this, gl_obj* texture) {
+	int width, height;
+	glfwGetWindowSize(this->window, &width, &height);
+
+	gl_fb defaultFrame = {.frame = 0, .texture = 0};
+	gl_bindFrameBuffer(&defaultFrame, (size2d_t){.width=width, .height=height}, 0);
+
+	gl_useShader(&this->windowDefaultBufferProgram);
+	gl_bindTexture(texture, 0);
+	gl_drawMesh(&this->windowDefaultBufferMesh);
 }
 
 uint64_t gl_drawEnd(GL this, const char* title) {
@@ -137,6 +189,8 @@ void gl_destroy(GL this) {
 		fflush(stdout);
 	#endif
 
+	gl_unloadShader(&this->windowDefaultBufferProgram);
+	gl_deleteMesh(&this->windowDefaultBufferMesh);
 	if (this->window) glfwTerminate();
 	free(this);
 }
@@ -146,7 +200,7 @@ void gl_destroy(GL this) {
 /* Load a shader from file to memory, use free() to free the memory when no longer need */
 char* gl_loadFileToMemory(const char* filename, long int* length);
 
-gl_obj gl_loadShader(const char* shaderVertexFile, const char* shaderFragmentFile) {
+gl_obj gl_loadShader(const char* shaderVertexFile, const char* shaderFragmentFile, const char* paramName[], gl_param* paramId, const size_t paramCount) {
 	#ifdef VERBOSE
 		fprintf(stdout, "Load shader: V=%s F=%s\n", shaderVertexFile, shaderFragmentFile);
 		fflush(stdout);
@@ -211,7 +265,7 @@ gl_obj gl_loadShader(const char* shaderVertexFile, const char* shaderFragmentFil
 	if (!shaderCompileStatus) {
 		#ifdef VERBOSE
 			char compileMsg[255];
-			glGetShaderInfoLog(shaderV, 255, NULL, compileMsg);
+			glGetShaderInfoLog(shaderF, 255, NULL, compileMsg);
 			fprintf(stderr, "\tGL fragment shader error: %s\n", compileMsg);
 		#endif
 
@@ -221,7 +275,7 @@ gl_obj gl_loadShader(const char* shaderVertexFile, const char* shaderFragmentFil
 
 	/* Link program */
 
-	shader = glCreateProgram(); //Non-sero
+	shader = glCreateProgram(); //Non-zero
 	glAttachShader(shader, shaderV);
 	glAttachShader(shader, shaderF);
 	glLinkProgram(shader);
@@ -234,6 +288,16 @@ gl_obj gl_loadShader(const char* shaderVertexFile, const char* shaderFragmentFil
 		#endif
 		
 		goto gl_loadShader_error;
+	}
+
+	for (size_t i = paramCount; i; i--) {
+		*paramId = glGetUniformLocation(shader, *paramName);
+		#ifdef VERBOSE
+			fprintf(stdout, "\tParam '%s' location: %d\n", *paramName, *paramId);
+			fflush(stdout);
+		#endif
+		paramId++;
+		paramName++;
 	}
 
 	glDeleteShader(shaderV); //Flag set, will be automatically delete when program deleted.
@@ -250,6 +314,43 @@ gl_obj gl_loadShader(const char* shaderVertexFile, const char* shaderFragmentFil
 
 void gl_useShader(gl_obj* shader) {
 	glUseProgram(*shader);
+}
+
+void gl_setShaderParam_internal(gl_param paramId, uint8_t length, gl_datatype type, void* data) {
+	if (type == gl_type_int) {
+		int* d = data;
+		if (length == 1)
+			glUniform1i(paramId, *d);
+		else if (length == 2)
+			glUniform2i(paramId, d[0], d[1]);
+		else if (length == 3)
+			glUniform3i(paramId, d[0], d[1], d[2]);
+		else
+			glUniform4i(paramId, d[0], d[1], d[2], d[3]);
+	}
+	else if (type == gl_type_uint) {
+		unsigned int* d = data;
+		if (length == 1)
+			glUniform1ui(paramId, *d);
+		else if (length == 2)
+			glUniform2ui(paramId, d[0], d[1]);
+		else if (length == 3)
+			glUniform3ui(paramId, d[0], d[1], d[2]);
+		else
+			glUniform4ui(paramId, d[0], d[1], d[2], d[3]);
+
+	}
+	else {
+		float* d = data;
+		if (length == 1)
+			glUniform1f(paramId, *d);
+		else if (length == 2)
+			glUniform2f(paramId, d[0], d[1]);
+		else if (length == 3)
+			glUniform3f(paramId, d[0], d[1], d[2]);
+		else
+			glUniform4f(paramId, d[0], d[1], d[2], d[3]);
+	}
 }
 
 void gl_unloadShader(gl_obj* shader) {
@@ -427,6 +528,7 @@ char* gl_loadFileToMemory(const char* filename, long int* length) {
 	}
 
 	int whatever = fread(content, 1, *length, fp);
+	content[*length - 1] = '\0'; //Change the empty new line to null terminator
 	fclose(fp);
 	return content;
 }
