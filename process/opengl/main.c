@@ -27,7 +27,8 @@ int main(int argc, char* argv[]) {
 	GL gl = NULL;
 	gl_obj texture_orginalFrame = 0;
 
-	gl_fb framebuffer_stage1 = {0, 0};
+	gl_fb framebuffer_stageA = {0, 0};
+	gl_fb framebuffer_stageB = {0, 0};
 
 	gl_obj shader_filter3 = 0;
 
@@ -56,24 +57,24 @@ int main(int argc, char* argv[]) {
 	texture_orginalFrame = gl_createTexture(videoInfo, NULL);
 
 	/* Drawing on frame buffer to process data */
-	framebuffer_stage1 = gl_createFrameBuffer(videoInfo);
+	framebuffer_stageA = gl_createFrameBuffer(videoInfo);
+	framebuffer_stageB = gl_createFrameBuffer(videoInfo);
 
 	/* Process - Kernel filter 3x3 */
-	const char* shader_filter3_paramName[] = {"width", "maskTop", "maskMiddle", "maskBottom"};
+	const char* shader_filter3_paramName[] = {"size", "maskTop", "maskMiddle", "maskBottom"};
 	gl_param shader_filter3_paramId[4];
 	shader_filter3 = gl_loadShader("shader/stdRect.vs.glsl", "shader/filter3.fs.glsl", shader_filter3_paramName, shader_filter3_paramId, 4);
 	if (!shader_filter3) {
 		fputs("Cannot load program.\n", stderr);
 		goto label_exit;
 	}
-	gl_param shader_filter3_paramWidth = shader_filter3_paramId[0];
+	gl_param shader_filter3_paramSize = shader_filter3_paramId[0];
 	gl_param shader_filter3_paramMaskTop = shader_filter3_paramId[1];
 	gl_param shader_filter3_paramMaskMiddle = shader_filter3_paramId[2];
 	gl_param shader_filter3_paramMaskBottom = shader_filter3_paramId[3];
 	gl_useShader(&shader_filter3);
-	unsigned int width = size.width; //Cast to unsigned int first, size is of size_t
-	gl_setShaderParam(shader_filter3_paramWidth, 1, gl_type_uint, &width);
-
+	unsigned int shader_filter3_paramSize_v[] = {size.width, size.height}; //Cast to unsigned int first, size is of size_t
+	gl_setShaderParam(shader_filter3_paramSize, 2, gl_type_uint, shader_filter3_paramSize_v); //Size of frame will not change
 
 	/* Drawing mash (simple rect) */
 	gl_vertex_t vertices[] = {
@@ -86,6 +87,15 @@ int main(int argc, char* argv[]) {
 	gl_index_t indices[] = {0, 3, 2, 0, 2, 1};
 	mesh_StdRect = gl_createMesh((size2d_t){.height=4, .width=4}, 6, attributes, vertices, indices);
 
+	/* Some extra code for development */
+	gl_fb* frameBuffer_old = &framebuffer_stageA; //Double buffer in workspace, one as old, one as new
+	gl_fb* frameBuffer_new = &framebuffer_stageB; //Swap the old and new after each stage using the function below
+	void swapFrameBuffer() { /* GCC OK */
+		gl_fb* temp = frameBuffer_old;
+		frameBuffer_old = frameBuffer_new;
+		frameBuffer_new = temp;
+	}
+
 	/* Main process loop here */
 	double lastFrameTime = 0;
 	while(!gl_close(gl, -1)) {
@@ -93,13 +103,35 @@ int main(int argc, char* argv[]) {
 			gl_close(gl, 1);
 		size2d_t windowSize = gl_drawStart(gl);
 
-		gl_bindFrameBuffer(&framebuffer_stage1, (size2d_t){0,0}, 0);
-
+		gl_bindFrameBuffer(frameBuffer_new, size, 0); //Use video full-resolution for render
 		gl_useShader(&shader_filter3);
+		const float gussianMask[] = {
+			1.0f/16,	2.0f/16,	1.0f/16,
+			2.0f/16,	4.0f/16,	2.0f/16,
+			1.0f/16,	2.0f/16,	1.0f/16
+		};
+		gl_setShaderParam(shader_filter3_paramMaskTop, 3, gl_type_float, &(gussianMask[0]));
+		gl_setShaderParam(shader_filter3_paramMaskMiddle, 3, gl_type_float, &(gussianMask[3]));
+		gl_setShaderParam(shader_filter3_paramMaskBottom, 3, gl_type_float, &(gussianMask[6]));
 		gl_bindTexture(&texture_orginalFrame, 0);
 		gl_drawMesh(&mesh_StdRect);
+		swapFrameBuffer();
 
-		gl_drawWindow(gl, &framebuffer_stage1.texture);
+		gl_bindFrameBuffer(frameBuffer_new, size, 0);
+		gl_useShader(&shader_filter3);
+		const float edgeMask[] = {
+			1.0f,	1.0f,	1.0f,
+			1.0f,	-8.0f,	1.0f,
+			1.0f,	1.0f,	1.0f
+		};
+		gl_setShaderParam(shader_filter3_paramMaskTop, 3, gl_type_float, &(edgeMask[0]));
+		gl_setShaderParam(shader_filter3_paramMaskMiddle, 3, gl_type_float, &(edgeMask[3]));
+		gl_setShaderParam(shader_filter3_paramMaskBottom, 3, gl_type_float, &(edgeMask[6]));
+		gl_bindTexture(&frameBuffer_old->texture, 0);
+		gl_drawMesh(&mesh_StdRect);
+		swapFrameBuffer();
+
+		gl_drawWindow(gl, &frameBuffer_old->texture);
 
 		char title[60];
 		sprintf(title, "Viewer - frame %zu", frameCount++);
@@ -113,7 +145,9 @@ int main(int argc, char* argv[]) {
 label_exit:
 	gl_deleteMesh(&mesh_StdRect);
 	gl_unloadShader(&shader_filter3);
-	gl_deleteFrameBuffer(&framebuffer_stage1);
+
+	gl_deleteFrameBuffer(&framebuffer_stageB);
+	gl_deleteFrameBuffer(&framebuffer_stageA);
 	
 	gl_deleteTexture(&texture_orginalFrame);
 	gl_close(gl, 1);
