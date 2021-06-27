@@ -475,7 +475,7 @@ gl_fb gl_createFrameBuffer(vh_t info) {
 void gl_bindFrameBuffer(gl_fb* this, size2d_t size, int clear) {
 	glBindFramebuffer(GL_FRAMEBUFFER, this->frame);
 
-	if (size.height != 0 && size.width != 0) {
+	if (size.width || size.height) {
 		glViewport(0, 0, size.width, size.height);
 	}
 

@@ -51,7 +51,7 @@ typedef enum gl_datatype {gl_type_float, gl_type_int, gl_type_uint} gl_datatype;
 
 /** Init the GL class (only one allowed). 
  * The data is processed in the orginal (full-size) resolution, but the viewer size may be smaller, 
- * this should give some performance gain because of less display manager bandwidth. 
+ * this should give some performance gain because of less display manager bandwidth [to-be-verified]. 
  * @param frameSize Resolution of the frame
  * @param windowRatio View size is frameSize/windowRatio
  * @return $this(Opaque) GL class object if success, null if fail
@@ -177,7 +177,7 @@ gl_fb gl_createFrameBuffer(vh_t info);
 /** Bind a frame buffer to current. 
  * To bind the default buffer (window), pass this->frame = 0. 
  * @param this A frame buffer object previously created by gl_createFrameBuffer(...)
- * @param size Set the size of view port. Leval one of width or height to 0 to skip this step
+ * @param size Set the size of view port. Pass {0,0} to skip this step
  * @param clear Set to true (non-zero value) to clear the buffer
  */
 void gl_bindFrameBuffer(gl_fb* this, size2d_t size, int clear);
