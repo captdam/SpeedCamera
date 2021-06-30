@@ -60,12 +60,11 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio);
 
 /** Call to start a render loop, this process all GLFW window events 
  * @param this This GL class object
- * @return Width and height of the window
  */
-size2d_t gl_drawStart(GL this);
+void gl_drawStart(GL this);
 
 /** Call this to draw a texture in viewer window 
- * To draw anything in the viewer window, first draw all the objects on a texture; 
+ * To draw anything in the viewer window, first draw all the objects on a texture (framebuffer.texture); 
  * then, pass that texture to this function. 
  * @param this This GL class object
  * @param texture Texture to draw
@@ -143,19 +142,18 @@ void gl_drawMesh(gl_mesh* mesh);
  */
 void gl_deleteMesh(gl_mesh* mesh);
 
-/** Create texture object 
- * @param info Video header, contains frame size and color scheme
- * @param data Pointer to the frame data
+/** Create texture object whit empty content 
+ * @param size Width and height of the texture in unit of pixel
  * @return GL texture object
  */
-gl_obj gl_createTexture(vh_t info, void* data);
+gl_obj gl_createTexture(size2d_t size);
 
 /** Update a texture object 
  * @param texture A texture object previously created by gl_createTexture(...)
- * @param info Video header, contains frame size and color scheme
+ * @param size Width and height of the texture in unit of pixel
  * @param data Pointer to the frame data
  */
-void gl_updateTexture(gl_obj* texture, vh_t info, void* data);
+void gl_updateTexture(gl_obj* texture, size2d_t size, void* data);
 
 /** Bind a texture object to OpenGL engine texture unit 
  * @param texture A texture object previously created by gl_createTexture(...)
@@ -169,22 +167,22 @@ void gl_bindTexture(gl_obj* texture, unsigned int unit);
 void gl_deleteTexture(gl_obj* texture);
 
 /** Create a frame buffer used for multi-stage rendering 
- * @param info Video header, contains frame size and color scheme
+ * @param size Width and height of the texture in unit of pixel
  * @return GL frame buffer object
  */
-gl_fb gl_createFrameBuffer(vh_t info);
+gl_fb gl_createFrameBuffer(size2d_t size);
 
 /** Bind a frame buffer to current. 
  * To bind the default buffer (window), pass this->frame = 0. 
- * @param this A frame buffer object previously created by gl_createFrameBuffer(...)
+ * @param fb A frame buffer object previously created by gl_createFrameBuffer(...)
  * @param size Set the size of view port. Pass {0,0} to skip this step
  * @param clear Set to true (non-zero value) to clear the buffer
  */
-void gl_bindFrameBuffer(gl_fb* this, size2d_t size, int clear);
+void gl_bindFrameBuffer(gl_fb* fb, size2d_t size, int clear);
 
 /** Delete a frame buffer object
- * @param this A frame buffer object previously created by gl_createFrameBuffer(...)
+ * @param fb A frame buffer object previously created by gl_createFrameBuffer(...)
  */
-void gl_deleteFrameBuffer(gl_fb* this);
+void gl_deleteFrameBuffer(gl_fb* fb);
 
 #endif /* #ifndef INCLUDE_GL_H */

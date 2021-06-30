@@ -16,10 +16,11 @@
 #include "gl.h"
 
 struct GL_ClassDataStructure {
-	GLFWwindow* window;
+	GLFWwindow* window; //Obj
 	struct timespec renderLoopStartTime;
-	gl_mesh windowDefaultBufferMesh;
-	gl_obj windowDefaultBufferProgram;
+	gl_mesh windowDefaultBufferMesh; //Obj
+	gl_obj windowDefaultBufferProgram; //Obj
+	size2d_t windowSize;
 };
 
 /* == Window management and driver init == [Object] ========================================= */
@@ -39,6 +40,7 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio) {
 		fflush(stdout);
 	#endif
 
+	/* Object init */
 	GL this = malloc(sizeof(struct GL_ClassDataStructure));
 	if (!this) {
 		#ifdef VERBOSE
@@ -47,8 +49,16 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio) {
 
 		return NULL;
 	}
-	this->window = NULL;
 
+	/* Default values of all objects (null-equivalent, can be passed to destructor safely without init) */
+	this->window = NULL;
+	this->windowDefaultBufferMesh = (gl_mesh){.drawSize=0, .vao=0, .vbo=0, .ebo=0};
+	this->windowDefaultBufferProgram = 0;
+	/* and default values to non-object variables */
+	this->renderLoopStartTime = (struct timespec){.tv_nsec=0, .tv_sec=0};
+	this->windowSize = (size2d_t){.width = frameSize.width / windowRatio, .height = frameSize.height / windowRatio};
+
+	/* init GLFW */
 	if (!glfwInit()) {
 		#ifdef VERBOSE
 				fputs("\tFail to init GLFW\n", stderr);
@@ -58,13 +68,14 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio) {
 		return NULL;
 	}
 
+	/* Start and config OpenGL, init window */
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-//	glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
-	this->window = glfwCreateWindow(frameSize.width / windowRatio, frameSize.height / windowRatio, "Viewer", NULL, NULL);
+	glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
+	this->window = glfwCreateWindow(this->windowSize.width, this->windowSize.height, "Viewer", NULL, NULL);
 	if (!this->window){
 		#ifdef VERBOSE
 				fputs("\tFail to open window\n", stderr);
@@ -74,7 +85,9 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio) {
 		return NULL;
 	}
 	glfwMakeContextCurrent(this->window);
+	glfwSwapInterval(0);
 
+	/* init GLEW */
 	GLenum glewInitError = glewInit();
 	if (glewInitError != GLEW_OK) {
 		#ifdef VERBOSE
@@ -85,23 +98,44 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio) {
 		return NULL;
 	}
 
+	/* GLFW event control */
 	glfwSetWindowCloseCallback(this->window, gl_windowCloseCallback);
 	glfwSetErrorCallback(gl_glfwErrorCallback);
 	glDebugMessageCallback(gl_glErrorCallback, 0);
 
+	/* OpenGL config */
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 //	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
-	gl_vertex_t vertices[] = {
+	/* Draw window - mesh */
+	GLuint vao, vbo, ebo;
+	glGenVertexArrays(1, &vao);
+	glGenBuffers(1, &vbo);
+	glGenBuffers(1, &ebo);
+	glBindVertexArray(vao);
+
+	glBindBuffer(GL_ARRAY_BUFFER, vbo);
+	GLfloat vertices[] = {
 		+1.0f, +1.0f, 1.0f, 0.0f,
 		+1.0f, -1.0f, 1.0f, 1.0f,
 		-1.0f, -1.0f, 0.0f, 1.0f,
 		-1.0f, +1.0f, 0.0f, 0.0f
 	};
-	gl_index_t attributes[] = {4};
-	gl_index_t indices[] = {0, 3, 2, 0, 2, 1};
-	this->windowDefaultBufferMesh = gl_createMesh((size2d_t){.height=4, .width=4}, 6, attributes, vertices, indices);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
 
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+	GLuint indices[] = {0, 3, 2, 0, 2, 1};
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_DYNAMIC_DRAW);
+	
+	glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), (GLvoid*)(0));
+	glEnableVertexAttribArray(0);
+	
+	this->windowDefaultBufferMesh = (gl_mesh){.vao = vao, .vbo = vbo, .ebo = ebo, .drawSize = 6};
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glBindVertexArray(0);
+
+	/* Draw window - shader */
+	GLuint shaderV = glCreateShader(GL_VERTEX_SHADER);
 	const char* vs = "#version 310 es\n" /* Tested, so we do not need to check the compile status */
 	"layout (location = 0) in vec4 position;\n"
 	"out vec2 textpos;\n"
@@ -109,6 +143,10 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio) {
 	"	gl_Position = vec4(position.x, position.y, 0.0f, 1.0f);\n"
 	"	textpos = vec2(position.z, position.w);\n"
 	"}\n";
+	glShaderSource(shaderV, 1, (const GLchar * const*)&vs, NULL);
+	glCompileShader(shaderV);
+	
+	GLuint shaderF = glCreateShader(GL_FRAGMENT_SHADER);
 	const char* fs = "#version 310 es\n"
 	"precision mediump float;\n"
 	"in vec2 textpos;\n"
@@ -117,12 +155,9 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio) {
 	"void main() {\n"
 	"	color = texture(bitmap, textpos);\n"
 	"}\n";
-	GLuint shaderV = glCreateShader(GL_VERTEX_SHADER);
-	glShaderSource(shaderV, 1, (const GLchar * const*)&vs, NULL);
-	glCompileShader(shaderV);
-	GLuint shaderF = glCreateShader(GL_FRAGMENT_SHADER);
 	glShaderSource(shaderF, 1, (const GLchar * const*)&fs, NULL);
 	glCompileShader(shaderF);
+
 	this->windowDefaultBufferProgram = glCreateProgram();
 	glAttachShader(this->windowDefaultBufferProgram, shaderV);
 	glAttachShader(this->windowDefaultBufferProgram, shaderF);
@@ -130,34 +165,27 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio) {
 	glDeleteShader(shaderV);
 	glDeleteShader(shaderF);
 
+	/* Init OK */
 	return this;
 }
 
-GLFWwindow* gl_getWindow(GL this) {
-	return this->window;
-}
-
-size2d_t gl_drawStart(GL this) {
+void gl_drawStart(GL this) {
 	clock_gettime(CLOCK_REALTIME_COARSE, &this->renderLoopStartTime);
-
-	int width, height;
-	glfwGetWindowSize(this->window, &width, &height);
-
 	glfwPollEvents();
-
-	return (size2d_t){.width = width, .height = height};
 }
 
 void gl_drawWindow(GL this, gl_obj* texture) {
-	int width, height;
-	glfwGetWindowSize(this->window, &width, &height);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glViewport(0, 0, this->windowSize.width, this->windowSize.height);
 
-	gl_fb defaultFrame = {.frame = 0, .texture = 0};
-	gl_bindFrameBuffer(&defaultFrame, (size2d_t){.width=width, .height=height}, 0);
-
-	gl_useShader(&this->windowDefaultBufferProgram);
-	gl_bindTexture(texture, 0);
-	gl_drawMesh(&this->windowDefaultBufferMesh);
+	glUseProgram(this->windowDefaultBufferProgram);
+	
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, *texture);
+	
+	glBindVertexArray(this->windowDefaultBufferMesh.vao);
+	glDrawElements(GL_TRIANGLES, this->windowDefaultBufferMesh.drawSize, GL_UNSIGNED_INT, 0);
+	glBindVertexArray(0);
 }
 
 uint64_t gl_drawEnd(GL this, const char* title) {
@@ -189,15 +217,18 @@ void gl_destroy(GL this) {
 		fflush(stdout);
 	#endif
 
-	gl_unloadShader(&this->windowDefaultBufferProgram);
-	gl_deleteMesh(&this->windowDefaultBufferMesh);
+	glDeleteProgram(this->windowDefaultBufferProgram);
+	glDeleteVertexArrays(1, &(this->windowDefaultBufferMesh.vao));
+	glDeleteBuffers(1, &(this->windowDefaultBufferMesh.vbo));
+	glDeleteBuffers(1, &(this->windowDefaultBufferMesh.ebo));
+
 	if (this->window) glfwTerminate();
 	free(this);
 }
 
 /* == OpenGL routines == [Static] =========================================================== */
 
-/* Load a shader from file to memory, use free() to free the memory when no longer need */
+/* Load a shader from file to memory, return a pointer to the memory, use free() to free the memory when no longer need */
 char* gl_loadFileToMemory(const char* filename, long int* length);
 
 gl_obj gl_loadShader(const char* shaderVertexFile, const char* shaderFragmentFile, const char* paramName[], gl_param* paramId, const size_t paramCount) {
@@ -404,43 +435,23 @@ void gl_deleteMesh(gl_mesh* mesh) {
 	mesh->ebo = 0;
 }
 
-gl_obj gl_createTexture(vh_t info, void* data) {
-//	glUseProgram(shader);
-	GLuint glBitmap;
-	glGenTextures(1, &glBitmap);
-	glBindTexture(GL_TEXTURE_2D, glBitmap);
-
-//	glUniform1i(glGetUniformLocation(shader, "bitmap"), 0); //Uniform 0
+gl_obj gl_createTexture(size2d_t size) {
+	GLuint text;
+	glGenTextures(1, &text);
+	glBindTexture(GL_TEXTURE_2D, text);
 	
-	if (info.colorScheme == 1)
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, info.width, info.height, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, data);
-	else if (info.colorScheme == 3)
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, info.width, info.height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
-	else
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, info.width, info.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-	glGenerateMipmap(GL_TEXTURE_2D);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, size.width, size.height, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-	glBindTexture(GL_TEXTURE_2D, 0);
-	return glBitmap;
+//	glBindTexture(GL_TEXTURE_2D, 0);
+	return text;
 }
 
-void gl_updateTexture(gl_obj* texture, vh_t info, void* data) {
+void gl_updateTexture(gl_obj* texture, size2d_t size, void* data) {
 	glBindTexture(GL_TEXTURE_2D, *texture);
-
-	if (info.colorScheme == 1)
-		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, info.width, info.height, GL_LUMINANCE, GL_UNSIGNED_BYTE, data);
-	else if (info.colorScheme == 3)
-		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, info.width, info.height, GL_RGB, GL_UNSIGNED_BYTE, data);
-	else
-		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, info.width, info.height, GL_RGBA, GL_UNSIGNED_BYTE, data);
-	glGenerateMipmap(GL_TEXTURE_2D);
-
-	glBindTexture(GL_TEXTURE_2D, 0);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width, size.height, GL_RGB, GL_UNSIGNED_BYTE, data);
+//	glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 void gl_bindTexture(gl_obj* texture, unsigned int unit) {
@@ -450,20 +461,15 @@ void gl_bindTexture(gl_obj* texture, unsigned int unit) {
 
 void gl_deleteTexture(gl_obj* texture) {
 	glDeleteTextures(1, texture);
+	*texture = 0;
 }
 
-gl_fb gl_createFrameBuffer(vh_t info) {
+gl_fb gl_createFrameBuffer(size2d_t size) {
 	GLuint frameBuffer;
 	glGenFramebuffers(1, &frameBuffer);
 	glBindFramebuffer(GL_FRAMEBUFFER, frameBuffer);
 
-	GLuint textureBuffer;
-	glGenTextures(1, &textureBuffer);
-	glBindTexture(GL_TEXTURE_2D, textureBuffer);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, info.width, info.height, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glBindTexture(GL_TEXTURE_2D, 0);
+	GLuint textureBuffer = gl_createTexture(size);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textureBuffer, 0);
 
 	return (gl_fb){
@@ -472,8 +478,8 @@ gl_fb gl_createFrameBuffer(vh_t info) {
 	};
 }
 
-void gl_bindFrameBuffer(gl_fb* this, size2d_t size, int clear) {
-	glBindFramebuffer(GL_FRAMEBUFFER, this->frame);
+void gl_bindFrameBuffer(gl_fb* fb, size2d_t size, int clear) {
+	glBindFramebuffer(GL_FRAMEBUFFER, fb->frame);
 
 	if (size.width || size.height) {
 		glViewport(0, 0, size.width, size.height);
@@ -485,10 +491,10 @@ void gl_bindFrameBuffer(gl_fb* this, size2d_t size, int clear) {
 	}
 }
 
-void gl_deleteFrameBuffer(gl_fb* this) {
-	glDeleteTextures(1, &this->texture);
-	glDeleteFramebuffers(1, &this->frame);
-	*this = (gl_fb){0, 0};
+void gl_deleteFrameBuffer(gl_fb* fb) {
+	gl_deleteTexture(&fb->texture); //Set texture and frame to 0. If we forget something, the error will be draw on vieweer window, so we can know the issue
+	glDeleteFramebuffers(1, &fb->frame);
+	fb->frame = 0;
 }
 
 /* == Private functions ===================================================================== */

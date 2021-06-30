@@ -11,7 +11,7 @@
 
 #include "source.h"
 
-#define WINDOW_RATIO 1
+#define WINDOW_RATIO 2
 
 #define DEBUG_STAGE 1
 #define DEBUG_FILE_DIR "./debugspace/debug.data"
@@ -54,11 +54,11 @@ int main(int argc, char* argv[]) {
 	}
 
 	/* Use a texture to store raw frame data */
-	texture_orginalFrame = gl_createTexture(videoInfo, NULL);
+	texture_orginalFrame = gl_createTexture(size);
 
 	/* Drawing on frame buffer to process data */
-	framebuffer_stageA = gl_createFrameBuffer(videoInfo);
-	framebuffer_stageB = gl_createFrameBuffer(videoInfo);
+	framebuffer_stageA = gl_createFrameBuffer(size);
+	framebuffer_stageB = gl_createFrameBuffer(size);
 
 	/* Process - Kernel filter 3x3 */
 	const char* shader_filter3_paramName[] = {"size", "maskTop", "maskMiddle", "maskBottom"};
@@ -99,9 +99,14 @@ int main(int argc, char* argv[]) {
 	/* Main process loop here */
 	double lastFrameTime = 0;
 	while(!gl_close(gl, -1)) {
-		if (!source_read(source, texture_orginalFrame))
+		if (!source_read(source)) {
 			gl_close(gl, 1);
-		size2d_t windowSize = gl_drawStart(gl);
+			break;
+		}
+
+		gl_drawStart(gl);
+
+		gl_updateTexture(&texture_orginalFrame, size, source_get(source));
 
 		gl_bindFrameBuffer(frameBuffer_new, size, 0); //Use video full-resolution for render
 		gl_useShader(&shader_filter3);
