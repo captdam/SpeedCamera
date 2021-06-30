@@ -19,14 +19,20 @@ typedef struct Source_ClassDataStructure* Source;
  */
 Source source_init(const char* videoFile, vh_t* info);
 
-/** Read a frame from the source file, save the frame to a GL texture. 
+/** Read a frame from the source file into internal buffer. 
  * @param this This source class object
- * @param dest Destination of the content
  * @return Number of bytes fetched from source file
  */
-size_t source_read(Source this, gl_obj dest);
+size_t source_read(Source this);
 
-/** Destroy this source class object, close the source file 
+/** Get the content just fetched from the source file (pointer to the internal buffer). 
+ * This pointer in fact will never change. 
+ * @param this This source class object
+ * @return Pointer to the content
+ */
+char* source_get(Source this);
+
+/** Destroy this source class object, close the source file. 
  * @param this This source class object
  */
 void source_destroy(Source this);

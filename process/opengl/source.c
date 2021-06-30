@@ -69,10 +69,13 @@ Source source_init(const char* videoFile, vh_t* info) {
 	return this;
 }
 
-size_t source_read(Source this, gl_obj dest) {
+size_t source_read(Source this) {
 	size_t l = fread(this->buffer, 1, this->info.width * this->info.height * this->info.colorScheme, this->fp);
-	gl_updateTexture(&dest, this->info, this->buffer);
 	return l;
+}
+
+char* source_get(Source this) {
+	return this->buffer;
 }
 
 void source_destroy(Source this) {
