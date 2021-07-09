@@ -18,8 +18,14 @@ typedef struct VideoHeader_t {
 /** Size of 2D object (image): width and height in pixel 
  */
 typedef struct Size2D_t {
-	size_t width;
-	size_t height;
+	union {
+		size_t width;
+		size_t x;
+	};
+	union {
+		size_t height;
+		size_t y;
+	};
 } size2d_t;
 
 /** Describe a real-world location 
