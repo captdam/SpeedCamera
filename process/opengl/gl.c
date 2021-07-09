@@ -538,3 +538,10 @@ char* gl_loadFileToMemory(const char* filename, long int* length) {
 	fclose(fp);
 	return content;
 }
+
+void gl_fsync() {
+	glFinish();
+}
+void gl_rsync() {
+	glFlush();
+}

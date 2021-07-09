@@ -185,4 +185,14 @@ void gl_bindFrameBuffer(gl_fb* fb, size2d_t size, int clear);
  */
 void gl_deleteFrameBuffer(gl_fb* fb);
 
+/** Force the GL driver to sync. 
+ * Calling thread will be blocked until all previous GL calls executed completely.
+ */
+void gl_fsync();
+
+/** Request the GL driver to sync. 
+ * Empty the command buffer. Calling thread will not be blocked.
+ */
+void gl_rsync();
+
 #endif /* #ifndef INCLUDE_GL_H */
