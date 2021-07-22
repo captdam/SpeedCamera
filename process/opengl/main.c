@@ -5,10 +5,10 @@
 #include <math.h>
 #include <unistd.h>
 #include <errno.h>
-#include <pthread.h>
 
 #include "common.h"
 #include "gl.h"
+#include "mt_source.h"
 
 //#include "source.h"
 
@@ -17,60 +17,33 @@
 #define DEBUG_STAGE 1
 #define DEBUG_FILE_DIR "./debugspace/debug.data"
 
-typedef struct Thread_Source_DataStack {
-	void* frameData;
-	vh_t videoInfo;
-	uint64_t readCount; //Writable for thread: -1 = initializing in progress, -2 = error, -3 = end
-	uint64_t loadCount; //Writable for main: -1 = initializing in progress, -2 = halt signal
-	/* Here we use a mailbox instead of mutex:
-	| Thread updates readCount after it reads new frame frome file (buffer full and fresh);
-	| Main updates loadCount after it loads frame into memory (buffer empty and free);
-	| When readCount = loadCount: thread buffer empty and free, thread should read next frame, main should wait;
-	| When readCount > loadCount: thread buffer full and fresh, thread should wait, main should load current frame.
-	*/
-} th_source_d;
-#define TH_SOURCE_READ_INIT -1
-#define TH_SOURCE_READ_ERROR -2
-#define TH_SOURCE_READ_END -3
-#define TH_SOURCE_LOAD_INIT -1
-#define TH_SOURCE_LOAD_HALT -2
-volatile th_source_d source_data = { .readCount = TH_SOURCE_READ_INIT, .loadCount = TH_SOURCE_LOAD_INIT };
-void* thread_source(void* arg);
+
 
 int main(int argc, char* argv[]) {
 	int status = EXIT_FAILURE;
 
 	size_t frameCount = 0;
-	size2d_t size;
 	
+	MT_Source source = NULL;
+	size2d_t size;
+
 	GL gl = NULL;
-	gl_obj texture_orginalFrame = 0;
+	gl_tex texture_orginalFrame = 0;
 
 	gl_fb framebuffer_stageA = {0, 0};
 	gl_fb framebuffer_stageB = {0, 0};
 
-	gl_obj shader_filter3 = 0;
+	gl_shader shader_filter3 = 0;
 
 	gl_mesh mesh_StdRect = {0, 0, 0, 0};
 
 	/* Init source reading thread */
-	pthread_t source_tid;
-	pthread_attr_t source_attr;
-	pthread_attr_init(&source_attr);
-	pthread_attr_setdetachstate(&source_attr, PTHREAD_CREATE_JOINABLE);
-	int source_error = pthread_create(&source_tid, &source_attr, thread_source, argv[1]);
-	if (source_error) {
-		fprintf(stderr, "Cannot init Source thread (%d).\n", source_error);
+	source = mt_source_init(argv[1]);
+	if (!source) {
+		fputs("Cannot init MT-Source class object (Source reading thread).\n", stderr);
 		goto label_exit;
 	}
-
-	while (source_data.readCount == TH_SOURCE_READ_INIT); //Waiting the source thread init
-	if (source_data.readCount == TH_SOURCE_READ_ERROR) {
-		fputs("Source thread error.\n", stderr);
-		goto label_exit;
-	}
-
-	size = (size2d_t){.width = source_data.videoInfo.width, .height = source_data.videoInfo.height};
+	size = mt_source_getSize(source);
 
 	/* Init OpenGL and viewer window */
 	gl = gl_init(size, WINDOW_RATIO);
@@ -90,7 +63,7 @@ int main(int argc, char* argv[]) {
 	const char* shader_filter3_paramName[] = {"size", "maskTop", "maskMiddle", "maskBottom"};
 	size_t shader_filter3_paramCount = sizeof(shader_filter3_paramName) / sizeof(shader_filter3_paramName[0]);
 	gl_param shader_filter3_paramId[4];
-	shader_filter3 = gl_loadShader("shader/stdRect.vs.glsl", "shader/filter3.fs.glsl", shader_filter3_paramName, shader_filter3_paramId, shader_filter3_paramCount);
+	shader_filter3 = gl_loadShader("shader/stdRect.vs.glsl", "shader/filter3.fs.glsl", shader_filter3_paramName, shader_filter3_paramId, shader_filter3_paramCount, 1);
 	if (!shader_filter3) {
 		fputs("Cannot load program.\n", stderr);
 		goto label_exit;
@@ -100,8 +73,8 @@ int main(int argc, char* argv[]) {
 	gl_param shader_filter3_paramMaskMiddle = shader_filter3_paramId[2];
 	gl_param shader_filter3_paramMaskBottom = shader_filter3_paramId[3];
 	gl_useShader(&shader_filter3);
-	unsigned int shader_filter3_paramSize_v[] = {size.width, size.height}; //Cast to unsigned int first, need unsigned int, but size is of size_t
-	gl_setShaderParam(shader_filter3_paramSize, 2, gl_type_uint, shader_filter3_paramSize_v); //Size of frame will not change
+	float shader_filter3_paramSize_v[] = {size.width, size.height}; //Cast to float
+	gl_setShaderParam(shader_filter3_paramSize, 2, gl_type_float, shader_filter3_paramSize_v); //Size of frame will not change
 
 	/* Drawing mash (simple rect) */
 	gl_vertex_t vertices[] = {
@@ -123,32 +96,22 @@ int main(int argc, char* argv[]) {
 		frameBuffer_new = temp;
 	}
 
-
-	
-
-
 	/* Main process loop here */
-	double lastFrameTime = 0;
-	source_data.loadCount = 0; //Main thread ready
 	fputs("Main thread: ready\n", stdout);
 	fflush(stdout);
+	uint64_t startTime, endTime;
 	while(!gl_close(gl, -1)) {
-		if (source_data.readCount == TH_SOURCE_READ_END) {
+		startTime = nanotime();
+
+		void* frame = mt_source_start(source); //Poll frame data from source class
+		if (!frame) {
 			gl_close(gl, 1);
 			break;
 		}
-		while (source_data.readCount == source_data.loadCount);
-
+		
 		gl_drawStart(gl);
 
-		gl_updateTexture(&texture_orginalFrame, size, source_data.frameData);
-		gl_fsync(); //Force sync, make sure frame data is loaded
-		source_data.loadCount++;
-		
-		/* Mailbox:
-		| When readCount = loadCount: thread buffer empty and free, thread should read next frame, main should wait;
-		| When readCount > loadCount: thread buffer full and fresh, thread should wait, main should load current frame.
-		*/
+		gl_updateTexture(&texture_orginalFrame, size, frame);
 
 		gl_bindFrameBuffer(frameBuffer_new, size, 0); //Use video full-resolution for render
 		gl_useShader(&shader_filter3);
@@ -178,11 +141,13 @@ int main(int argc, char* argv[]) {
 		gl_drawMesh(&mesh_StdRect);
 		swapFrameBuffer();
 
-		gl_drawWindow(gl, &frameBuffer_old->texture);
+		gl_drawWindow(gl, &frameBuffer_old->texture); //A forced opengl synch
+		mt_source_finish(source); //Release source class buffer
 
 		char title[60];
 		sprintf(title, "Viewer - frame %zu", frameCount++);
-		gl_drawEnd(gl, title);
+		fprintf(stdout, "\rLoop %zu takes %lfms.", frameCount, gl_drawEnd(gl, title) / 1000000.0);
+		fflush(stdout);
 	}
 
 
@@ -195,122 +160,12 @@ label_exit:
 
 	gl_deleteFrameBuffer(&framebuffer_stageB);
 	gl_deleteFrameBuffer(&framebuffer_stageA);
-	
 	gl_deleteTexture(&texture_orginalFrame);
-	gl_close(gl, 1);
+
 	gl_destroy(gl);
 
-	source_data.loadCount = TH_SOURCE_LOAD_HALT; //Send halt signal
-	pthread_join(source_tid, NULL);
+	mt_source_destroy(source);
 
 	fprintf(stdout, "%zu frames displayed.\n\n", frameCount);
 	return status;
-}
-
-
-
-void* thread_source(void* arg) {
-	/* Init */
-	fputs("Source thread: Start!\n", stdout);
-	fflush(stdout);
-
-	FILE* fp = NULL;
-	uint8_t* fileBuffer = NULL;
-	uint8_t* workBuffer = NULL;
-	vh_t info;
-
-	/* Init */
-	fp = fopen((char*)arg, "rb");
-	if (!fp) {
-		fprintf(stderr, "Source thread: Cannot open input file (errno = %d).\n", errno);
-		goto thread_source_end_error;
-	}
-
-	if (!fread(&info, 1, sizeof(info), fp)) {
-		fputs("Source thread: Cannot get file info.\n", stderr);
-		goto thread_source_end_error;
-	}
-	if (info.colorScheme != 3) {
-		fputs("Source thread: Bad color scheme.\n", stderr);
-		goto thread_source_end_error;
-	}
-
-	fileBuffer = malloc(info.height * info.width * 3);
-	workBuffer = malloc(info.height * info.width * 4);
-	if (!fileBuffer || !workBuffer) {
-		fputs("Source thread: Cannot allocated buffer.\n", stderr);
-		goto thread_source_end_error;
-	}
-
-	source_data.videoInfo = info;
-	source_data.frameData = workBuffer;
-
-	/* Ready */
-	fprintf(stdout, "Source thread: Ready (size=%"PRIu16"*%"PRIu16", cs=%"PRIu16", fps=%"PRIu16")!\n", info.width, info.height, info.colorScheme, info.fps);
-	fflush(stdout);
-	source_data.readCount = 0;
-	while (source_data.loadCount != 0); //Waiting main thread ready
-	
-	/* Mailbox:
-	| When readCount = loadCount: thread buffer empty and free, thread should read next frame, main should wait;
-	| When readCount > loadCount: thread buffer full and fresh, thread should wait, main should load current frame.
-	*/
-
-	/* 3-stage buffer
-	| There are 3 buffer: readBuffer, workBuffer, glBuffer
-	| Read buffer: The fread() function put the raw file content into this buffer.
-	| Work buffer: The program load data from readBuffer, process it, and save the processed, read-to-use data into the workBuffer.
-	|		This is the buffer mentioned in the mailbox section.
-	| GL buffer: This buffer is controled by the OpenGL driver. The GL driver decides when to DMA data from workBuffer to glBuffer.
-	| ReadBuffer can be used again (override) after the program loads the data into workBuffer.
-	| WorkBuffer can be used again (override) after the glFinish() or any other sync call.
-	*/
-
-	/* Loading frame data until reaching end of video file or main thread sending halt signal */
-	while (1) {
-		for (size_t i = 0; i < info.width * info.height; i++) { //Data format convert
-			int color = (fileBuffer[i*3] + fileBuffer[i*3+1] + fileBuffer[i*3+2]) >> 2; //RGB->gray
-			uint8_t* dest = source_data.frameData;
-			dest[i*3+0] = fileBuffer[i*3+0];
-			dest[i*3+1] = fileBuffer[i*3+1];
-			dest[i*3+2] = fileBuffer[i*3+2];
-		}
-
-		source_data.readCount++;
-
-		if (!fread(fileBuffer, 3, info.width * info.height, fp)) { //Reach the end of video file
-			fputs("Source thread: End of file!\n", stdout);
-			fflush(stdout);
-			goto thread_source_end_ok;
-		}
-		
-		while (1) { //Waiting main thread signal
-			if (source_data.loadCount == TH_SOURCE_LOAD_HALT) {
-				goto thread_source_end_ok;
-			}
-			if (source_data.loadCount >= source_data.readCount) {
-				break;
-			}
-		}
-
-	}
-	
-
-	/* End of video file or main thread sends halt signal */
-	thread_source_end_ok:
-	source_data.readCount = TH_SOURCE_READ_END; //Set end flag
-	goto thread_source_end_quit;
-
-	thread_source_end_error:
-	source_data.readCount = TH_SOURCE_READ_ERROR; //Set error flag
-	goto thread_source_end_quit;
-
-	thread_source_end_quit:
-	if (fp) fclose(fp); //fclose(NULL) undefined
-	free(fileBuffer);
-	free(workBuffer);
-
-	fprintf(stdout, "Source thread: Halt! (err = %"PRIu64")\n", source_data.readCount + 3);
-	fflush(stdout);
-	return NULL;
 }

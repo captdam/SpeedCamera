@@ -14,40 +14,44 @@
  */
 typedef struct GL_ClassDataStructure* GL;
 
-/** GL objects (programs, buffers, ...)
+/** Shader and data types
  */
-typedef unsigned int gl_obj;
+typedef unsigned int gl_shader;
+#define GL_INIT_DEFAULT_SHADER (gl_shader)0
+typedef int gl_param;
+typedef enum gl_datatype {gl_type_float, gl_type_int, gl_type_uint} gl_datatype;
 
 /** Geometry objects (mesh)
  */
+typedef unsigned int gl_vao, gl_xbo;
 typedef struct GL_Mesh {
-	gl_obj vao;
-	gl_obj vbo;
-	gl_obj ebo;
+	gl_vao vao;
+	gl_xbo vbo;
+	gl_xbo ebo;
 	unsigned int drawSize;
 } gl_mesh;
-
-/** Frame buffer objects (multi-stage rendering)
- */
-typedef struct GL_FrameBuffer {
-	gl_obj frame;
-	gl_obj texture;
-} gl_fb;
-
-/** Mesh VBO and EBO data types
- */
+#define GL_INIT_DEFAULT_VAO (gl_vao)0
+#define GL_INIT_DEFAULT_XBO (gl_xbo)0
+#define GL_INIT_DEFAULT_MESH (gl_mesh){GL_INIT_DEFAULT_VAO, GL_INIT_DEFAULT_XBO, GL_INIT_DEFAULT_XBO, 0}
 typedef float gl_vertex_t;
 typedef unsigned int gl_index_t;
 
-/** Shader uniform location
+/** Texture
  */
-typedef int gl_param;
+typedef unsigned int gl_tex;
+#define GL_INIT_DEFAULT_TEX (gl_tex)0
 
-/** Shader uniform data type
+/** Frame buffer objects (multi-stage rendering)
  */
-typedef enum gl_datatype {gl_type_float, gl_type_int, gl_type_uint} gl_datatype;
+typedef unsigned int gl_fbo;
+#define GL_INIT_DEFAULT_FBO (gl_fbo)0
+typedef struct GL_FrameBuffer {
+	gl_fbo frame;
+	gl_tex texture;
+} gl_fb;
+#define GL_INIT_DEFAULT_FB (gl_fb){GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX}
 
-/* == Window management and driver init == [Object] ========================================= */
+/* == Window management and driver init ===================================================== */
 
 /** Init the GL class (only one allowed). 
  * The data is processed in the orginal (full-size) resolution, but the viewer size may be smaller, 
@@ -69,7 +73,7 @@ void gl_drawStart(GL this);
  * @param this This GL class object
  * @param texture Texture to draw
  */
-void gl_drawWindow(GL this, gl_obj* texture);
+void gl_drawWindow(GL this, gl_tex* texture);
 
 /** Call to end a render loop 
  * @param this This GL class object
@@ -90,81 +94,82 @@ int gl_close(GL this, int close);
  */
 void gl_destroy(GL this);
 
-/* == OpenGL routines == [Static] =========================================================== */
+/* == OpenGL routines ======================================================================= */
 
-/** Load vertex and fragment shader form file, get IDs (location) of all parameters (uniform). 
- * @param shaderVertexFile Direction to the vertex shader file
- * @param shaderFragmentFile Direction to the fragment shader file
- * @param paramName An array of string represents parameters' names (uniform)
+/** Load vertex and fragment shader, get IDs (location) of all parameters (uniform). 
+ * @param shaderVertex Vertex shader or path to vertex shader file
+ * @param shaderFragment Fragment shader or path to fragment shader file
+ * @param paramName An array of string represents shader parameters' names (uniform)
  * @param paramId Pass-by-reference: IDs (location) of the parameters
  * @param paramCount Number of parameters, same as the length (number of elements) of the paramNames and paramId
- * @return Shader if success, 0 if fail
+ * @param isFilePath If 0, shaderVertex and shaderFragment are pointer to the source code. If 1, they are path to the shader file
+ * @return gl_shader object upon success, GL_INIT_DEFAULT_SHADER if fail
  */
-gl_obj gl_loadShader(const char* shaderVertexFile, const char* shaderFragmentFile, const char* paramName[], gl_param* paramId, const size_t paramCount);
+gl_shader gl_loadShader(char* shaderVertex, char* shaderFragment, char* paramName[], gl_param* paramId, const unsigned int paramCount, const int isFilePath);
 
-/** Use a shader program (bind a program to current)
- * @param shader Shader to bind, previously returned by gl_loadShader(...)
+/** Use a shader (bind a shader to current)
+ * @param shader Shader to bind, previously returned by gl_loadShader()
  */
-void gl_useShader(gl_obj* shader);
+void gl_useShader(gl_shader* shader);
 
-/** Pass data to shader parameters (uniform).
- * Call gl_useShader to bind the shader before set the parameters 
+/** Pass data to shader parameters (uniform). 
+ * Call gl_useShader() to bind the shader before set the parameters. 
  * @param paramId ID of parameter returned by gl_loadShader
  * @param length Number of parameters (vecX, can be 1, 2, 3 or 4, use 1 for non-verctor params, like float or sampler), must match with shader
- * @param type Type of the data (float, int or uint), must match with shader
+ * @param type Type of the data (gl_type_float, gl_type_int or gl_type_uint), must match with shader
  * @param data Pointer to the data to be pass
  */
 #define gl_setShaderParam(paramId, length, type, data) gl_setShaderParam_internal(paramId, length, type, (void*)data)
 void gl_setShaderParam_internal(gl_param paramId, uint8_t length, gl_datatype type, void* data);
 
-/** Unload a shader, the shader ID will be set to 0 
- * @param shader Shader index returned by gl_loadShader(...)
+/** Unload a shader, the shader will be reset to GL_INIT_DEFAULT_SHADER. 
+ * @param shader Shader index returned by gl_loadShader()
  */
-void gl_unloadShader(gl_obj* shader);
+void gl_unloadShader(gl_shader* shader);
 
-/** Create and bind mesh object (geometry) 
+/** Create and bind gl_mesh object (geometry). 
  * @param vertexSize Size of vertices array. Height = number of vertex; width = data per vertex
  * @param indexCount Number of index in the indices array
- * @param elementsSize Size of each elements (attribute) in a vertex
+ * @param elementsSize Array, size of each elements (attribute) in a vertex
  * @param vertices The vertice array
  * @param indices The indices array
- * @return GL mesh object
+ * @return gl_mesh object
  */
 gl_mesh gl_createMesh(size2d_t vertexSize, size_t indexCount, gl_index_t* elementsSize, gl_vertex_t* vertices, gl_index_t* indices);
 
-/** Draw a mesh object 
- * @param mesh A mesh previously created by gl_createMesh(...)
+/** Draw a gl_mesh object. 
+ * @param mesh A gl_mesh object previously created by gl_createMesh()
  */
 void gl_drawMesh(gl_mesh* mesh);
 
-/** Delete a mesh object (mesh), the mesh ID will be set to 0 
- * @param mesh A mesh object previously created by gl_createMesh(...)
+/** Delete a gl_mesh object (geometry), the gl_mesh ID will be set to GL_INIT_DEFAULT_MESH. 
+ * @param mesh A gl_mesh object previously created by gl_createMesh()
  */
 void gl_deleteMesh(gl_mesh* mesh);
 
-/** Create texture object whit empty content 
- * @param size Width and height of the texture in unit of pixel
- * @return GL texture object
+/** Create gl_tex object whit empty content, this texture only has one 8-bit channel (R8). 
+ * @param size Width and height of the gl_tex in unit of pixel
+ * @return gl_tex object
  */
-gl_obj gl_createTexture(size2d_t size);
+gl_tex gl_createTexture(size2d_t size);
 
-/** Update a texture object 
- * @param texture A texture object previously created by gl_createTexture(...)
+/** Update a gl_tex object 
+ * @param texture A gl_tex object previously created by gl_createTexture()
  * @param size Width and height of the texture in unit of pixel
- * @param data Pointer to the frame data
+ * @param data Pointer to the texture data
  */
-void gl_updateTexture(gl_obj* texture, size2d_t size, void* data);
+void gl_updateTexture(gl_tex* texture, size2d_t size, void* data);
 
 /** Bind a texture object to OpenGL engine texture unit 
- * @param texture A texture object previously created by gl_createTexture(...)
+ * @param texture A gl_tex object previously created by gl_createTexture()
  * @param unit OpenGL texture unit, same as the GL_TEXTUREX
  */
-void gl_bindTexture(gl_obj* texture, unsigned int unit);
+void gl_bindTexture(gl_tex* texture, unsigned int unit);
 
-/** Delete a texture object , the texture ID be set to 0
- * @param texture A texture object previously created by gl_createTexture(...)
+/** Delete a gl_tex object, the texture ID be set to GL_INIT_DEFAULT_TEX
+ * @param texture A gl_tex object previously created by gl_createTexture()
  */
-void gl_deleteTexture(gl_obj* texture);
+void gl_deleteTexture(gl_tex* texture);
 
 /** Create a frame buffer used for multi-stage rendering 
  * @param size Width and height of the texture in unit of pixel
@@ -176,16 +181,16 @@ gl_fb gl_createFrameBuffer(size2d_t size);
  * To bind the default buffer (window), pass this->frame = 0. 
  * @param fb A frame buffer object previously created by gl_createFrameBuffer(...)
  * @param size Set the size of view port. Pass {0,0} to skip this step
- * @param clear Set to true (non-zero value) to clear the buffer
+ * @param clear Set to true (non-zero value) to clear the buffer, use 0 to skip
  */
 void gl_bindFrameBuffer(gl_fb* fb, size2d_t size, int clear);
 
-/** Delete a frame buffer object
+/** Delete a frame buffer object. 
  * @param fb A frame buffer object previously created by gl_createFrameBuffer(...)
  */
 void gl_deleteFrameBuffer(gl_fb* fb);
 
-/** Force the GL driver to sync. 
+/** Force the GL driver to sync, the frame buffer will be reset to GL_INIT_DEFAULT_FB. 
  * Calling thread will be blocked until all previous GL calls executed completely.
  */
 void gl_fsync();
