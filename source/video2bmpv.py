@@ -16,8 +16,8 @@ compressed video in this project; instead, we will only deal with easy-to-read p
 By "plain", it means:
 - A file contains multiple blocks, each block is a frame of the video. Frame 1 first, then frame 2, then frame 3...
 - A frame has width * height pixels. The order is left-to-right, top-to-bottom, like how we write English.
-- A pixel has 3 or 4 bytes, which is RGB(A).
-So, a 1 minute long 1080p 30FPS RGB24 video is about 60MB in .mov format, but
+- A pixel has 1, 3 or 4 bytes, which is mono, RGB or RGBA.
+So, a 1 minute long 1080p 30FPS RGB24 video is about 60MB in .mov format, but with RGB scheme there are 
 60s * 30fps * (1920*1080)pixel/frame * 3byte/pixel = 11,197,440,000 bytes in our plain bitmap video format.
 That's a lot of data need to put on the disk or in our memory. Since we are now developing the algorithm on a high-end
 platform, this is not a big issue. But, when we implement this in our product, we need to switch to
@@ -28,7 +28,7 @@ import sys
 import cv2
 import numpy
 
-dataStructure = cv2.COLOR_BGR2RGB # COLOR_BGR2RGBA or COLOR_BGR2RGB
+dataStructure = cv2.COLOR_BGR2GRAY # COLOR_BGR2RGBA or COLOR_BGR2RGB or COLOR_BGR2GRAY
 '''
 RGBA consumes extra 25% space, but align pixels in 32-bit word.
 Generally speaking, this is a trade-off between memory size and computation speed.
@@ -37,8 +37,12 @@ This is a really complex trade off, and the result may differ on different CPU (
 context switch strategy), compiler...
 Don't ask me for why BGR, the opencv guy decided so.
 '''
-if dataStructure != cv2.COLOR_BGR2RGB:
-	dataStructure = cv2.COLOR_BGR2RGBA
+
+realtimeFPS = True
+'''
+Write 0 to FPS field of the video header.
+For use with real camera.
+'''
 
 if len(sys.argv) < 3:
 	print(programInfo)
@@ -52,16 +56,21 @@ video = cv2.VideoCapture(sys.argv[1])
 while video.isOpened():
 	ret, frame = video.read()
 	if count == 0:
-		fps = video.get(cv2.CAP_PROP_FPS)
+		fps = 0 if realtimeFPS else video.get(cv2.CAP_PROP_FPS) 
 		width = video.get(cv2.CAP_PROP_FRAME_WIDTH)
 		height = video.get(cv2.CAP_PROP_FRAME_HEIGHT)
 		print('Processing start. Resolution = {}*{}, {}FPS'.format(width, height, fps))
 		if dataStructure == cv2.COLOR_BGR2RGB:
 			header = numpy.array([width, height, fps, 3], dtype=numpy.uint16)
 			outputFile.write(header)
-		else:
+		elif dataStructure == cv2.COLOR_BGR2RGBA:
 			header = numpy.array([width, height, fps, 4], dtype=numpy.uint16)
 			outputFile.write(header)
+		elif dataStructure == cv2.COLOR_BGR2GRAY:
+			header = numpy.array([width, height, fps, 1], dtype=numpy.uint16)
+			outputFile.write(header)
+		else:
+			exit('Bad color scheme.')
 	if frame is None:
 		print('Done, end of video reached, {} frames processed.'.format(video.get(cv2.CAP_PROP_FRAME_COUNT)))
 		break
@@ -70,6 +79,6 @@ while video.isOpened():
 	outputFile.write(byteBlock)
 	count = count + 1
 	if count >= maxFrame:
-		print('Done, {} frames processed.'.format(maxFrame))
+		print('Done, limit reached, {} frames processed.'.format(maxFrame))
 		break
 outputFile.close()
