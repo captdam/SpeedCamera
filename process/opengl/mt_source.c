@@ -16,7 +16,7 @@ struct MultiThread_Source_ClassDataStructure {
 	size2d_t size; //Size of the video
 	Fifo2 buffer; //Inter-thread communication between this reader thread and main thread
 	pthread_t tid; //Source reading thread ID
-	int tidValid; //tid valid? tid may be undefined (ref: man pthread). 0=invalid, 1=valid, -1=valid, but request to end
+	int tidValid; //tid valid? tid may be undefined (ref: man pthread). 0=invalid; 1=valid; -1=valid but request to end
 };
 
 void* mt_source_main(void* arg);
@@ -61,11 +61,8 @@ MT_Source mt_source_init(const char* filename) {
 		mt_source_destroy(this);
 		return NULL;
 	}
-
-	#ifdef VERBOSE
-		fprintf(stderr, "FIFO (%s) ready, waiting for input data...\n", filename);
-		fflush(stdout);
-	#endif
+	fprintf(stdout, "FIFO (%s) ready, waiting for input data...\n", filename);
+	fflush(stdout);
 
 	/* Get and check video info header */
 	vh_t info;
@@ -76,6 +73,9 @@ MT_Source mt_source_init(const char* filename) {
 		mt_source_destroy(this);
 		return NULL;
 	}
+	fprintf(stdout, "Get video file header\tSize = %"PRIu16"*%"PRIu16" FPS=%"PRIu16", Color=%"PRIu16"\n", info.width, info.height, info.fps, info.colorScheme);
+	fflush(stdout);
+
 	if (info.colorScheme != 1) {
 		#ifdef VERBOSE
 			fputs("Bad color scheme (Accepts 1 only, using YUV but truncating UV)\n", stderr);
@@ -106,7 +106,7 @@ MT_Source mt_source_init(const char* filename) {
 	pthread_attr_t attr;
 	pthread_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-	int source_error = pthread_create(&this->tid, &attr, mt_source_main, NULL);
+	int source_error = pthread_create(&this->tid, &attr, mt_source_main, this);
 	if (source_error) {
 		#ifdef VERBOSE
 			fprintf(stderr, "Fail init Source thread (%d)\n", source_error);
@@ -188,11 +188,13 @@ void* mt_source_main(void* arg) {
 				fputs("[MT-Source] End of file, or broken pipe!\n", stdout);
 				fflush(stdout);
 			#endif
-			this->tidValid = -1; //Request the main thread to kill the reader thread. We leave the control right to main thread.
+			this->tidValid = -1; //Request the main thread to kill the reader thread. We leave the control to main thread.
 		}
 		fifo2_write_finish(this->buffer);
 	}
 
-	pthread_cleanup_pop(1);
+	#ifdef VERBOSE
+		pthread_cleanup_pop(1);
+	#endif
 	return NULL;
 }
