@@ -28,14 +28,14 @@ int main(int argc, char* argv[]) {
 	size2d_t size;
 
 	GL gl = NULL;
-	gl_tex texture_orginalFrame = 0;
 
-	gl_fb framebuffer_stageA = {0, 0};
-	gl_fb framebuffer_stageB = {0, 0};
+	gl_tex texture_orginalFrame = GL_INIT_DEFAULT_TEX;
+	gl_fb framebuffer_stageA = GL_INIT_DEFAULT_FB;
+	gl_fb framebuffer_stageB = GL_INIT_DEFAULT_FB;
 
-	gl_shader shader_filter3 = 0;
+	gl_shader shader_filter3 = GL_INIT_DEFAULT_SHADER;
 
-	gl_mesh mesh_StdRect = {0, 0, 0, 0};
+	gl_mesh mesh_StdRect = GL_INIT_DEFAULT_MESH;
 
 	/* Init source reading thread */
 	source = mt_source_init(argv[1]);
@@ -90,11 +90,8 @@ int main(int argc, char* argv[]) {
 	/* Some extra code for development */
 	gl_fb* frameBuffer_old = &framebuffer_stageA; //Double buffer in workspace, one as old, one as new
 	gl_fb* frameBuffer_new = &framebuffer_stageB; //Swap the old and new after each stage using the function below
-	void swapFrameBuffer() { /* GCC OK */
-		gl_fb* temp = frameBuffer_old;
-		frameBuffer_old = frameBuffer_new;
-		frameBuffer_new = temp;
-	}
+	gl_fb* temp;
+	#define swapFrameBuffer(a, b) {gl_fb* temp = a; a = b; b = temp;}
 
 	/* Main process loop here */
 	fputs("Main thread: ready\n", stdout);
@@ -125,7 +122,7 @@ int main(int argc, char* argv[]) {
 		gl_setShaderParam(shader_filter3_paramMaskBottom, 3, gl_type_float, &(gussianMask[6]));
 		gl_bindTexture(&texture_orginalFrame, 0);
 		gl_drawMesh(&mesh_StdRect);
-		swapFrameBuffer();
+		swapFrameBuffer(frameBuffer_old, frameBuffer_new);
 
 		gl_bindFrameBuffer(frameBuffer_new, size, 0);
 		gl_useShader(&shader_filter3);
@@ -139,14 +136,17 @@ int main(int argc, char* argv[]) {
 		gl_setShaderParam(shader_filter3_paramMaskBottom, 3, gl_type_float, &(edgeMask[6]));
 		gl_bindTexture(&frameBuffer_old->texture, 0);
 		gl_drawMesh(&mesh_StdRect);
-		swapFrameBuffer();
+		swapFrameBuffer(frameBuffer_old, frameBuffer_new);
 
 		gl_drawWindow(gl, &frameBuffer_old->texture); //A forced opengl synch
 		mt_source_finish(source); //Release source class buffer
 
 		char title[60];
 		sprintf(title, "Viewer - frame %zu", frameCount++);
-		fprintf(stdout, "\rLoop %zu takes %lfms.", frameCount, gl_drawEnd(gl, title) / 1000000.0);
+		gl_drawEnd(gl, title);
+
+		endTime = nanotime();
+		fprintf(stdout, "\rLoop %zu takes %lfms/frame.", frameCount, (endTime - startTime) / 1e6);
 		fflush(stdout);
 	}
 
@@ -166,6 +166,6 @@ label_exit:
 
 	mt_source_destroy(source);
 
-	fprintf(stdout, "%zu frames displayed.\n\n", frameCount);
+	fprintf(stdout, "\n%zu frames displayed.\n\n", frameCount);
 	return status;
 }

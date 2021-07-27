@@ -75,7 +75,9 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio) {
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 	glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
-	glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
+	#ifdef VERBOSE
+		glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
+	#endif
 	this->windowSize = (size2d_t){.width = frameSize.width / windowRatio, .height = frameSize.height / windowRatio};
 	this->window = glfwCreateWindow(this->windowSize.width, this->windowSize.height, "Viewer", NULL, NULL);
 	if (!this->window){
@@ -177,7 +179,6 @@ uint64_t gl_drawEnd(GL this, const char* title) {
 		glfwSetWindowTitle(this->window, title);
 	
 	glfwSwapBuffers(this->window);
-	return nanotime();
 }
 
 int gl_close(GL this, int close) {
@@ -238,21 +239,24 @@ char* gl_loadFileToMemory(const char* filename, long int* length) {
 	return content;
 }
 
-gl_shader gl_loadShader(char* shaderVertex, char* shaderFragment, char* paramName[], gl_param* paramId, const unsigned int paramCount, const int isFilePath) {
+gl_shader gl_loadShader(const char* shaderVertex, const char* shaderFragment, const char* paramName[], gl_param* paramId, const unsigned int paramCount, const int isFilePath) {
 	#ifdef VERBOSE
 		if (isFilePath) {
 			fprintf(stdout, "Load shader: V=%s F=%s\n", shaderVertex, shaderFragment);
+		}
+		else {
+			fputs("Load shader: V=[in_memory] F[in_memory]\n", stdout);
 		}
 		fflush(stdout);
 	#endif
 
 	GLuint shaderV = 0, shaderF = 0, shader = 0;
-	char* shaderSrc = NULL;
+	const char* shaderSrc = NULL;
 	GLint status;
-	long int length;
 
 	/* Vertex shader */
-	if (isFilePath)
+	if (isFilePath) {
+		long int length;
 		shaderSrc = gl_loadFileToMemory(shaderVertex, &length);
 		if (!shaderSrc) {
 			#ifdef VERBOSE
@@ -265,6 +269,7 @@ gl_shader gl_loadShader(char* shaderVertex, char* shaderFragment, char* paramNam
 			#endif
 
 			goto gl_loadShader_error;
+		}
 	}
 	else
 		shaderSrc = shaderVertex;
@@ -284,10 +289,11 @@ gl_shader gl_loadShader(char* shaderVertex, char* shaderFragment, char* paramNam
 	}
 
 	if (isFilePath)
-		free(shaderSrc);
+		free((void*)shaderSrc);
 
 	/* Fragment shader */
 	if (isFilePath) {
+		long int length;
 		shaderSrc = gl_loadFileToMemory(shaderFragment, &length);
 		if (!shaderSrc) {
 			#ifdef VERBOSE
@@ -320,7 +326,7 @@ gl_shader gl_loadShader(char* shaderVertex, char* shaderFragment, char* paramNam
 	}
 
 	if (isFilePath)
-		free(shaderSrc);
+		free((void*)shaderSrc);
 
 	/* Link program */
 
@@ -332,7 +338,7 @@ gl_shader gl_loadShader(char* shaderVertex, char* shaderFragment, char* paramNam
 	if (!status) {
 		#ifdef VERBOSE
 			char compileMsg[255];
-			glGetShaderInfoLog(shader, 255, NULL, compileMsg);
+			glGetProgramInfoLog(shader, 255, NULL, compileMsg);
 			fprintf(stderr, "\tGL shader link error: %s\n", compileMsg);
 		#endif
 		
@@ -417,9 +423,9 @@ gl_mesh gl_createMesh(size2d_t vertexSize, size_t indexCount, gl_index_t* elemen
 	glBindVertexArray(mesh.vao);
 
 	glBindBuffer(GL_ARRAY_BUFFER, mesh.vbo);
-	glBufferData(GL_ARRAY_BUFFER, vertexSize.height * vertexSize.width * sizeof(gl_vertex_t), vertices, GL_DYNAMIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, vertexSize.height * vertexSize.width * sizeof(gl_vertex_t), vertices, GL_STATIC_DRAW);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh.ebo);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexCount * sizeof(gl_index_t), indices, GL_DYNAMIC_DRAW);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexCount * sizeof(gl_index_t), indices, GL_STATIC_DRAW);
 	
 	GLuint elementIndex = 0, attrIndex = 0;
 	while (elementIndex < vertexSize.width) {

@@ -105,7 +105,7 @@ void gl_destroy(GL this);
  * @param isFilePath If 0, shaderVertex and shaderFragment are pointer to the source code. If 1, they are path to the shader file
  * @return gl_shader object upon success, GL_INIT_DEFAULT_SHADER if fail
  */
-gl_shader gl_loadShader(char* shaderVertex, char* shaderFragment, char* paramName[], gl_param* paramId, const unsigned int paramCount, const int isFilePath);
+gl_shader gl_loadShader(const char* shaderVertex, const char* shaderFragment, const char* paramName[], gl_param* paramId, const unsigned int paramCount, const int isFilePath);
 
 /** Use a shader (bind a shader to current)
  * @param shader Shader to bind, previously returned by gl_loadShader()
