@@ -123,7 +123,7 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio) {
 	};
 	gl_index_t indices[] = {0, 3, 2, 0, 2, 1};
 	gl_index_t attributes[] = {4};
-	this->windowDefaultBufferMesh = gl_createMesh((size2d_t){4,4}, 6, attributes, vertices, indices);
+	this->windowDefaultBufferMesh = gl_mesh_create((size2d_t){4,4}, 6, attributes, vertices, indices);
 
 	/* Draw window - shader */
 	const char* vs = "#version 310 es\n"
@@ -142,7 +142,7 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio) {
 	"	float red = texture(bitmap, textpos).r;\n"
 	"	color = vec4(red, red, red, 1.0f);\n"
 	"}\n";
-	this->windowDefaultBufferShader = gl_loadShader(vs, fs, NULL, NULL, 0, 0);
+	this->windowDefaultBufferShader = gl_shader_load(vs, fs, NULL, NULL, 0, 0);
 	if (!this->windowDefaultBufferShader) {
 		#ifdef VERBOSE
 			fputs("\tFail to load default shader\n", stderr);
@@ -174,7 +174,7 @@ void gl_drawWindow(GL this, gl_tex* texture) {
 	glBindVertexArray(0);
 }
 
-uint64_t gl_drawEnd(GL this, const char* title) {
+void gl_drawEnd(GL this, const char* title) {
 	if (title)
 		glfwSetWindowTitle(this->window, title);
 	
@@ -201,8 +201,8 @@ void gl_destroy(GL this) {
 
 	gl_close(this, 1);
 
-	gl_unloadShader(&this->windowDefaultBufferShader);
-	gl_deleteMesh(&this->windowDefaultBufferMesh);
+	gl_shader_unload(&this->windowDefaultBufferShader);
+	gl_mesh_delete(&this->windowDefaultBufferMesh);
 
 	if (this->window)
 		glfwTerminate();
@@ -239,7 +239,7 @@ char* gl_loadFileToMemory(const char* filename, long int* length) {
 	return content;
 }
 
-gl_shader gl_loadShader(const char* shaderVertex, const char* shaderFragment, const char* paramName[], gl_param* paramId, const unsigned int paramCount, const int isFilePath) {
+gl_shader gl_shader_load(const char* shaderVertex, const char* shaderFragment, const char* paramName[], gl_param* paramId, const unsigned int paramCount, const int isFilePath) {
 	#ifdef VERBOSE
 		if (isFilePath) {
 			fprintf(stdout, "Load shader: V=%s F=%s\n", shaderVertex, shaderFragment);
@@ -366,11 +366,11 @@ gl_shader gl_loadShader(const char* shaderVertex, const char* shaderFragment, co
 	return GL_INIT_DEFAULT_SHADER;
 }
 
-void gl_useShader(gl_shader* shader) {
+void gl_shader_use(gl_shader* shader) {
 	glUseProgram(*shader);
 }
 
-void gl_setShaderParam_internal(gl_param paramId, uint8_t length, gl_datatype type, void* data) {
+void gl_shader_setParam_internal(gl_param paramId, uint8_t length, gl_datatype type, void* data) {
 	if (type == gl_type_int) {
 		int* d = data;
 		if (length == 1)
@@ -407,13 +407,13 @@ void gl_setShaderParam_internal(gl_param paramId, uint8_t length, gl_datatype ty
 	}
 }
 
-void gl_unloadShader(gl_shader* shader) {
+void gl_shader_unload(gl_shader* shader) {
 	if (*shader != GL_INIT_DEFAULT_SHADER)
 		glDeleteProgram(*shader);
 	*shader = GL_INIT_DEFAULT_SHADER;
 }
 
-gl_mesh gl_createMesh(size2d_t vertexSize, size_t indexCount, gl_index_t* elementsSize, gl_vertex_t* vertices, gl_index_t* indices) {
+gl_mesh gl_mesh_create(size2d_t vertexSize, size_t indexCount, gl_index_t* elementsSize, gl_vertex_t* vertices, gl_index_t* indices) {
 	gl_mesh mesh = GL_INIT_DEFAULT_MESH;
 	mesh.drawSize = indexCount;
 
@@ -440,13 +440,13 @@ gl_mesh gl_createMesh(size2d_t vertexSize, size_t indexCount, gl_index_t* elemen
 	return mesh;
 }
 
-void gl_drawMesh(gl_mesh* mesh) {
+void gl_mesh_draw(gl_mesh* mesh) {
 	glBindVertexArray(mesh->vao);
 	glDrawElements(GL_TRIANGLES, mesh->drawSize, GL_UNSIGNED_INT, 0);
 	glBindVertexArray(0);
 }
 
-void gl_deleteMesh(gl_mesh* mesh) {
+void gl_mesh_delete(gl_mesh* mesh) {
 	if (mesh->vbo != GL_INIT_DEFAULT_MESH.vao)
 		glDeleteVertexArrays(1, &mesh->vao);
 	if (mesh->vbo != GL_INIT_DEFAULT_MESH.vbo)
@@ -456,7 +456,7 @@ void gl_deleteMesh(gl_mesh* mesh) {
 	*mesh = GL_INIT_DEFAULT_MESH;
 }
 
-gl_tex gl_createTexture(size2d_t size) {
+gl_tex gl_texture_create(size2d_t size) {
 	gl_tex texture;
 	glGenTextures(1, &texture);
 	glBindTexture(GL_TEXTURE_2D, texture);
@@ -467,35 +467,35 @@ gl_tex gl_createTexture(size2d_t size) {
 	return texture;
 }
 
-void gl_updateTexture(gl_tex* texture, size2d_t size, void* data) {
+void gl_texture_update(gl_tex* texture, size2d_t size, void* data) {
 	glBindTexture(GL_TEXTURE_2D, *texture);
 	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width, size.height, GL_RED, GL_UNSIGNED_BYTE, data);
 }
 
-void gl_bindTexture(gl_tex* texture, unsigned int unit) {
+void gl_texture_bind(gl_tex* texture, unsigned int unit) {
 	glActiveTexture(GL_TEXTURE0 + unit);
 	glBindTexture(GL_TEXTURE_2D, *texture);
 }
 
-void gl_deleteTexture(gl_tex* texture) {
+void gl_texture_delete(gl_tex* texture) {
 	if (*texture != GL_INIT_DEFAULT_TEX)
 		glDeleteTextures(1, texture);
 	*texture = GL_INIT_DEFAULT_TEX;
 }
 
-gl_fb gl_createFrameBuffer(size2d_t size) {
+gl_fb gl_frameBuffer_create(size2d_t size) {
 	gl_fb buffer = GL_INIT_DEFAULT_FB;
 
 	glGenFramebuffers(1, &buffer.frame);
 	glBindFramebuffer(GL_FRAMEBUFFER, buffer.frame);
 
-	buffer.texture = gl_createTexture(size);
+	buffer.texture = gl_texture_create(size);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, buffer.texture, 0);
 
 	return buffer;
 }
 
-void gl_bindFrameBuffer(gl_fb* fb, size2d_t size, int clear) {
+void gl_frameBuffer_bind(gl_fb* fb, size2d_t size, int clear) {
 	glBindFramebuffer(GL_FRAMEBUFFER, fb->frame);
 
 	if (size.width || size.height) {
@@ -508,11 +508,11 @@ void gl_bindFrameBuffer(gl_fb* fb, size2d_t size, int clear) {
 	}
 }
 
-void gl_deleteFrameBuffer(gl_fb* fb) {
+void gl_frameBuffer_delete(gl_fb* fb) {
 	if (fb->frame != GL_INIT_DEFAULT_FB.frame)
 		glDeleteFramebuffers(1, &fb->frame);
 	if (fb->texture != GL_INIT_DEFAULT_FB.texture)
-		gl_deleteTexture(&fb->texture);
+		gl_texture_delete(&fb->texture);
 	*fb = GL_INIT_DEFAULT_FB;
 }
 
