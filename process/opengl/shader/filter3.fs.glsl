@@ -7,9 +7,12 @@ precision mediump float;
 uniform sampler2D pStage;
 
 uniform vec2 size;
-uniform vec3 maskTop;
-uniform vec3 maskMiddle;
-uniform vec3 maskBottom;
+
+uniform FilterMask {
+	vec3 maskTop;
+	vec3 maskMiddle;
+	vec3 maskBottom;
+};
 
 in vec2 textpos;
 

@@ -127,6 +127,7 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio) {
 	this->windowDefaultBufferMesh = gl_mesh_create((size2d_t){.height = 4, .width = 2}, 6, attributes, vertices, indices);
 
 	/* Draw window - shader */
+	#define mixLevel "0.99f"
 	const char* vs = "#version 310 es\nprecision mediump float;\n"
 	"layout (location = 0) in vec2 position;\n"
 	"out vec2 textpos;\n"
@@ -140,14 +141,14 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio) {
 	"uniform sampler2D processedTexture;\n"
 	"out vec4 color;\n"
 	"void main() {\n"
-	"	const float mixLevel = 1.0f;\n"
+	"	const float mixLevel = "mixLevel";\n"
 	"	float od = texture(orginalTexture, textpos).r;\n"
 	"	float pd = texture(processedTexture, textpos).r;\n"
 	"	float data = mix(od, pd, mixLevel);\n"
 	"	color = vec4(data, data, data, 1.0f);\n"
 	"}\n";
 	const char* windowDefaultBufferShader_paramName[] = {"orginalTexture", "processedTexture"};
-	this->windowDefaultBufferShader = gl_shader_load(vs, fs, windowDefaultBufferShader_paramName, this->windowDefaultBufferShader_param, 2, 0);
+	this->windowDefaultBufferShader = gl_shader_load(vs, fs, 0, windowDefaultBufferShader_paramName, this->windowDefaultBufferShader_param, 2, NULL, NULL, 0);
 	if (this->windowDefaultBufferShader == GL_INIT_DEFAULT_SHADER) {
 		#ifdef VERBOSE
 			fputs("\tFail to load default shader\n", stderr);
@@ -248,7 +249,11 @@ char* gl_loadFileToMemory(const char* filename, long int* length) {
 	return content;
 }
 
-gl_shader gl_shader_load(const char* shaderVertex, const char* shaderFragment, const char* paramName[], gl_param* paramId, const unsigned int paramCount, const int isFilePath) {
+gl_shader gl_shader_load(
+	const char* shaderVertex, const char* shaderFragment, const int isFilePath,
+	const char* paramName[], gl_param* paramId, const unsigned int paramCount,
+	const char* blockName[], gl_param* blockId, const unsigned int blockCount
+) {
 	#ifdef VERBOSE
 		if (isFilePath) {
 			fprintf(stdout, "Load shader: V=%s F=%s\n", shaderVertex, shaderFragment);
@@ -364,8 +369,18 @@ gl_shader gl_shader_load(const char* shaderVertex, const char* shaderFragment, c
 		paramName++;
 	}
 
+	for (size_t i = blockCount; i; i--) {
+		*blockId = glGetUniformBlockIndex(shader, *blockName);
+		#ifdef VERBOSE
+			fprintf(stdout, "\tBlock '%s' location: %d\n", *paramName, *paramId);
+			fflush(stdout);
+		#endif
+		blockId++;
+		blockName++;
+	}
+
 	glDeleteShader(shaderV); //Flag set, will be automatically delete when program deleted.
-	glDeleteShader(shaderF); //So we don't need to remember the vertex and fragment shaders ptr.
+	glDeleteShader(shaderF); //So we don't need to remember the vertex and fragment shaders name.
 	return shader;
 
 	gl_loadShader_error:
@@ -420,6 +435,36 @@ void gl_shader_unload(gl_shader* shader) {
 	if (*shader != GL_INIT_DEFAULT_SHADER)
 		glDeleteProgram(*shader);
 	*shader = GL_INIT_DEFAULT_SHADER;
+}
+
+gl_ubo gl_uniformBuffer_create(unsigned int bindingPoint, size_t size) {
+	gl_ubo ubo = GL_INIT_DEFAULT_UBO;
+
+	glGenBuffers(1, &ubo);
+	glBindBuffer(GL_UNIFORM_BUFFER, ubo);
+	glBufferData(GL_UNIFORM_BUFFER, size, NULL, GL_STATIC_DRAW); //in most case, we set params only at the beginning for only once
+
+	glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+	glBindBufferBase(GL_UNIFORM_BUFFER, bindingPoint, ubo);
+
+	return ubo;
+}
+
+void gl_uniformBuffer_bindShader(unsigned int bindingPoint, gl_shader* shader, gl_param id) {
+	glUniformBlockBinding(*shader, id, bindingPoint);
+}
+
+void gl_uniformBuffer_update_internal(gl_ubo* ubo, size_t start, size_t len, void* data) {
+	glBindBuffer(GL_UNIFORM_BUFFER, *ubo);
+	glBufferSubData(GL_UNIFORM_BUFFER, start, len, data);
+	glBindBuffer(GL_UNIFORM_BUFFER, 0);
+}
+
+void gl_unifromBuffer_delete(gl_ubo* ubo) {
+	if (*ubo != GL_INIT_DEFAULT_UBO)
+		glDeleteBuffers(1, ubo);
+	*ubo = GL_INIT_DEFAULT_UBO;
 }
 
 gl_mesh gl_mesh_create(size2d_t vertexSize, size_t indexCount, gl_index_t* elementsSize, gl_vertex_t* vertices, gl_index_t* indices) {

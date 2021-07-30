@@ -14,25 +14,32 @@
  */
 typedef struct GL_ClassDataStructure* GL;
 
-/** Shader and data types
+/** Shader and data types, UBO, SSBO
  */
 typedef unsigned int gl_shader;
 #define GL_INIT_DEFAULT_SHADER (gl_shader)0
 typedef int gl_param;
 typedef enum gl_datatype {gl_type_float, gl_type_int, gl_type_uint} gl_datatype;
 
+typedef unsigned int gl_ubo;
+#define GL_INIT_DEFAULT_UBO (gl_ubo)0
+
+typedef unsigned int gl_ssbo;
+#define GL_INIT_DEFAULT_SSBO (gl_ssbo)0
+
 /** Geometry objects (mesh)
  */
-typedef unsigned int gl_vao, gl_xbo;
+typedef unsigned int gl_vao, gl_vbo, gl_ebo;
 typedef struct GL_Mesh {
 	gl_vao vao;
-	gl_xbo vbo;
-	gl_xbo ebo;
+	gl_vbo vbo;
+	gl_ebo ebo;
 	unsigned int drawSize;
 } gl_mesh;
 #define GL_INIT_DEFAULT_VAO (gl_vao)0
-#define GL_INIT_DEFAULT_XBO (gl_xbo)0
-#define GL_INIT_DEFAULT_MESH (gl_mesh){GL_INIT_DEFAULT_VAO, GL_INIT_DEFAULT_XBO, GL_INIT_DEFAULT_XBO, 0}
+#define GL_INIT_DEFAULT_VBO (gl_vbo)0
+#define GL_INIT_DEFAULT_EBO (gl_ebo)0
+#define GL_INIT_DEFAULT_MESH (gl_mesh){GL_INIT_DEFAULT_VAO, GL_INIT_DEFAULT_VBO, GL_INIT_DEFAULT_EBO, 0}
 typedef float gl_vertex_t;
 typedef unsigned int gl_index_t;
 
@@ -50,11 +57,6 @@ typedef struct GL_FrameBuffer {
 	gl_tex texture;
 } gl_fb;
 #define GL_INIT_DEFAULT_FB (gl_fb){GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX}
-
-/** Shader storage buffer object
- */
-//typedef unsigned int gl_ssbo;
-//#define GL_INIT_DEFAULT_SSBO (gl_ssbo)0
 
 /* == Window management and driver init ===================================================== */
 
@@ -104,13 +106,20 @@ void gl_destroy(GL this);
 /** Load vertex and fragment shader, get IDs (location) of all parameters (uniform). 
  * @param shaderVertex Vertex shader or path to vertex shader file
  * @param shaderFragment Fragment shader or path to fragment shader file
+ * @param isFilePath If 0, shaderVertex and shaderFragment are pointer to the source code. If 1, they are path to the shader file
  * @param paramName An array of string represents shader parameters' names (uniform)
  * @param paramId Pass-by-reference: IDs (location) of the parameters
- * @param paramCount Number of parameters, same as the length (number of elements) of the paramNames and paramId
- * @param isFilePath If 0, shaderVertex and shaderFragment are pointer to the source code. If 1, they are path to the shader file
+ * @param paramCount Number of parameters, same as the length (number of elements) of the paramName and paramId
+ * @param blockName An array of string represents shader blocks' names (uniform interface)
+ * @param blockId Pass-by-reference: IDs (location) of the blocks
+ * @param blockCount Number of blocks, same as the length (number of elements) of the blockName and blockId
  * @return gl_shader object upon success, GL_INIT_DEFAULT_SHADER if fail
  */
-gl_shader gl_shader_load(const char* shaderVertex, const char* shaderFragment, const char* paramName[], gl_param* paramId, const unsigned int paramCount, const int isFilePath);
+gl_shader gl_shader_load(
+	const char* shaderVertex, const char* shaderFragment, const int isFilePath,
+	const char* paramName[], gl_param* paramId, const unsigned int paramCount,
+	const char* blockName[], gl_param* blockId, const unsigned int blockCount
+);
 
 /** Use a shader (bind a shader to current)
  * @param shader Shader to bind, previously returned by gl_shader_load()
@@ -128,9 +137,37 @@ void gl_shader_use(gl_shader* shader);
 void gl_shader_setParam_internal(gl_param paramId, uint8_t length, gl_datatype type, void* data);
 
 /** Unload a shader, the shader will be reset to GL_INIT_DEFAULT_SHADER. 
- * @param shader Shader index returned by gl_shader_load()
+ * @param shader Shader name returned by gl_shader_load()
  */
 void gl_shader_unload(gl_shader* shader);
+
+/** Create a uniform buffer and bind it to a binding point. 
+ * @param bindingPoint Binding point to bind
+ * @param size Size of memory allocating to the buffer, in bytes
+ * @return GL uniform buffer object
+ */
+gl_ubo gl_uniformBuffer_create(unsigned int bindingPoint, size_t size);
+
+/** Bind a shader's block to a uniform buffer in the binding point. 
+ * @param bindingPoint Binding point to bind
+ * @param shader Shader name returned by gl_shader_load()
+ * @param blockId ID (location) of the block in the shader
+ */
+void gl_uniformBuffer_bindShader(unsigned int bindingPoint, gl_shader* shader, gl_param id);
+
+/** Update data in a uniform buffer. 
+ * @param ubo A gl_ubo previously created by gl_uniformBuffer_create()
+ * @param start Starting offset of the update in bytes
+ * @param len Length of the update in bytes
+ * @param data Pointer to the data to write into UBO
+ */
+#define gl_uniformBuffer_update(ubo, start, len, data) gl_uniformBuffer_update_internal(ubo, start, len, (void*)data)
+void gl_uniformBuffer_update_internal(gl_ubo* ubo, size_t start, size_t len, void* data);
+
+/** Delete a UBO
+ * @param ubo A gl_ubo previously created by gl_uniformBuffer_create()
+ */
+void gl_unifromBuffer_delete(gl_ubo* ubo);
 
 /** Create and bind gl_mesh object (geometry). 
  * @param vertexSize Size of vertices array. Height = number of vertex; width = data per vertex

@@ -34,6 +34,13 @@ int main(int argc, char* argv[]) {
 	gl_fb framebuffer_stageB = GL_INIT_DEFAULT_FB;
 
 	gl_shader shader_filter3 = GL_INIT_DEFAULT_SHADER;
+	gl_param shader_filter3_paramSize;
+	gl_param shader_filter3_blockMask;
+
+	unsigned int ubo_bp_gussianMask =	0;
+	unsigned int ubo_bp_edgeMask =		1;
+	gl_ubo shader_ubo_gussianMask = GL_INIT_DEFAULT_UBO;
+	gl_ubo shader_ubo_edgeMask = GL_INIT_DEFAULT_UBO;
 
 //	gl_shader shader_history = GL_INIT_DEFAULT_SHADER;
 //	gl_ssbo shader_history_ssboPreviousFrame = GL_INIT_DEFAULT_SSBO;
@@ -62,40 +69,65 @@ int main(int argc, char* argv[]) {
 	framebuffer_stageA = gl_frameBuffer_create(size);
 	framebuffer_stageB = gl_frameBuffer_create(size);
 
-	/* Process - Kernel filter 3x3 */
-	const char* shader_filter3_paramName[] = {"size", "maskTop", "maskMiddle", "maskBottom"};
-	size_t shader_filter3_paramCount = sizeof(shader_filter3_paramName) / sizeof(shader_filter3_paramName[0]);
-	gl_param shader_filter3_paramId[4];
-	shader_filter3 = gl_shader_load("shader/stdRect.vs.glsl", "shader/filter3.fs.glsl", shader_filter3_paramName, shader_filter3_paramId, shader_filter3_paramCount, 1);
-	if (shader_filter3 == GL_INIT_DEFAULT_SHADER) {
-		fputs("Cannot load shader: 3*3 filter\n", stderr);
-		goto label_exit;
+	/* Process - Kernel filter 3x3 */ {
+		const char* pName[] = {"size"};
+		unsigned int pCount = sizeof(pName) / sizeof(pName[0]);
+		gl_param pId[pCount];
+
+		const char* bName[] = {"FilterMask"};
+		unsigned int bCount = sizeof(bName) / sizeof(bName[0]);
+		gl_param bId[bCount];
+
+		shader_filter3 = gl_shader_load("shader/stdRect.vs.glsl", "shader/filter3.fs.glsl", 1, pName, pId, pCount, bName, bId, bCount);
+		if (shader_filter3 == GL_INIT_DEFAULT_SHADER) {
+			fputs("Cannot load shader: 3*3 filter\n", stderr);
+			goto label_exit;
+		}
+
+		shader_filter3_paramSize = pId[0];
+		shader_filter3_blockMask = bId[0];
+
+		gl_shader_use(&shader_filter3);
+		float shader_filter3_paramSize_v[] = {size.width, size.height}; //Cast to float
+		gl_shader_setParam(shader_filter3_paramSize, 2, gl_type_float, shader_filter3_paramSize_v); //Size of frame will never change
 	}
-	gl_param shader_filter3_paramSize = shader_filter3_paramId[0];
-	gl_param shader_filter3_paramMaskTop = shader_filter3_paramId[1];
-	gl_param shader_filter3_paramMaskMiddle = shader_filter3_paramId[2];
-	gl_param shader_filter3_paramMaskBottom = shader_filter3_paramId[3];
-	gl_shader_use(&shader_filter3);
-	float shader_filter3_paramSize_v[] = {size.width, size.height}; //Cast to float
-	gl_shader_setParam(shader_filter3_paramSize, 2, gl_type_float, shader_filter3_paramSize_v); //Size of frame will not change
 
 	/* Process - Check pervious frame */
-/*	shader_history = gl_shader_load("shader/stdRect.vs.glsl", "shader/history.fs.glsl", NULL, NULL, 0, 1);
+/*	shader_history = gl_shader_load("shader/stdRect.vs.glsl", "shader/history.fs.glsl", 1, NULL, NULL, 0);
 	if (shader_history == GL_INIT_DEFAULT_SHADER) {
 		fputs("Cannot load shader: History frame lookback\n", stderr);
 		goto label_exit;
 	}*/
 
-	/* Drawing mash (simple rect) */
-	gl_vertex_t vertices[] = {
-		/*tr*/ 1.0f, 1.0f,
-		/*br*/ 1.0f, 0.0f,
-		/*bl*/ 0.0f, 0.0f,
-		/*tl*/ 0.0f, 1.0f
-	};
-	gl_index_t attributes[] = {2};
-	gl_index_t indices[] = {0, 3, 2, 0, 2, 1};
-	mesh_StdRect = gl_mesh_create((size2d_t){.height=4, .width=2}, 6, attributes, vertices, indices);
+	/* Process - Kernel filter 3*3 masks */ {
+		const float gussianMask[] = {
+			1.0f/16,	2.0f/16,	1.0f/16,	0.0f, //vec4 alignment
+			2.0f/16,	4.0f/16,	2.0f/16,	0.0f,
+			1.0f/16,	2.0f/16,	1.0f/16,	0.0f
+		};
+		shader_ubo_gussianMask = gl_uniformBuffer_create(ubo_bp_gussianMask, sizeof(gussianMask));
+		gl_uniformBuffer_update(&shader_ubo_gussianMask, 0, sizeof(gussianMask), gussianMask);
+
+		const float edgeMask[] = {
+			1.0f,	1.0f,	1.0f,	0.0f,
+			1.0f,	-8.0f,	1.0f,	0.0f,
+			1.0f,	1.0f,	1.0f,	0.0f
+		};
+		shader_ubo_edgeMask = gl_uniformBuffer_create(ubo_bp_edgeMask, sizeof(edgeMask));
+		gl_uniformBuffer_update(&shader_ubo_edgeMask, 0, sizeof(edgeMask), edgeMask);
+	}
+
+	/* Drawing mash (simple rect) */ {
+		gl_vertex_t vertices[] = {
+			/*tr*/ 1.0f, 1.0f,
+			/*br*/ 1.0f, 0.0f,
+			/*bl*/ 0.0f, 0.0f,
+			/*tl*/ 0.0f, 1.0f
+		};
+		gl_index_t attributes[] = {2};
+		gl_index_t indices[] = {0, 3, 2, 0, 2, 1};
+		mesh_StdRect = gl_mesh_create((size2d_t){.height=4, .width=2}, 6, attributes, vertices, indices);
+	}
 
 	/* Some extra code for development */
 	gl_fb* frameBuffer_old = &framebuffer_stageA; //Double buffer in workspace, one as old, one as new
@@ -122,28 +154,14 @@ int main(int argc, char* argv[]) {
 
 		gl_frameBuffer_bind(frameBuffer_new, size, 0); //Use video full-resolution for render
 		gl_shader_use(&shader_filter3);
-		const float gussianMask[] = {
-			1.0f/16,	2.0f/16,	1.0f/16,
-			2.0f/16,	4.0f/16,	2.0f/16,
-			1.0f/16,	2.0f/16,	1.0f/16
-		};
-		gl_shader_setParam(shader_filter3_paramMaskTop, 3, gl_type_float, &(gussianMask[0]));
-		gl_shader_setParam(shader_filter3_paramMaskMiddle, 3, gl_type_float, &(gussianMask[3]));
-		gl_shader_setParam(shader_filter3_paramMaskBottom, 3, gl_type_float, &(gussianMask[6]));
+		gl_uniformBuffer_bindShader(ubo_bp_gussianMask, &shader_filter3, shader_filter3_blockMask);
 		gl_texture_bind(&texture_orginalFrame, 0);
 		gl_mesh_draw(&mesh_StdRect);
 		swapFrameBuffer(frameBuffer_old, frameBuffer_new);
 
 		gl_frameBuffer_bind(frameBuffer_new, size, 0);
 		gl_shader_use(&shader_filter3);
-		const float edgeMask[] = {
-			1.0f,	1.0f,	1.0f,
-			1.0f,	-8.0f,	1.0f,
-			1.0f,	1.0f,	1.0f
-		};
-		gl_shader_setParam(shader_filter3_paramMaskTop, 3, gl_type_float, &(edgeMask[0]));
-		gl_shader_setParam(shader_filter3_paramMaskMiddle, 3, gl_type_float, &(edgeMask[3]));
-		gl_shader_setParam(shader_filter3_paramMaskBottom, 3, gl_type_float, &(edgeMask[6]));
+		gl_uniformBuffer_bindShader(ubo_bp_edgeMask, &shader_filter3, shader_filter3_blockMask);
 		gl_texture_bind(&frameBuffer_old->texture, 0);
 		gl_mesh_draw(&mesh_StdRect);
 		swapFrameBuffer(frameBuffer_old, frameBuffer_new);
@@ -176,6 +194,9 @@ label_exit:
 //	gl_shaderStorageBuffer_delete(&shader_history_ssboPreviousFrame);
 //	gl_shader_unload(&shader_history);
 	
+	gl_unifromBuffer_delete(&shader_ubo_gussianMask);
+	gl_unifromBuffer_delete(&shader_ubo_edgeMask);
+
 	gl_shader_unload(&shader_filter3);
 
 	gl_frameBuffer_delete(&framebuffer_stageB);
