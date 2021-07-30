@@ -94,5 +94,5 @@ void fifo2_destroy(Fifo2 this) {
 
 	free(this->bufferA);
 	free(this->bufferB);
-	free(this);
+	free((void*)this);
 }

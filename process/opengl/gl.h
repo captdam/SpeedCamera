@@ -51,6 +51,11 @@ typedef struct GL_FrameBuffer {
 } gl_fb;
 #define GL_INIT_DEFAULT_FB (gl_fb){GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX}
 
+/** Shader storage buffer object
+ */
+//typedef unsigned int gl_ssbo;
+//#define GL_INIT_DEFAULT_SSBO (gl_ssbo)0
+
 /* == Window management and driver init ===================================================== */
 
 /** Init the GL class (only one allowed). 
@@ -71,9 +76,10 @@ void gl_drawStart(GL this);
  * To draw anything in the viewer window, first draw all the objects on a texture (framebuffer.texture); 
  * then, pass that texture to this function. 
  * @param this This GL class object
- * @param texture Texture to draw
+ * @param orginalTexture Orginal texture from camera
+ * @param processedTexture Processed data
  */
-void gl_drawWindow(GL this, gl_tex* texture);
+void gl_drawWindow(GL this, gl_tex* orginalTexture, gl_tex* processedTexture);
 
 /** Call to end a render loop 
  * @param this This GL class object
@@ -107,13 +113,13 @@ void gl_destroy(GL this);
 gl_shader gl_shader_load(const char* shaderVertex, const char* shaderFragment, const char* paramName[], gl_param* paramId, const unsigned int paramCount, const int isFilePath);
 
 /** Use a shader (bind a shader to current)
- * @param shader Shader to bind, previously returned by gl_loadShader()
+ * @param shader Shader to bind, previously returned by gl_shader_load()
  */
 void gl_shader_use(gl_shader* shader);
 
 /** Pass data to shader parameters (uniform). 
  * Call gl_useShader() to bind the shader before set the parameters. 
- * @param paramId ID of parameter returned by gl_loadShader
+ * @param paramId ID of parameter returned by gl_shader_load()
  * @param length Number of parameters (vecX, can be 1, 2, 3 or 4, use 1 for non-verctor params, like float or sampler), must match with shader
  * @param type Type of the data (gl_type_float, gl_type_int or gl_type_uint), must match with shader
  * @param data Pointer to the data to be pass
@@ -122,7 +128,7 @@ void gl_shader_use(gl_shader* shader);
 void gl_shader_setParam_internal(gl_param paramId, uint8_t length, gl_datatype type, void* data);
 
 /** Unload a shader, the shader will be reset to GL_INIT_DEFAULT_SHADER. 
- * @param shader Shader index returned by gl_loadShader()
+ * @param shader Shader index returned by gl_shader_load()
  */
 void gl_shader_unload(gl_shader* shader);
 
@@ -137,12 +143,12 @@ void gl_shader_unload(gl_shader* shader);
 gl_mesh gl_mesh_create(size2d_t vertexSize, size_t indexCount, gl_index_t* elementsSize, gl_vertex_t* vertices, gl_index_t* indices);
 
 /** Draw a gl_mesh object. 
- * @param mesh A gl_mesh object previously created by gl_createMesh()
+ * @param mesh A gl_mesh object previously created by gl_mesh_create()
  */
 void gl_mesh_draw(gl_mesh* mesh);
 
 /** Delete a gl_mesh object (geometry), the gl_mesh ID will be set to GL_INIT_DEFAULT_MESH. 
- * @param mesh A gl_mesh object previously created by gl_createMesh()
+ * @param mesh A gl_mesh object previously created by gl_mesh_create()
  */
 void gl_mesh_delete(gl_mesh* mesh);
 
@@ -153,20 +159,20 @@ void gl_mesh_delete(gl_mesh* mesh);
 gl_tex gl_texture_create(size2d_t size);
 
 /** Update a gl_tex object 
- * @param texture A gl_tex object previously created by gl_createTexture()
+ * @param texture A gl_tex object previously created by gl_texture_create()
  * @param size Width and height of the texture in unit of pixel
  * @param data Pointer to the texture data
  */
 void gl_texture_update(gl_tex* texture, size2d_t size, void* data);
 
 /** Bind a texture object to OpenGL engine texture unit 
- * @param texture A gl_tex object previously created by gl_createTexture()
+ * @param texture A gl_tex object previously created by gl_texture_create()
  * @param unit OpenGL texture unit, same as the GL_TEXTUREX
  */
 void gl_texture_bind(gl_tex* texture, unsigned int unit);
 
 /** Delete a gl_tex object, the texture ID be set to GL_INIT_DEFAULT_TEX
- * @param texture A gl_tex object previously created by gl_createTexture()
+ * @param texture A gl_tex object previously created by gl_texture_create()
  */
 void gl_texture_delete(gl_tex* texture);
 
@@ -178,16 +184,27 @@ gl_fb gl_frameBuffer_create(size2d_t size);
 
 /** Bind a frame buffer to current. 
  * To bind the default buffer (window), pass this->frame = 0. 
- * @param fb A frame buffer object previously created by gl_createFrameBuffer(...)
+ * @param fb A frame buffer object previously created by gl_frameBuffer_create()
  * @param size Set the size of view port. Pass {0,0} to skip this step
  * @param clear Set to true (non-zero value) to clear the buffer, use 0 to skip
  */
 void gl_frameBuffer_bind(gl_fb* fb, size2d_t size, int clear);
 
 /** Delete a frame buffer object. 
- * @param fb A frame buffer object previously created by gl_createFrameBuffer(...)
+ * @param fb A frame buffer object previously created by gl_frameBuffer_create()
  */
 void gl_frameBuffer_delete(gl_fb* fb);
+
+/** Create a shader storage buffer of general purpose computation. 
+ * @param size Size of buffer in bytes
+ * @return GL shader storage buffer object
+ */
+//gl_ssbo gl_shaderStorageBuffer_create(size_t size);
+
+/** Delerte a shader storage buffer object. 
+ * @param ssbo A storage buffer object previously created by gl_shaderStorageBuffer_create()
+ */
+//void gl_shaderStorageBuffer_delete(gl_ssbo* ssbo);
 
 /** Force the GL driver to sync, the frame buffer will be reset to GL_INIT_DEFAULT_FB. 
  * Calling thread will be blocked until all previous GL calls executed completely.

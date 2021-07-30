@@ -35,6 +35,9 @@ int main(int argc, char* argv[]) {
 
 	gl_shader shader_filter3 = GL_INIT_DEFAULT_SHADER;
 
+//	gl_shader shader_history = GL_INIT_DEFAULT_SHADER;
+//	gl_ssbo shader_history_ssboPreviousFrame = GL_INIT_DEFAULT_SSBO;
+
 	gl_mesh mesh_StdRect = GL_INIT_DEFAULT_MESH;
 
 	/* Init source reading thread */
@@ -64,8 +67,8 @@ int main(int argc, char* argv[]) {
 	size_t shader_filter3_paramCount = sizeof(shader_filter3_paramName) / sizeof(shader_filter3_paramName[0]);
 	gl_param shader_filter3_paramId[4];
 	shader_filter3 = gl_shader_load("shader/stdRect.vs.glsl", "shader/filter3.fs.glsl", shader_filter3_paramName, shader_filter3_paramId, shader_filter3_paramCount, 1);
-	if (!shader_filter3) {
-		fputs("Cannot load program.\n", stderr);
+	if (shader_filter3 == GL_INIT_DEFAULT_SHADER) {
+		fputs("Cannot load shader: 3*3 filter\n", stderr);
 		goto label_exit;
 	}
 	gl_param shader_filter3_paramSize = shader_filter3_paramId[0];
@@ -76,16 +79,23 @@ int main(int argc, char* argv[]) {
 	float shader_filter3_paramSize_v[] = {size.width, size.height}; //Cast to float
 	gl_shader_setParam(shader_filter3_paramSize, 2, gl_type_float, shader_filter3_paramSize_v); //Size of frame will not change
 
+	/* Process - Check pervious frame */
+/*	shader_history = gl_shader_load("shader/stdRect.vs.glsl", "shader/history.fs.glsl", NULL, NULL, 0, 1);
+	if (shader_history == GL_INIT_DEFAULT_SHADER) {
+		fputs("Cannot load shader: History frame lookback\n", stderr);
+		goto label_exit;
+	}*/
+
 	/* Drawing mash (simple rect) */
 	gl_vertex_t vertices[] = {
-		/*tr*/ +1.0f, +1.0f, 1.0f, 1.0f,
-		/*br*/ +1.0f, -1.0f, 1.0f, 0.0f,
-		/*bl*/ -1.0f, -1.0f, 0.0f, 0.0f,
-		/*tl*/ -1.0f, +1.0f, 0.0f, 1.0f
+		/*tr*/ 1.0f, 1.0f,
+		/*br*/ 1.0f, 0.0f,
+		/*bl*/ 0.0f, 0.0f,
+		/*tl*/ 0.0f, 1.0f
 	};
-	gl_index_t attributes[] = {4};
+	gl_index_t attributes[] = {2};
 	gl_index_t indices[] = {0, 3, 2, 0, 2, 1};
-	mesh_StdRect = gl_mesh_create((size2d_t){.height=4, .width=4}, 6, attributes, vertices, indices);
+	mesh_StdRect = gl_mesh_create((size2d_t){.height=4, .width=2}, 6, attributes, vertices, indices);
 
 	/* Some extra code for development */
 	gl_fb* frameBuffer_old = &framebuffer_stageA; //Double buffer in workspace, one as old, one as new
@@ -138,7 +148,13 @@ int main(int argc, char* argv[]) {
 		gl_mesh_draw(&mesh_StdRect);
 		swapFrameBuffer(frameBuffer_old, frameBuffer_new);
 
-		gl_drawWindow(gl, &frameBuffer_old->texture); //A forced opengl synch
+/*		gl_frameBuffer_bind(frameBuffer_new, size, 0);
+		gl_shader_use(&shader_history);
+		gl_texture_bind(&frameBuffer_old->texture, 0);
+		gl_mesh_draw(&mesh_StdRect);
+		swapFrameBuffer(frameBuffer_old, frameBuffer_new);*/
+
+		gl_drawWindow(gl, &texture_orginalFrame, &frameBuffer_old->texture); //A forced opengl synch
 		mt_source_finish(source); //Release source class buffer
 
 		char title[60];
@@ -156,6 +172,10 @@ int main(int argc, char* argv[]) {
 	status = EXIT_SUCCESS;
 label_exit:
 	gl_mesh_delete(&mesh_StdRect);
+	
+//	gl_shaderStorageBuffer_delete(&shader_history_ssboPreviousFrame);
+//	gl_shader_unload(&shader_history);
+	
 	gl_shader_unload(&shader_filter3);
 
 	gl_frameBuffer_delete(&framebuffer_stageB);
