@@ -12,7 +12,7 @@
 
 //#include "source.h"
 
-#define WINDOW_RATIO 2
+#define WINDOW_RATIO 1
 
 #define DEBUG_STAGE 1
 #define DEBUG_FILE_DIR "./debugspace/debug.data"
@@ -26,24 +26,28 @@ int main(int argc, char* argv[]) {
 	
 	MT_Source source = NULL;
 	size2d_t size;
+	float fsize[2]; //Cast to float, for shader use, this value will never change
+	size_t tsize; //Total size in pixel, for memory allocation use
 
 	GL gl = NULL;
 
 	gl_tex texture_orginalFrame = GL_INIT_DEFAULT_TEX;
+	gl_fb framebuffer_history = GL_INIT_DEFAULT_FB;
 	gl_fb framebuffer_stageA = GL_INIT_DEFAULT_FB;
 	gl_fb framebuffer_stageB = GL_INIT_DEFAULT_FB;
 
 	gl_shader shader_filter3 = GL_INIT_DEFAULT_SHADER;
-	gl_param shader_filter3_paramSize;
+	gl_param shader_filter3_paramPStage;
 	gl_param shader_filter3_blockMask;
 
-	unsigned int ubo_bp_gussianMask =	0;
-	unsigned int ubo_bp_edgeMask =		1;
+	gl_shader shader_history = GL_INIT_DEFAULT_SHADER;
+	gl_param shader_history_paramPStage;
+	gl_param shader_history_paramHistory;
+
+	const unsigned int bindingPoint_ubo_gussianMask =	0;
+	const unsigned int bindingPoint_ubo_edgeMask =		1;
 	gl_ubo shader_ubo_gussianMask = GL_INIT_DEFAULT_UBO;
 	gl_ubo shader_ubo_edgeMask = GL_INIT_DEFAULT_UBO;
-
-//	gl_shader shader_history = GL_INIT_DEFAULT_SHADER;
-//	gl_ssbo shader_history_ssboPreviousFrame = GL_INIT_DEFAULT_SSBO;
 
 	gl_mesh mesh_StdRect = GL_INIT_DEFAULT_MESH;
 
@@ -54,6 +58,10 @@ int main(int argc, char* argv[]) {
 		goto label_exit;
 	}
 	size = mt_source_getSize(source);
+	fsize[0] = size.width;
+	fsize[1] = size.height;
+	tsize = size.width * size.height;
+
 
 	/* Init OpenGL and viewer window */
 	gl = gl_init(size, WINDOW_RATIO);
@@ -65,12 +73,15 @@ int main(int argc, char* argv[]) {
 	/* Use a texture to store raw frame data */
 	texture_orginalFrame = gl_texture_create(size);
 
+	/* Use a texture to remember previous edges */
+	framebuffer_history = gl_frameBuffer_create(size); //First few frames will contain garbages, but we are OK with that
+
 	/* Drawing on frame buffer to process data */
 	framebuffer_stageA = gl_frameBuffer_create(size);
 	framebuffer_stageB = gl_frameBuffer_create(size);
 
 	/* Process - Kernel filter 3x3 */ {
-		const char* pName[] = {"size"};
+		const char* pName[] = {"size", "pStage"};
 		unsigned int pCount = sizeof(pName) / sizeof(pName[0]);
 		gl_param pId[pCount];
 
@@ -84,20 +95,34 @@ int main(int argc, char* argv[]) {
 			goto label_exit;
 		}
 
-		shader_filter3_paramSize = pId[0];
+		shader_filter3_paramPStage = pId[1];
 		shader_filter3_blockMask = bId[0];
 
 		gl_shader_use(&shader_filter3);
-		float shader_filter3_paramSize_v[] = {size.width, size.height}; //Cast to float
-		gl_shader_setParam(shader_filter3_paramSize, 2, gl_type_float, shader_filter3_paramSize_v); //Size of frame will never change
+		gl_shader_setParam(pId[0], 2, gl_type_float, fsize);
 	}
 
-	/* Process - Check pervious frame */
-/*	shader_history = gl_shader_load("shader/stdRect.vs.glsl", "shader/history.fs.glsl", 1, NULL, NULL, 0);
-	if (shader_history == GL_INIT_DEFAULT_SHADER) {
-		fputs("Cannot load shader: History frame lookback\n", stderr);
-		goto label_exit;
-	}*/
+	/* Process - Check pervious frames */ {
+		const char* pName[] = {"size", "pStage", "history"};
+		unsigned int pCount = sizeof(pName) / sizeof(pName[0]);
+		gl_param pId[pCount];
+
+		const char* bName[] = {};
+		unsigned int bCount = sizeof(bName) / sizeof(bName[0]);
+		gl_param bId[bCount];
+
+		shader_history = gl_shader_load("shader/stdRect.vs.glsl", "shader/history.fs.glsl", 1, pName, pId, pCount, bName, bId, bCount);
+		if (shader_history == GL_INIT_DEFAULT_SHADER) {
+			fputs("Cannot load shader: History frame lookback\n", stderr);
+			goto label_exit;
+		}
+
+		shader_history_paramPStage = pId[1];
+		shader_history_paramHistory = pId[2];
+
+		gl_shader_use(&shader_history);
+		gl_shader_setParam(pId[0], 2, gl_type_float, fsize);
+	}
 
 	/* Process - Kernel filter 3*3 masks */ {
 		const float gussianMask[] = {
@@ -105,7 +130,7 @@ int main(int argc, char* argv[]) {
 			2.0f/16,	4.0f/16,	2.0f/16,	0.0f,
 			1.0f/16,	2.0f/16,	1.0f/16,	0.0f
 		};
-		shader_ubo_gussianMask = gl_uniformBuffer_create(ubo_bp_gussianMask, sizeof(gussianMask));
+		shader_ubo_gussianMask = gl_uniformBuffer_create(bindingPoint_ubo_gussianMask, sizeof(gussianMask));
 		gl_uniformBuffer_update(&shader_ubo_gussianMask, 0, sizeof(gussianMask), gussianMask);
 
 		const float edgeMask[] = {
@@ -113,7 +138,7 @@ int main(int argc, char* argv[]) {
 			1.0f,	-8.0f,	1.0f,	0.0f,
 			1.0f,	1.0f,	1.0f,	0.0f
 		};
-		shader_ubo_edgeMask = gl_uniformBuffer_create(ubo_bp_edgeMask, sizeof(edgeMask));
+		shader_ubo_edgeMask = gl_uniformBuffer_create(bindingPoint_ubo_edgeMask, sizeof(edgeMask));
 		gl_uniformBuffer_update(&shader_ubo_edgeMask, 0, sizeof(edgeMask), edgeMask);
 	}
 
@@ -154,22 +179,24 @@ int main(int argc, char* argv[]) {
 
 		gl_frameBuffer_bind(frameBuffer_new, size, 0); //Use video full-resolution for render
 		gl_shader_use(&shader_filter3);
-		gl_uniformBuffer_bindShader(ubo_bp_gussianMask, &shader_filter3, shader_filter3_blockMask);
-		gl_texture_bind(&texture_orginalFrame, 0);
+		gl_uniformBuffer_bindShader(bindingPoint_ubo_gussianMask, &shader_filter3, shader_filter3_blockMask);
+		gl_texture_bind(&texture_orginalFrame, shader_filter3_paramPStage, 0);
 		gl_mesh_draw(&mesh_StdRect);
 		swapFrameBuffer(frameBuffer_old, frameBuffer_new);
 
 		gl_frameBuffer_bind(frameBuffer_new, size, 0);
 		gl_shader_use(&shader_filter3);
-		gl_uniformBuffer_bindShader(ubo_bp_edgeMask, &shader_filter3, shader_filter3_blockMask);
-		gl_texture_bind(&frameBuffer_old->texture, 0);
+		gl_uniformBuffer_bindShader(bindingPoint_ubo_edgeMask, &shader_filter3, shader_filter3_blockMask);
+		gl_texture_bind(&frameBuffer_old->texture, shader_filter3_paramPStage, 0);
 		gl_mesh_draw(&mesh_StdRect);
 		swapFrameBuffer(frameBuffer_old, frameBuffer_new);
 
-/*		gl_frameBuffer_bind(frameBuffer_new, size, 0);
+	/*	gl_frameBuffer_bind(frameBuffer_new, size, 0);
 		gl_shader_use(&shader_history);
-		gl_texture_bind(&frameBuffer_old->texture, 0);
+		gl_texture_bind(&frameBuffer_old->texture, shader_history_paramPStage, 0);
+		gl_texture_bind(&framebuffer_history.texture, shader_history_paramHistory, 1);
 		gl_mesh_draw(&mesh_StdRect);
+		gl_frameBuffer_copy(&framebuffer_history, &frameBuffer_new, size);
 		swapFrameBuffer(frameBuffer_old, frameBuffer_new);*/
 
 		gl_drawWindow(gl, &texture_orginalFrame, &frameBuffer_old->texture); //A forced opengl synch
@@ -191,16 +218,15 @@ int main(int argc, char* argv[]) {
 label_exit:
 	gl_mesh_delete(&mesh_StdRect);
 	
-//	gl_shaderStorageBuffer_delete(&shader_history_ssboPreviousFrame);
-//	gl_shader_unload(&shader_history);
-	
 	gl_unifromBuffer_delete(&shader_ubo_gussianMask);
 	gl_unifromBuffer_delete(&shader_ubo_edgeMask);
 
+	gl_shader_unload(&shader_history);
 	gl_shader_unload(&shader_filter3);
 
 	gl_frameBuffer_delete(&framebuffer_stageB);
 	gl_frameBuffer_delete(&framebuffer_stageA);
+	gl_frameBuffer_delete(&framebuffer_history);
 	gl_texture_delete(&texture_orginalFrame);
 
 	gl_destroy(gl);

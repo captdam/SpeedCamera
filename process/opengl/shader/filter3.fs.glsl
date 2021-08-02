@@ -8,7 +8,7 @@ uniform sampler2D pStage;
 
 uniform vec2 size;
 
-uniform FilterMask {
+layout (std140) uniform FilterMask {
 	vec3 maskTop;
 	vec3 maskMiddle;
 	vec3 maskBottom;
@@ -24,19 +24,19 @@ void main() {
 		int(textpos.y * size.y)
 	);
 	vec3 pixelTop = vec3(
-		texelFetch(pStage, texelIndex + ivec2(-1, -1), 0).r,
-		texelFetch(pStage, texelIndex + ivec2( 0, -1), 0).r,
-		texelFetch(pStage, texelIndex + ivec2(+1, -1), 0).r
+		texelFetchOffset(pStage, texelIndex, 0, ivec2(-1, -1)).r,
+		texelFetchOffset(pStage, texelIndex, 0, ivec2( 0, -1)).r,
+		texelFetchOffset(pStage, texelIndex, 0, ivec2(+1, -1)).r
 	);
 	vec3 pixelMiddle = vec3(
-		texelFetch(pStage, texelIndex + ivec2(-1,  0), 0).r,
-		texelFetch(pStage, texelIndex + ivec2( 0,  0), 0).r,
-		texelFetch(pStage, texelIndex + ivec2(+1,  0), 0).r
+		texelFetchOffset(pStage, texelIndex, 0, ivec2(-1,  0)).r,
+		texelFetchOffset(pStage, texelIndex, 0, ivec2( 0,  0)).r,
+		texelFetchOffset(pStage, texelIndex, 0, ivec2(+1,  0)).r
 	);
 	vec3 pixelBottom = vec3(
-		texelFetch(pStage, texelIndex + ivec2(-1, +1), 0).r,
-		texelFetch(pStage, texelIndex + ivec2( 0, +1), 0).r,
-		texelFetch(pStage, texelIndex + ivec2(+1, +1), 0).r
+		texelFetchOffset(pStage, texelIndex, 0, ivec2(-1, +1)).r,
+		texelFetchOffset(pStage, texelIndex, 0, ivec2( 0, +1)).r,
+		texelFetchOffset(pStage, texelIndex, 0, ivec2(+1, +1)).r
 	);
 
 	float accumTop = dot(pixelTop, maskTop);

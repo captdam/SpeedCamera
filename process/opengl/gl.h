@@ -24,9 +24,6 @@ typedef enum gl_datatype {gl_type_float, gl_type_int, gl_type_uint} gl_datatype;
 typedef unsigned int gl_ubo;
 #define GL_INIT_DEFAULT_UBO (gl_ubo)0
 
-typedef unsigned int gl_ssbo;
-#define GL_INIT_DEFAULT_SSBO (gl_ssbo)0
-
 /** Geometry objects (mesh)
  */
 typedef unsigned int gl_vao, gl_vbo, gl_ebo;
@@ -111,7 +108,7 @@ void gl_destroy(GL this);
  * @param paramId Pass-by-reference: IDs (location) of the parameters
  * @param paramCount Number of parameters, same as the length (number of elements) of the paramName and paramId
  * @param blockName An array of string represents shader blocks' names (uniform interface)
- * @param blockId Pass-by-reference: IDs (location) of the blocks
+ * @param blockId Pass-by-reference: IDs (index) of the blocks
  * @param blockCount Number of blocks, same as the length (number of elements) of the blockName and blockId
  * @return gl_shader object upon success, GL_INIT_DEFAULT_SHADER if fail
  */
@@ -151,9 +148,9 @@ gl_ubo gl_uniformBuffer_create(unsigned int bindingPoint, size_t size);
 /** Bind a shader's block to a uniform buffer in the binding point. 
  * @param bindingPoint Binding point to bind
  * @param shader Shader name returned by gl_shader_load()
- * @param blockId ID (location) of the block in the shader
+ * @param blockId ID of the block in the shader  returned by gl_shader_load()
  */
-void gl_uniformBuffer_bindShader(unsigned int bindingPoint, gl_shader* shader, gl_param id);
+void gl_uniformBuffer_bindShader(unsigned int bindingPoint, gl_shader* shader, gl_param blockId);
 
 /** Update data in a uniform buffer. 
  * @param ubo A gl_ubo previously created by gl_uniformBuffer_create()
@@ -164,7 +161,7 @@ void gl_uniformBuffer_bindShader(unsigned int bindingPoint, gl_shader* shader, g
 #define gl_uniformBuffer_update(ubo, start, len, data) gl_uniformBuffer_update_internal(ubo, start, len, (void*)data)
 void gl_uniformBuffer_update_internal(gl_ubo* ubo, size_t start, size_t len, void* data);
 
-/** Delete a UBO
+/** Delete a uniform buffer (UBO). 
  * @param ubo A gl_ubo previously created by gl_uniformBuffer_create()
  */
 void gl_unifromBuffer_delete(gl_ubo* ubo);
@@ -204,9 +201,10 @@ void gl_texture_update(gl_tex* texture, size2d_t size, void* data);
 
 /** Bind a texture object to OpenGL engine texture unit 
  * @param texture A gl_tex object previously created by gl_texture_create()
+ * @param paramId ID of texture parameter returned by gl_shader_load()
  * @param unit OpenGL texture unit, same as the GL_TEXTUREX
  */
-void gl_texture_bind(gl_tex* texture, unsigned int unit);
+void gl_texture_bind(gl_tex* texture, gl_param paramId, unsigned int unit);
 
 /** Delete a gl_tex object, the texture ID be set to GL_INIT_DEFAULT_TEX
  * @param texture A gl_tex object previously created by gl_texture_create()
@@ -220,28 +218,24 @@ void gl_texture_delete(gl_tex* texture);
 gl_fb gl_frameBuffer_create(size2d_t size);
 
 /** Bind a frame buffer to current. 
- * To bind the default buffer (window), pass this->frame = 0. 
+ * To bind the default buffer (window), pass this with child frame = 0. 
  * @param fb A frame buffer object previously created by gl_frameBuffer_create()
  * @param size Set the size of view port. Pass {0,0} to skip this step
  * @param clear Set to true (non-zero value) to clear the buffer, use 0 to skip
  */
 void gl_frameBuffer_bind(gl_fb* fb, size2d_t size, int clear);
 
+/** Copy texture from one frame buffer to another. 
+ * @param dest Data will be write into this frame buffer's texture buffer
+ * @param src Data will be read from this frame buffer's texture buffer
+ * @param size Size of the texture
+ */
+void gl_frameBuffer_copy(gl_fb* dest, gl_fb* src, size2d_t size);
+
 /** Delete a frame buffer object. 
  * @param fb A frame buffer object previously created by gl_frameBuffer_create()
  */
 void gl_frameBuffer_delete(gl_fb* fb);
-
-/** Create a shader storage buffer of general purpose computation. 
- * @param size Size of buffer in bytes
- * @return GL shader storage buffer object
- */
-//gl_ssbo gl_shaderStorageBuffer_create(size_t size);
-
-/** Delerte a shader storage buffer object. 
- * @param ssbo A storage buffer object previously created by gl_shaderStorageBuffer_create()
- */
-//void gl_shaderStorageBuffer_delete(gl_ssbo* ssbo);
 
 /** Force the GL driver to sync, the frame buffer will be reset to GL_INIT_DEFAULT_FB. 
  * Calling thread will be blocked until all previous GL calls executed completely.

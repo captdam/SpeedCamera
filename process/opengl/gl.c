@@ -18,10 +18,10 @@
 
 struct GL_ClassDataStructure {
 	GLFWwindow* window;
-	gl_mesh windowDefaultBufferMesh;
-	gl_shader windowDefaultBufferShader;
+	gl_mesh defaultMesh;
+	gl_shader defaultShader;
 	size2d_t windowSize;
-	gl_param windowDefaultBufferShader_param[2];
+	gl_param defaultShader_paramOrginal, defaultShader_paramProcessed;
 };
 
 /* == Window management and driver init == [Object] ========================================= */
@@ -57,8 +57,8 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio) {
 		return NULL;
 	}
 	this->window = NULL;
-	this->windowDefaultBufferMesh = GL_INIT_DEFAULT_MESH;
-	this->windowDefaultBufferShader = GL_INIT_DEFAULT_SHADER;
+	this->defaultMesh = GL_INIT_DEFAULT_MESH;
+	this->defaultShader = GL_INIT_DEFAULT_SHADER;
 
 	/* init GLFW */
 	if (!glfwInit()) {
@@ -115,47 +115,59 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio) {
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 //	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
-	/* Draw window - mesh */
-	gl_vertex_t vertices[] = {
-		1.0f, 0.0f,
-		1.0f, 1.0f,
-		0.0f, 1.0f,
-		0.0f, 0.0f
-	};
-	gl_index_t indices[] = {0, 3, 2, 0, 2, 1};
-	gl_index_t attributes[] = {2};
-	this->windowDefaultBufferMesh = gl_mesh_create((size2d_t){.height = 4, .width = 2}, 6, attributes, vertices, indices);
+	/* Draw window - mesh */ {
+		gl_vertex_t vertices[] = {
+			1.0f, 0.0f,
+			1.0f, 1.0f,
+			0.0f, 1.0f,
+			0.0f, 0.0f
+		};
+		gl_index_t indices[] = {0, 3, 2, 0, 2, 1};
+		gl_index_t attributes[] = {2};
+		this->defaultMesh = gl_mesh_create((size2d_t){.height = 4, .width = 2}, 6, attributes, vertices, indices);
+	}
 
-	/* Draw window - shader */
-	#define mixLevel "0.99f"
-	const char* vs = "#version 310 es\nprecision mediump float;\n"
-	"layout (location = 0) in vec2 position;\n"
-	"out vec2 textpos;\n"
-	"void main() {\n"
-	"	gl_Position = vec4(position.x * 2.0f - 1.0f, position.y * 2.0f - 1.0f, 0.0f, 1.0f);\n"
-	"	textpos = vec2(position.x, 1.0f - position.y); //Fix y-axis difference screen coord\n"
-	"}\n";
-	const char* fs = "#version 310 es\nprecision mediump float;\n"
-	"in vec2 textpos;\n"
-	"uniform sampler2D orginalTexture;\n"
-	"uniform sampler2D processedTexture;\n"
-	"out vec4 color;\n"
-	"void main() {\n"
-	"	const float mixLevel = "mixLevel";\n"
-	"	float od = texture(orginalTexture, textpos).r;\n"
-	"	float pd = texture(processedTexture, textpos).r;\n"
-	"	float data = mix(od, pd, mixLevel);\n"
-	"	color = vec4(data, data, data, 1.0f);\n"
-	"}\n";
-	const char* windowDefaultBufferShader_paramName[] = {"orginalTexture", "processedTexture"};
-	this->windowDefaultBufferShader = gl_shader_load(vs, fs, 0, windowDefaultBufferShader_paramName, this->windowDefaultBufferShader_param, 2, NULL, NULL, 0);
-	if (this->windowDefaultBufferShader == GL_INIT_DEFAULT_SHADER) {
-		#ifdef VERBOSE
-			fputs("\tFail to load default shader\n", stderr);
-		#endif
+	/* Draw window - shader */ {
+		#define mixLevel "0.99f"
+		const char* vs = "#version 310 es\nprecision mediump float;\n"
+		"layout (location = 0) in vec2 position;\n"
+		"out vec2 textpos;\n"
+		"void main() {\n"
+		"	gl_Position = vec4(position.x * 2.0f - 1.0f, position.y * 2.0f - 1.0f, 0.0f, 1.0f);\n"
+		"	textpos = vec2(position.x, 1.0f - position.y); //Fix y-axis difference screen coord\n"
+		"}\n";
+		const char* fs = "#version 310 es\nprecision mediump float;\n"
+		"in vec2 textpos;\n"
+		"uniform sampler2D orginalTexture;\n"
+		"uniform sampler2D processedTexture;\n"
+		"out vec4 color;\n"
+		"void main() {\n"
+		"	const float mixLevel = "mixLevel";\n"
+		"	float od = texture(orginalTexture, textpos).r;\n"
+		"	float pd = texture(processedTexture, textpos).r;\n"
+		"	float data = mix(od, pd, mixLevel);\n"
+		"	color = vec4(data, data, data, 1.0f);\n"
+		"}\n";
+		const char* pName[] = {"orginalTexture", "processedTexture"};
+		unsigned int pCount = sizeof(pName) / sizeof(pName[0]);
+		gl_param pId[pCount];
 
-		gl_destroy(this);
-		return NULL;
+		const char* bName[] = {};
+		unsigned int bCount = sizeof(bName) / sizeof(bName[0]);
+		gl_param bId[bCount];
+
+		this->defaultShader = gl_shader_load(vs, fs, 0, pName, pId, pCount, bName, bId, bCount);
+		if (this->defaultShader == GL_INIT_DEFAULT_SHADER) {
+			#ifdef VERBOSE
+				fputs("\tFail to load default shader\n", stderr);
+			#endif
+
+			gl_destroy(this);
+			return NULL;
+		}
+
+		this->defaultShader_paramOrginal = pId[0];
+		this->defaultShader_paramProcessed = pId[1];
 	}
 
 	/* Init OK */
@@ -167,21 +179,14 @@ void gl_drawStart(GL this) {
 }
 
 void gl_drawWindow(GL this, gl_tex* orginalTexture, gl_tex* processedTexture) {
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	glViewport(0, 0, this->windowSize.width, this->windowSize.height);
+	gl_fb df = {.frame=0};
+	gl_frameBuffer_bind(&df, this->windowSize, 0);
 
-	glUseProgram(this->windowDefaultBufferShader);
+	gl_shader_use(&this->defaultShader);
+	gl_texture_bind(orginalTexture, this->defaultShader_paramOrginal, 0);
+	gl_texture_bind(processedTexture, this->defaultShader_paramProcessed, 0);
 	
-	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, *orginalTexture);
-	glUniform1i(this->windowDefaultBufferShader_param[0], 0);
-	glActiveTexture(GL_TEXTURE1);
-	glBindTexture(GL_TEXTURE_2D, *processedTexture);
-	glUniform1i(this->windowDefaultBufferShader_param[1], 1);
-	
-	glBindVertexArray(this->windowDefaultBufferMesh.vao);
-	glDrawElements(GL_TRIANGLES, this->windowDefaultBufferMesh.drawSize, GL_UNSIGNED_INT, 0);
-	glBindVertexArray(0);
+	gl_mesh_draw(&this->defaultMesh);
 }
 
 void gl_drawEnd(GL this, const char* title) {
@@ -211,8 +216,8 @@ void gl_destroy(GL this) {
 
 	gl_close(this, 1);
 
-	gl_shader_unload(&this->windowDefaultBufferShader);
-	gl_mesh_delete(&this->windowDefaultBufferMesh);
+	gl_shader_unload(&this->defaultShader);
+	gl_mesh_delete(&this->defaultMesh);
 
 	if (this->window)
 		glfwTerminate();
@@ -372,7 +377,7 @@ gl_shader gl_shader_load(
 	for (size_t i = blockCount; i; i--) {
 		*blockId = glGetUniformBlockIndex(shader, *blockName);
 		#ifdef VERBOSE
-			fprintf(stdout, "\tBlock '%s' location: %d\n", *paramName, *paramId);
+			fprintf(stdout, "\tBlock '%s' location: %d\n", *blockName, *paramId);
 			fflush(stdout);
 		#endif
 		blockId++;
@@ -443,16 +448,14 @@ gl_ubo gl_uniformBuffer_create(unsigned int bindingPoint, size_t size) {
 	glGenBuffers(1, &ubo);
 	glBindBuffer(GL_UNIFORM_BUFFER, ubo);
 	glBufferData(GL_UNIFORM_BUFFER, size, NULL, GL_STATIC_DRAW); //in most case, we set params only at the beginning for only once
-
-	glBindBuffer(GL_UNIFORM_BUFFER, 0);
-
 	glBindBufferBase(GL_UNIFORM_BUFFER, bindingPoint, ubo);
+	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
 	return ubo;
 }
 
-void gl_uniformBuffer_bindShader(unsigned int bindingPoint, gl_shader* shader, gl_param id) {
-	glUniformBlockBinding(*shader, id, bindingPoint);
+void gl_uniformBuffer_bindShader(unsigned int bindingPoint, gl_shader* shader, gl_param blockId) {
+	glUniformBlockBinding(*shader, blockId, bindingPoint);
 }
 
 void gl_uniformBuffer_update_internal(gl_ubo* ubo, size_t start, size_t len, void* data) {
@@ -526,9 +529,10 @@ void gl_texture_update(gl_tex* texture, size2d_t size, void* data) {
 	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width, size.height, GL_RED, GL_UNSIGNED_BYTE, data);
 }
 
-void gl_texture_bind(gl_tex* texture, unsigned int unit) {
+void gl_texture_bind(gl_tex* texture, gl_param paramId, unsigned int unit) {
 	glActiveTexture(GL_TEXTURE0 + unit);
 	glBindTexture(GL_TEXTURE_2D, *texture);
+	glUniform1i(paramId, unit);
 }
 
 void gl_texture_delete(gl_tex* texture) {
@@ -562,6 +566,18 @@ void gl_frameBuffer_bind(gl_fb* fb, size2d_t size, int clear) {
 	}
 }
 
+void gl_frameBuffer_copy(gl_fb* dest, gl_fb* src, size2d_t size) {
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, dest->frame);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, src->frame);
+	glReadBuffer(GL_COLOR_ATTACHMENT0);
+	glDrawBuffer(GL_COLOR_ATTACHMENT0);
+	glBlitFramebuffer(0, 0, size.width, size.height, 0, 0, size.width, size.height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+
+//	glBindFramebuffer(GL_READ_FRAMEBUFFER, src->frame);
+//	glBindTexture(GL_TEXTURE_2D, dest->texture);
+//	glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RED, 0, 0, size.width, size.height, 0);
+}
+
 void gl_frameBuffer_delete(gl_fb* fb) {
 	if (fb->frame != GL_INIT_DEFAULT_FB.frame)
 		glDeleteFramebuffers(1, &fb->frame);
@@ -569,24 +585,6 @@ void gl_frameBuffer_delete(gl_fb* fb) {
 		gl_texture_delete(&fb->texture);
 	*fb = GL_INIT_DEFAULT_FB;
 }
-
-/*gl_ssbo gl_shaderStorageBuffer_create(size_t size) {
-	gl_ssbo ssbo = GL_INIT_DEFAULT_SSBO;
-
-	glGenBuffers(1, &ssbo);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, size, NULL, GL_DYNAMIC_COPY);
-//	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ssbo);
-
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-	return ssbo;
-}
-
-void gl_shaderStorageBuffer_delete(gl_ssbo* ssbo) {
-	if (*ssbo == GL_INIT_DEFAULT_SSBO)
-		glDeleteBuffers(1, ssbo);
-	*ssbo = GL_INIT_DEFAULT_SSBO;
-}*/
 
 void gl_fsync() {
 	glFinish();
