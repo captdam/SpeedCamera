@@ -5,18 +5,15 @@
 precision mediump float;
 
 uniform sampler2D pStage;
-
 uniform vec2 size;
+in vec2 textpos;
+out vec4 nStage;
 
 layout (std140) uniform FilterMask {
 	vec3 maskTop;
 	vec3 maskMiddle;
 	vec3 maskBottom;
 };
-
-in vec2 textpos;
-
-out vec4 nStage;
 
 void main() {
 	ivec2 texelIndex = ivec2(
