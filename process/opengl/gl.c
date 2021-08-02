@@ -566,18 +566,6 @@ void gl_frameBuffer_bind(gl_fb* fb, size2d_t size, int clear) {
 	}
 }
 
-void gl_frameBuffer_copy(gl_fb* dest, gl_fb* src, size2d_t size) {
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, dest->frame);
-	glBindFramebuffer(GL_READ_FRAMEBUFFER, src->frame);
-	glReadBuffer(GL_COLOR_ATTACHMENT0);
-	glDrawBuffer(GL_COLOR_ATTACHMENT0);
-	glBlitFramebuffer(0, 0, size.width, size.height, 0, 0, size.width, size.height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
-
-//	glBindFramebuffer(GL_READ_FRAMEBUFFER, src->frame);
-//	glBindTexture(GL_TEXTURE_2D, dest->texture);
-//	glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RED, 0, 0, size.width, size.height, 0);
-}
-
 void gl_frameBuffer_delete(gl_fb* fb) {
 	if (fb->frame != GL_INIT_DEFAULT_FB.frame)
 		glDeleteFramebuffers(1, &fb->frame);

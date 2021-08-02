@@ -36,6 +36,9 @@ int main(int argc, char* argv[]) {
 	gl_fb framebuffer_stageA = GL_INIT_DEFAULT_FB;
 	gl_fb framebuffer_stageB = GL_INIT_DEFAULT_FB;
 
+	gl_shader shader_blit = GL_INIT_DEFAULT_SHADER;
+	gl_param shader_blit_paramPStage;
+
 	gl_shader shader_filter3 = GL_INIT_DEFAULT_SHADER;
 	gl_param shader_filter3_paramPStage;
 	gl_param shader_filter3_blockMask;
@@ -80,6 +83,27 @@ int main(int argc, char* argv[]) {
 	framebuffer_stageA = gl_frameBuffer_create(size);
 	framebuffer_stageB = gl_frameBuffer_create(size);
 
+	/* Util - Blitting texture in framebuffer */ {
+		const char* pName[] = {"size", "pStage"};
+		unsigned int pCount = sizeof(pName) / sizeof(pName[0]);
+		gl_param pId[pCount];
+
+		const char* bName[] = {};
+		unsigned int bCount = sizeof(bName) / sizeof(bName[0]);
+		gl_param bId[bCount];
+
+		shader_blit = gl_shader_load("shader/stdRect.vs.glsl", "shader/blit.fs.glsl", 1, pName, pId, pCount, bName, bId, bCount);
+		if (shader_blit == GL_INIT_DEFAULT_SHADER) {
+			fputs("Cannot load shader: 3*3 filter\n", stderr);
+			goto label_exit;
+		}
+
+		gl_shader_use(&shader_blit);
+		gl_shader_setParam(pId[0], 2, gl_type_float, fsize);
+
+		shader_blit_paramPStage = pId[1];
+	}
+
 	/* Process - Kernel filter 3x3 */ {
 		const char* pName[] = {"size", "pStage"};
 		unsigned int pCount = sizeof(pName) / sizeof(pName[0]);
@@ -95,11 +119,11 @@ int main(int argc, char* argv[]) {
 			goto label_exit;
 		}
 
-		shader_filter3_paramPStage = pId[1];
-		shader_filter3_blockMask = bId[0];
-
 		gl_shader_use(&shader_filter3);
 		gl_shader_setParam(pId[0], 2, gl_type_float, fsize);
+
+		shader_filter3_paramPStage = pId[1];
+		shader_filter3_blockMask = bId[0];
 	}
 
 	/* Process - Check pervious frames */ {
@@ -117,11 +141,11 @@ int main(int argc, char* argv[]) {
 			goto label_exit;
 		}
 
-		shader_history_paramPStage = pId[1];
-		shader_history_paramHistory = pId[2];
-
 		gl_shader_use(&shader_history);
 		gl_shader_setParam(pId[0], 2, gl_type_float, fsize);
+
+		shader_history_paramPStage = pId[1];
+		shader_history_paramHistory = pId[2];
 	}
 
 	/* Process - Kernel filter 3*3 masks */ {
@@ -184,20 +208,24 @@ int main(int argc, char* argv[]) {
 		gl_mesh_draw(&mesh_StdRect);
 		swapFrameBuffer(frameBuffer_old, frameBuffer_new);
 
-		gl_frameBuffer_bind(frameBuffer_new, size, 0);
+/*		gl_frameBuffer_bind(frameBuffer_new, size, 0);
 		gl_shader_use(&shader_filter3);
 		gl_uniformBuffer_bindShader(bindingPoint_ubo_edgeMask, &shader_filter3, shader_filter3_blockMask);
 		gl_texture_bind(&frameBuffer_old->texture, shader_filter3_paramPStage, 0);
 		gl_mesh_draw(&mesh_StdRect);
-		swapFrameBuffer(frameBuffer_old, frameBuffer_new);
+		swapFrameBuffer(frameBuffer_old, frameBuffer_new);*/
 
-	/*	gl_frameBuffer_bind(frameBuffer_new, size, 0);
+		gl_frameBuffer_bind(frameBuffer_new, size, 0);
 		gl_shader_use(&shader_history);
 		gl_texture_bind(&frameBuffer_old->texture, shader_history_paramPStage, 0);
 		gl_texture_bind(&framebuffer_history.texture, shader_history_paramHistory, 1);
 		gl_mesh_draw(&mesh_StdRect);
-		gl_frameBuffer_copy(&framebuffer_history, &frameBuffer_new, size);
-		swapFrameBuffer(frameBuffer_old, frameBuffer_new);*/
+		swapFrameBuffer(frameBuffer_old, frameBuffer_new);
+
+		gl_frameBuffer_bind(&framebuffer_history, size, 0); //Render to history framebuffer instead frameBuffer_new
+		gl_shader_use(&shader_blit); //So, DON'T swap framebuffer after rendering
+		gl_texture_bind(&frameBuffer_old->texture, shader_blit_paramPStage, 0);
+		gl_mesh_draw(&mesh_StdRect);
 
 		gl_drawWindow(gl, &texture_orginalFrame, &frameBuffer_old->texture); //A forced opengl synch
 		mt_source_finish(source); //Release source class buffer
@@ -223,6 +251,7 @@ label_exit:
 
 	gl_shader_unload(&shader_history);
 	gl_shader_unload(&shader_filter3);
+	gl_shader_unload(&shader_blit);
 
 	gl_frameBuffer_delete(&framebuffer_stageB);
 	gl_frameBuffer_delete(&framebuffer_stageA);

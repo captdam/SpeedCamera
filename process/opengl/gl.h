@@ -225,13 +225,6 @@ gl_fb gl_frameBuffer_create(size2d_t size);
  */
 void gl_frameBuffer_bind(gl_fb* fb, size2d_t size, int clear);
 
-/** Copy texture from one frame buffer to another. 
- * @param dest Data will be write into this frame buffer's texture buffer
- * @param src Data will be read from this frame buffer's texture buffer
- * @param size Size of the texture
- */
-void gl_frameBuffer_copy(gl_fb* dest, gl_fb* src, size2d_t size);
-
 /** Delete a frame buffer object. 
  * @param fb A frame buffer object previously created by gl_frameBuffer_create()
  */
