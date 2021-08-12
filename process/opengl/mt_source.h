@@ -14,22 +14,25 @@
 typedef struct MultiThread_Source_ClassDataStructure* MT_Source;
 
 /** Create a MT_Source class. 
- * Init the inter-process communication FIFO with camera program. Get the video frame info. 
- * Init a new joinable thread to read frame data from FIFO. 
+ * Init a new joinable thread to read frame data from file, FIFO or Pi Camera. The first letter indicates the type. 
+ * To use Pi Camera, pass: "c" (c means camera); 
+ * To use FIFO file, pass: "f" (f means FIFO); 
+ * To use real file, pass: "dir/to/file" (if the argument is neither "c" or "f", the program read it as filepath). 
+ * A temp FIFO file call "tempframefifo.data" at current work directory will be created if using camera or fifo. 
  * Init a double buffer object to sharing frame data between main thread and this thread. 
- * This function will block until the camera program writes the video file header to the FIFO. 
+ * In case of FIFO, this function will block until the writer program writes the video file header to the FIFO. 
  * This function will create a new thread upon success. 
- * Double buffer: This thread will read frame n+1 while main threa processing frame n. 
+ * Double buffer: This thread will read and pre-process frame n+1 while main threa processing frame n. 
  * @param filename Path to the FIFO
  * @return $this(Opaque) MT-Source class object upon success. If fail, free all resource and return NULL
  */
 MT_Source mt_source_init(const char* filename);
 
-/** Get the size of video. 
+/** Get the video info of video. 
  * @param this This MT-Source class object
- * @return Size of frame data in pixel
+ * @return Video header data sturcture
  */
-size2d_t mt_source_getSize(MT_Source this);
+vh_t mt_source_getInfo(MT_Source this);
 
 /** Poll a new frame from the source, get the pointer to the data. 
  * This function will block until the frame data is ready in the double buffer. 
