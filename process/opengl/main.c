@@ -5,19 +5,14 @@
 #include <math.h>
 #include <unistd.h>
 #include <errno.h>
+#include <signal.h>
 
 #include "common.h"
 #include "gl.h"
 #include "mt_source.h"
+#include "roadmap.h"
 
-//#include "source.h"
-
-#define WINDOW_RATIO 1
-
-#define DEBUG_STAGE 1
-#define DEBUG_FILE_DIR "./debugspace/debug.data"
-
-
+#define WINDOW_RATIO 2
 
 int main(int argc, char* argv[]) {
 	int status = EXIT_FAILURE;
@@ -28,6 +23,7 @@ int main(int argc, char* argv[]) {
 	size2d_t size;
 	float fsize[2]; //Cast to float, for shader use, this value will never change
 	size_t tsize; //Total size in pixel, for memory allocation use
+	unsigned int fps;
 
 	GL gl = NULL;
 
@@ -54,16 +50,20 @@ int main(int argc, char* argv[]) {
 
 	gl_mesh mesh_StdRect = GL_INIT_DEFAULT_MESH;
 
-	/* Init source reading thread */
-	source = mt_source_init(argv[1]);
-	if (!source) {
-		fputs("Cannot init MT-Source class object (Source reading thread).\n", stderr);
-		goto label_exit;
+	/* Init source reading thread */ {
+		source = mt_source_init(argv[1]);
+		if (!source) {
+			fputs("Cannot init MT-Source class object (Source reading thread).\n", stderr);
+			goto label_exit;
+		}
+
+		vh_t info = mt_source_getInfo(source);
+		fps = info.fps;
+		size = (size2d_t){.width = info.width, .height = info.height};
+		fsize[0] = size.width;
+		fsize[1] = size.height;
+		tsize = size.width * size.height;
 	}
-	size = mt_source_getSize(source);
-	fsize[0] = size.width;
-	fsize[1] = size.height;
-	tsize = size.width * size.height;
 
 
 	/* Init OpenGL and viewer window */
@@ -167,15 +167,31 @@ int main(int argc, char* argv[]) {
 	}
 
 	/* Drawing mash (simple rect) */ {
-		gl_vertex_t vertices[] = {
-			/*tr*/ 1.0f, 1.0f,
-			/*br*/ 1.0f, 0.0f,
-			/*bl*/ 0.0f, 0.0f,
-			/*tl*/ 0.0f, 1.0f
+		Roadmap roadmap = roadmap_init(argv[2]);
+		if (!roadmap) {
+			fputs("Cannot load roadmap\n", stderr);
+			goto label_exit;
+		}
+
+		size_t vCount, iCount;
+		gl_vertex_t* vertices = roadmap_getVertices(roadmap, &vCount);
+		gl_index_t* indices = roadmap_getIndices(roadmap, &iCount);
+		gl_index_t attributes[] = {2, 2};
+		mesh_StdRect = gl_mesh_create((size2d_t){.height=vCount, .width=4}, 3 * iCount, attributes, vertices, indices);
+
+		gl_fsync();
+		roadmap_destroy(roadmap); //Free roadmap memory after data uploading finished
+
+/*		gl_vertex_t vertices[] = {
+			1.0f, 1.0f,
+			1.0f, 0.0f,
+			0.0f, 0.0f,
+			0.0f, 1.0f
 		};
 		gl_index_t attributes[] = {2};
 		gl_index_t indices[] = {0, 3, 2, 0, 2, 1};
-		mesh_StdRect = gl_mesh_create((size2d_t){.height=4, .width=2}, 6, attributes, vertices, indices);
+		mesh_StdRect = gl_mesh_create((size2d_t){.height=4, .width=2}, 6, attributes, vertices, indices);*/
+
 	}
 
 	/* Some extra code for development */
@@ -183,6 +199,11 @@ int main(int argc, char* argv[]) {
 	gl_fb* frameBuffer_new = &framebuffer_stageB; //Swap the old and new after each stage using the function below
 	gl_fb* temp;
 	#define swapFrameBuffer(a, b) {gl_fb* temp = a; a = b; b = temp;}
+
+	void ISR_SIGINT() {
+		gl_close(gl, 1);
+	}
+	signal(SIGINT, ISR_SIGINT);
 
 	/* Main process loop here */
 	fputs("Main thread: ready\n", stdout);
@@ -201,6 +222,7 @@ int main(int argc, char* argv[]) {
 
 		gl_texture_update(&texture_orginalFrame, size, frame);
 
+		/* Remove noise by using gussian blur mask */
 		gl_frameBuffer_bind(frameBuffer_new, size, 0); //Use video full-resolution for render
 		gl_shader_use(&shader_filter3);
 		gl_uniformBuffer_bindShader(bindingPoint_ubo_gussianMask, &shader_filter3, shader_filter3_blockMask);
@@ -208,12 +230,13 @@ int main(int argc, char* argv[]) {
 		gl_mesh_draw(&mesh_StdRect);
 		swapFrameBuffer(frameBuffer_old, frameBuffer_new);
 
-/*		gl_frameBuffer_bind(frameBuffer_new, size, 0);
+		/* Apply edge detection mask */
+		gl_frameBuffer_bind(frameBuffer_new, size, 0);
 		gl_shader_use(&shader_filter3);
 		gl_uniformBuffer_bindShader(bindingPoint_ubo_edgeMask, &shader_filter3, shader_filter3_blockMask);
 		gl_texture_bind(&frameBuffer_old->texture, shader_filter3_paramPStage, 0);
 		gl_mesh_draw(&mesh_StdRect);
-		swapFrameBuffer(frameBuffer_old, frameBuffer_new);*/
+		swapFrameBuffer(frameBuffer_old, frameBuffer_new);
 
 		gl_frameBuffer_bind(frameBuffer_new, size, 0);
 		gl_shader_use(&shader_history);
