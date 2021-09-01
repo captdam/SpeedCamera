@@ -46,7 +46,7 @@ typedef unsigned int gl_tex;
 #define GL_INIT_DEFAULT_TEX (gl_tex)0
 typedef unsigned int gl_pbo;
 #define GL_INIT_DEFAULT_PBO (gl_pbo)0
-typedef enum gl_texformat {gl_texformat_R8, gl_texformat_RG8, gl_texformat_RGB8, gl_texformat_RGBA8} gl_texformat;
+typedef enum gl_texformat {gl_texformat_R8, gl_texformat_RG8, gl_texformat_RGB8, gl_texformat_RGBA8, gl_texformat_placeholderEnd} gl_texformat;
 
 /** Frame buffer objects (multi-stage rendering)
  */

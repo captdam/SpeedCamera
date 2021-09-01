@@ -24,6 +24,27 @@ struct GL_ClassDataStructure {
 	gl_param defaultShader_paramOrginal, defaultShader_paramProcessed;
 };
 
+/* Texture data encode */
+const struct GL_TexFormat_LookUp {
+	gl_texformat eFormat;
+	GLint internalFormat;
+	GLenum format;
+	GLenum type;
+} gl_texformat_lookup[gl_texformat_placeholderEnd] = {
+	{gl_texformat_R8,		GL_R8,		GL_RED,		GL_UNSIGNED_BYTE	},
+	{gl_texformat_RG8,		GL_RG8,		GL_RG,		GL_UNSIGNED_BYTE	},
+	{gl_texformat_RGB8,		GL_RGB8,	GL_RGB,		GL_UNSIGNED_BYTE	},
+	{gl_texformat_RGBA8,		GL_RGBA8,	GL_RGBA,	GL_UNSIGNED_BYTE	}
+};
+//GL_TexFormat_LookUp.eFormat should be in increase order and start from 0
+int gl_texformat_lookup_check() {
+	for (int i = 0; i < gl_texformat_placeholderEnd; i++) {
+		if (gl_texformat_lookup[i].eFormat != i)
+			return 0;
+	}
+	return 1;
+}
+
 /* == Window management and driver init == [Object] ========================================= */
 
 // Event callback when window closed by user (X button or kill)
@@ -47,6 +68,14 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 		fputs("Init GL class object\n", stdout);
 		fflush(stdout);
 	#endif
+
+	/* Program check */
+	if (!gl_texformat_lookup_check()) {
+		#ifdef VERBOSE
+			fputs("\tProgram error: gl_texformat_lookup - Program-time error\n", stderr);
+		#endif
+		return NULL;
+	}
 
 	/* Object init */
 	GL this = malloc(sizeof(struct GL_ClassDataStructure));
@@ -229,19 +258,6 @@ void gl_destroy(GL this) {
 }
 
 /* == OpenGL routines == [Static] =========================================================== */
-
-/* Texture data encode */
-/*const struct TexFormat_LookUp {
-	gl_texformat eFormat;
-	GLint internalFormat;
-	GLenum format;
-	GLenum type;
-} texformat_lookup[] {
-	{gl_texformat_R8,		GL_R8,		GL_RED,		GL_UNSIGNED_BYTE},
-	{gl_texformat_RG8,		GL_RG8,		GL_RG,		GL_UNSIGNED_BYTE},
-	{gl_texformat_RGB8,		GL_RGB8,	GL_RGB,		GL_UNSIGNED_BYTE},
-	{gl_texformat_RGBA8,		GL_RGBA8,	GL_RGBA,	GL_UNSIGNED_BYTE}
-}*/
 
 /* Load a shader from file to memory, return a pointer to the memory, use free() to free the memory when no longer need */
 char* gl_loadFileToMemory(const char* filename, long int* length) {
@@ -535,15 +551,7 @@ gl_tex gl_texture_create(gl_texformat format, size2d_t size) {
 	glGenTextures(1, &texture);
 	glBindTexture(GL_TEXTURE_2D, texture);
 	
-	if (format == gl_texformat_R8)
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, size.width, size.height, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
-	else if (format == gl_texformat_RG8)
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RG8, size.width, size.height, 0, GL_RG, GL_UNSIGNED_BYTE, NULL);
-	else if (format == gl_texformat_RGB8)
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, size.width, size.height, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
-	else if (format == gl_texformat_RGBA8)
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, size.width, size.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-	
+	glTexImage2D(GL_TEXTURE_2D, 0, gl_texformat_lookup[format].internalFormat, size.width, size.height, 0, gl_texformat_lookup[format].format, gl_texformat_lookup[format].type, NULL);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
@@ -553,16 +561,7 @@ gl_tex gl_texture_create(gl_texformat format, size2d_t size) {
 
 void gl_texture_update(gl_texformat format, gl_tex* texture, size2d_t size, void* data) {
 	glBindTexture(GL_TEXTURE_2D, *texture);
-
-	if (format == gl_texformat_R8)
-		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width, size.height, GL_RED, GL_UNSIGNED_BYTE, data);
-	else if (format == gl_texformat_RG8)
-		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width, size.height, GL_RG, GL_UNSIGNED_BYTE, data);
-	else if (format == gl_texformat_RGB8)
-		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width, size.height, GL_RGB, GL_UNSIGNED_BYTE, data);
-	else if (format == gl_texformat_RGBA8)
-		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width, size.height, GL_RGBA, GL_UNSIGNED_BYTE, data);
-	
+	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width, size.height, gl_texformat_lookup[format].format, gl_texformat_lookup[format].type, data);
 	glBindTexture(GL_TEXTURE_2D, GL_INIT_DEFAULT_TEX);
 }
 
@@ -601,14 +600,7 @@ void gl_pixelBuffer_updateToTexture(gl_texformat format, gl_pbo* pbo, gl_tex* te
 	glBindTexture(GL_TEXTURE_2D, *texture);
 	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, *pbo);
 
-	if (format == gl_texformat_R8)
-		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width, size.height, GL_RED, GL_UNSIGNED_BYTE, 0);
-	else if (format == gl_texformat_RG8)
-		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width, size.height, GL_RG, GL_UNSIGNED_BYTE, 0);
-	else if (format == gl_texformat_RGB8)
-		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width, size.height, GL_RGB, GL_UNSIGNED_BYTE, 0);
-	else if (format == gl_texformat_RGBA8)
-		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width, size.height, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width, size.height, gl_texformat_lookup[format].format, gl_texformat_lookup[format].type, 0);
 	
 	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, GL_INIT_DEFAULT_PBO);
 	glBindTexture(GL_TEXTURE_2D, GL_INIT_DEFAULT_TEX);
