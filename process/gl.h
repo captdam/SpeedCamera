@@ -14,7 +14,7 @@
  */
 typedef struct GL_ClassDataStructure* GL;
 
-/** Shader and data types, UBO, SSBO
+/** Shader and data types, UBO
  */
 typedef unsigned int gl_shader;
 #define GL_INIT_DEFAULT_SHADER (gl_shader)0
@@ -40,10 +40,13 @@ typedef struct GL_Mesh {
 typedef float gl_vertex_t;
 typedef unsigned int gl_index_t;
 
-/** Texture
+/** Texture and Pixel buffer for texture transfer
  */
 typedef unsigned int gl_tex;
 #define GL_INIT_DEFAULT_TEX (gl_tex)0
+typedef unsigned int gl_pbo;
+#define GL_INIT_DEFAULT_PBO (gl_pbo)0
+typedef enum gl_texformat {gl_texformat_R8, gl_texformat_RG8, gl_texformat_RGB8, gl_texformat_RGBA8} gl_texformat;
 
 /** Frame buffer objects (multi-stage rendering)
  */
@@ -62,9 +65,10 @@ typedef struct GL_FrameBuffer {
  * this should give some performance gain because of less display manager bandwidth [to-be-verified]. 
  * @param frameSize Resolution of the frame
  * @param windowRatio View size is frameSize/windowRatio
+ * @param mix Intensity of orginal and processed data
  * @return $this(Opaque) GL class object if success, null if fail
  */
-GL gl_init(size2d_t frameSize, unsigned int windowRatio);
+GL gl_init(size2d_t frameSize, unsigned int windowRatio, float mix);
 
 /** Call to start a render loop, this process all GLFW window events 
  * @param this This GL class object
@@ -186,18 +190,20 @@ void gl_mesh_draw(gl_mesh* mesh);
  */
 void gl_mesh_delete(gl_mesh* mesh);
 
-/** Create gl_tex object whit empty content, this texture only has one 8-bit channel (R8). 
+/** Create gl_tex object whit empty content 
+ * @param format Format of the texture, can be gl_texformat_R8, gl_texformat_RG8, gl_texformat_RGB8 or gl_texformat_RGBA8
  * @param size Width and height of the gl_tex in unit of pixel
  * @return gl_tex object
  */
-gl_tex gl_texture_create(size2d_t size);
+gl_tex gl_texture_create(gl_texformat format, size2d_t size);
 
 /** Update a gl_tex object 
+ * @param format Format of the texture, can be gl_texformat_R8, gl_texformat_RG8, gl_texformat_RGB8 or gl_texformat_RGBA8, need to be same as it when create
  * @param texture A gl_tex object previously created by gl_texture_create()
  * @param size Width and height of the texture in unit of pixel
  * @param data Pointer to the texture data
  */
-void gl_texture_update(gl_tex* texture, size2d_t size, void* data);
+void gl_texture_update(gl_texformat format, gl_tex* texture, size2d_t size, void* data);
 
 /** Bind a texture object to OpenGL engine texture unit 
  * @param texture A gl_tex object previously created by gl_texture_create()
@@ -211,11 +217,40 @@ void gl_texture_bind(gl_tex* texture, gl_param paramId, unsigned int unit);
  */
 void gl_texture_delete(gl_tex* texture);
 
+/** Create a gl_pbo that used to manually transfer data to openGL texture 
+ * @param size Size of the PBO/texture data in bytes (pixel * bytes_of_one_pixel)
+ */
+gl_pbo gl_pixelBuffer_create(size_t size);
+
+/** Start a transfer by obtain the pointer to the GPU memory
+ * @param pbo A gl_pbo previously created by gl_pixelBuffer_create()
+ * @param size Size of the PBO/texture data in bytes (pixel * bytes_of_one_pixel)
+ */
+void* gl_pixelBuffer_updateStart(gl_pbo* pbo, size_t size);
+
+/** Finish the data transfer started by gl_pixelBuffer_updateStart()
+ */
+void gl_pixelBuffer_updateFinish();
+
+/** Delete a gl_pbo
+ * @param pbo A gl_pbo previously created by gl_pixelBuffer_create()
+ */
+void gl_pixelBuffer_delete(gl_pbo* pbo);
+
+/** Transfer data from PBO to actual texture 
+ * @param format Format of the texture, can be gl_texformat_R8, gl_texformat_RG8, gl_texformat_RGB8 or gl_texformat_RGBA8, need to be same as it when create
+ * @param pbo A gl_pbo previously created by gl_pixelBuffer_create()
+ * @param texture Dest gl_tex object previously created by gl_texture_createRGB()
+ * @param size Width and height of the texture in unit of pixel
+ */
+void gl_pixelBuffer_updateToTexture(gl_texformat format, gl_pbo* pbo, gl_tex* texture, size2d_t size);
+
 /** Create a frame buffer used for multi-stage rendering 
+ * @param format Format of the texture, can be gl_texformat_R8, gl_texformat_RG8, gl_texformat_RGB8 or gl_texformat_RGBA8
  * @param size Width and height of the texture in unit of pixel
  * @return GL frame buffer object
  */
-gl_fb gl_frameBuffer_create(size2d_t size);
+gl_fb gl_frameBuffer_create(gl_texformat format, size2d_t size);
 
 /** Bind a frame buffer to current. 
  * To bind the default buffer (window), pass this with child frame = 0. 

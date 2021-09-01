@@ -42,7 +42,7 @@ void GLAPIENTRY gl_glErrorCallback(GLenum src, GLenum type, GLuint id, GLenum se
 	fprintf(stderr, "OpenGL info: %s type %x, severity %x, message: %s\n", (type == GL_DEBUG_TYPE_ERROR ? "ERROR" : ""), type, severity, message);
 }
 
-GL gl_init(size2d_t frameSize, unsigned int windowRatio) {
+GL gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 	#ifdef VERBOSE
 		fputs("Init GL class object\n", stdout);
 		fflush(stdout);
@@ -74,7 +74,7 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio) {
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+//	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 	glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
 	#ifdef VERBOSE
 		glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
@@ -89,7 +89,7 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio) {
 		return NULL;
 	}
 	glfwMakeContextCurrent(this->window);
-//	glfwSwapInterval(0);
+	glfwSwapInterval(0);
 
 	#ifdef VERBOSE 
 		fprintf(stdout, "OpenGL driver: %s\n", glGetString(GL_VERSION));
@@ -112,7 +112,9 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio) {
 	glDebugMessageCallback(gl_glErrorCallback, NULL);
 
 	/* OpenGL config */
-	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+//	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	glPixelStorei(GL_UNPACK_ROW_LENGTH, frameSize.width);
+	glPixelStorei(GL_UNPACK_IMAGE_HEIGHT, frameSize.height);
 //	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
 	/* Draw window - mesh */ {
@@ -128,27 +130,26 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio) {
 	}
 
 	/* Draw window - shader */ {
-		#define mixLevel "0.99f"
 		const char* vs = "#version 310 es\nprecision mediump float;\n"
 		"layout (location = 0) in vec2 position;\n"
 		"out vec2 textpos;\n"
 		"void main() {\n"
-		"	gl_Position = vec4(position.x * 2.0f - 1.0f, position.y * 2.0f - 1.0f, 0.0f, 1.0f);\n"
-		"	textpos = vec2(position.x, 1.0f - position.y); //Fix y-axis difference screen coord\n"
+		"	gl_Position = vec4(position.x * 2.0 - 1.0, position.y * 2.0 - 1.0, 0.0, 1.0);\n"
+		"	textpos = vec2(position.x, 1.0 - position.y); //Fix y-axis difference screen coord\n"
 		"}\n";
 		const char* fs = "#version 310 es\nprecision mediump float;\n"
 		"in vec2 textpos;\n"
 		"uniform sampler2D orginalTexture;\n"
 		"uniform sampler2D processedTexture;\n"
+		"uniform float mixLevel;\n"
 		"out vec4 color;\n"
 		"void main() {\n"
-		"	const float mixLevel = "mixLevel";\n"
-		"	float od = texture(orginalTexture, textpos).r;\n"
-		"	float pd = texture(processedTexture, textpos).r;\n"
-		"	float data = mix(od, pd, mixLevel);\n"
-		"	color = vec4(data, data, data, 1.0f);\n"
+		"	vec4 od = texture(orginalTexture, textpos);\n"
+		"	vec4 pd = texture(processedTexture, textpos);\n"
+		"	vec4 data = mix(od, pd, mixLevel);\n"
+		"	color = vec4(data.r, data.g, data.b, 1.0);\n"
 		"}\n";
-		const char* pName[] = {"orginalTexture", "processedTexture"};
+		const char* pName[] = {"orginalTexture", "processedTexture", "mixLevel"};
 		unsigned int pCount = sizeof(pName) / sizeof(pName[0]);
 		gl_param pId[pCount];
 
@@ -165,6 +166,9 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio) {
 			gl_destroy(this);
 			return NULL;
 		}
+
+		gl_shader_use(&this->defaultShader);
+		gl_shader_setParam(pId[2], 1, gl_type_float, &mix);
 
 		this->defaultShader_paramOrginal = pId[0];
 		this->defaultShader_paramProcessed = pId[1];
@@ -184,7 +188,7 @@ void gl_drawWindow(GL this, gl_tex* orginalTexture, gl_tex* processedTexture) {
 
 	gl_shader_use(&this->defaultShader);
 	gl_texture_bind(orginalTexture, this->defaultShader_paramOrginal, 0);
-	gl_texture_bind(processedTexture, this->defaultShader_paramProcessed, 0);
+	gl_texture_bind(processedTexture, this->defaultShader_paramProcessed, 1);
 	
 	gl_mesh_draw(&this->defaultMesh);
 }
@@ -225,6 +229,19 @@ void gl_destroy(GL this) {
 }
 
 /* == OpenGL routines == [Static] =========================================================== */
+
+/* Texture data encode */
+/*const struct TexFormat_LookUp {
+	gl_texformat eFormat;
+	GLint internalFormat;
+	GLenum format;
+	GLenum type;
+} texformat_lookup[] {
+	{gl_texformat_R8,		GL_R8,		GL_RED,		GL_UNSIGNED_BYTE},
+	{gl_texformat_RG8,		GL_RG8,		GL_RG,		GL_UNSIGNED_BYTE},
+	{gl_texformat_RGB8,		GL_RGB8,	GL_RGB,		GL_UNSIGNED_BYTE},
+	{gl_texformat_RGBA8,		GL_RGBA8,	GL_RGBA,	GL_UNSIGNED_BYTE}
+}*/
 
 /* Load a shader from file to memory, return a pointer to the memory, use free() to free the memory when no longer need */
 char* gl_loadFileToMemory(const char* filename, long int* length) {
@@ -513,20 +530,40 @@ void gl_mesh_delete(gl_mesh* mesh) {
 	*mesh = GL_INIT_DEFAULT_MESH;
 }
 
-gl_tex gl_texture_create(size2d_t size) {
+gl_tex gl_texture_create(gl_texformat format, size2d_t size) {
 	gl_tex texture;
 	glGenTextures(1, &texture);
 	glBindTexture(GL_TEXTURE_2D, texture);
 	
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, size.width, size.height, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
+	if (format == gl_texformat_R8)
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, size.width, size.height, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
+	else if (format == gl_texformat_RG8)
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RG8, size.width, size.height, 0, GL_RG, GL_UNSIGNED_BYTE, NULL);
+	else if (format == gl_texformat_RGB8)
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, size.width, size.height, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+	else if (format == gl_texformat_RGBA8)
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, size.width, size.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+	
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+	glBindTexture(GL_TEXTURE_2D, GL_INIT_DEFAULT_TEX);
 	return texture;
 }
 
-void gl_texture_update(gl_tex* texture, size2d_t size, void* data) {
+void gl_texture_update(gl_texformat format, gl_tex* texture, size2d_t size, void* data) {
 	glBindTexture(GL_TEXTURE_2D, *texture);
-	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width, size.height, GL_RED, GL_UNSIGNED_BYTE, data);
+
+	if (format == gl_texformat_R8)
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width, size.height, GL_RED, GL_UNSIGNED_BYTE, data);
+	else if (format == gl_texformat_RG8)
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width, size.height, GL_RG, GL_UNSIGNED_BYTE, data);
+	else if (format == gl_texformat_RGB8)
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width, size.height, GL_RGB, GL_UNSIGNED_BYTE, data);
+	else if (format == gl_texformat_RGBA8)
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width, size.height, GL_RGBA, GL_UNSIGNED_BYTE, data);
+	
+	glBindTexture(GL_TEXTURE_2D, GL_INIT_DEFAULT_TEX);
 }
 
 void gl_texture_bind(gl_tex* texture, gl_param paramId, unsigned int unit) {
@@ -541,13 +578,55 @@ void gl_texture_delete(gl_tex* texture) {
 	*texture = GL_INIT_DEFAULT_TEX;
 }
 
-gl_fb gl_frameBuffer_create(size2d_t size) {
+gl_pbo gl_pixelBuffer_create(size_t size) {
+	gl_pbo pbo;
+	glGenBuffers(1, &pbo);
+	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+	glBufferData(GL_PIXEL_UNPACK_BUFFER, size, NULL, GL_DYNAMIC_DRAW);
+	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, GL_INIT_DEFAULT_PBO);
+	return pbo;
+}
+
+void* gl_pixelBuffer_updateStart(gl_pbo* pbo, size_t size) {
+	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, *pbo);
+	return glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, size, GL_MAP_WRITE_BIT/* | GL_MAP_INVALIDATE_BUFFER_BIT*//* | GL_MAP_UNSYNCHRONIZED_BIT*/);
+}
+
+void gl_pixelBuffer_updateFinish() {
+	glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, GL_INIT_DEFAULT_PBO);
+}
+
+void gl_pixelBuffer_updateToTexture(gl_texformat format, gl_pbo* pbo, gl_tex* texture, size2d_t size) {
+	glBindTexture(GL_TEXTURE_2D, *texture);
+	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, *pbo);
+
+	if (format == gl_texformat_R8)
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width, size.height, GL_RED, GL_UNSIGNED_BYTE, 0);
+	else if (format == gl_texformat_RG8)
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width, size.height, GL_RG, GL_UNSIGNED_BYTE, 0);
+	else if (format == gl_texformat_RGB8)
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width, size.height, GL_RGB, GL_UNSIGNED_BYTE, 0);
+	else if (format == gl_texformat_RGBA8)
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width, size.height, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+	
+	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, GL_INIT_DEFAULT_PBO);
+	glBindTexture(GL_TEXTURE_2D, GL_INIT_DEFAULT_TEX);
+}
+
+void gl_pixelBuffer_delete(gl_pbo* pbo) {
+	if (*pbo != GL_INIT_DEFAULT_PBO)
+		glDeleteBuffers(1, pbo);
+	*pbo = GL_INIT_DEFAULT_PBO;
+}
+
+gl_fb gl_frameBuffer_create(gl_texformat format, size2d_t size) {
 	gl_fb buffer = GL_INIT_DEFAULT_FB;
 
 	glGenFramebuffers(1, &buffer.frame);
 	glBindFramebuffer(GL_FRAMEBUFFER, buffer.frame);
 
-	buffer.texture = gl_texture_create(size);
+	buffer.texture = gl_texture_create(format, size);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, buffer.texture, 0);
 
 	return buffer;
