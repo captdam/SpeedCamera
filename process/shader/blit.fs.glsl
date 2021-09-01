@@ -1,7 +1,5 @@
 #version 310 es
 
-/* Texture type = R_8 */
-
 precision mediump float;
 
 uniform sampler2D pStage;
@@ -14,5 +12,5 @@ void main() {
 		int(textpos.x * size.x),
 		int(textpos.y * size.y)
 	);
-	nStage.r = texelFetch(pStage, texelIndex, 0).r;
+	nStage = texelFetch(pStage, texelIndex, 0);
 }

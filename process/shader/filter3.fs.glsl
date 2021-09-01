@@ -1,7 +1,5 @@
 #version 310 es
 
-/* Texture type = R_8 */
-
 precision mediump float;
 
 uniform sampler2D pStage;
@@ -20,26 +18,17 @@ void main() {
 		int(textpos.x * size.x),
 		int(textpos.y * size.y)
 	);
-	vec3 pixelTop = vec3(
-		texelFetchOffset(pStage, texelIndex, 0, ivec2(-1, -1)).r,
-		texelFetchOffset(pStage, texelIndex, 0, ivec2( 0, -1)).r,
-		texelFetchOffset(pStage, texelIndex, 0, ivec2(+1, -1)).r
-	);
-	vec3 pixelMiddle = vec3(
-		texelFetchOffset(pStage, texelIndex, 0, ivec2(-1,  0)).r,
-		texelFetchOffset(pStage, texelIndex, 0, ivec2( 0,  0)).r,
-		texelFetchOffset(pStage, texelIndex, 0, ivec2(+1,  0)).r
-	);
-	vec3 pixelBottom = vec3(
-		texelFetchOffset(pStage, texelIndex, 0, ivec2(-1, +1)).r,
-		texelFetchOffset(pStage, texelIndex, 0, ivec2( 0, +1)).r,
-		texelFetchOffset(pStage, texelIndex, 0, ivec2(+1, +1)).r
-	);
 
-	float accumTop = dot(pixelTop, maskTop);
-	float accumMiddle = dot(pixelMiddle, maskMiddle);
-	float accumBottom = dot(pixelBottom, maskBottom);
-	float accum = accumTop + accumMiddle + accumBottom;
+	vec4 accum = vec4(0.0, 0.0, 0.0, 0.0);
+	accum += texelFetchOffset(pStage, texelIndex, 0, ivec2(-1, -1)) * maskTop.x;
+	accum += texelFetchOffset(pStage, texelIndex, 0, ivec2( 0, -1)) * maskTop.y;
+	accum += texelFetchOffset(pStage, texelIndex, 0, ivec2(+1, -1)) * maskTop.z;
+	accum += texelFetchOffset(pStage, texelIndex, 0, ivec2(-1,  0)) * maskMiddle.x;
+	accum += texelFetchOffset(pStage, texelIndex, 0, ivec2( 0,  0)) * maskMiddle.y;
+	accum += texelFetchOffset(pStage, texelIndex, 0, ivec2(+1,  0)) * maskMiddle.z;
+	accum += texelFetchOffset(pStage, texelIndex, 0, ivec2(-1, +1)) * maskBottom.x;
+	accum += texelFetchOffset(pStage, texelIndex, 0, ivec2( 0, +1)) * maskBottom.y;
+	accum += texelFetchOffset(pStage, texelIndex, 0, ivec2(+1, +1)) * maskBottom.z;
 
-	nStage.r = accum;
+	nStage = vec4(accum.rgb, 1.0);
 }
