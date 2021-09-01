@@ -60,50 +60,66 @@ void* th_reader(void* arg) {
 	while (fileValid) {
 		sem_wait(&sem_readerJobStart); //Wait until main thread issue new GPU memory address for next frame
 
-		size_t size = this->size;
+		const size_t bucketSize = 16; //Height and width are multiple of 4, so total size is multiple of 16. Read 16 pixels at once to increase performance
+
+		size_t iter = this->size / bucketSize;
 		uint8_t* dest = (void*)rawDataPtr;
 
 		if (this->colorScheme == 1) {
-			uint8_t luma;
-			while (size--) {
-				if (!fread(&luma, 1, 1, fp)) { //Fail to read from fifo
+			uint8_t luma[bucketSize];
+			while (iter--) {
+				uint8_t* p = &(luma[0]);
+				if (!fread(p, 1, bucketSize, fp)) { //Fail to read from fifo
 					fileValid = 0;
 					break;
 				}
-				*(dest++) = luma; //R
-				*(dest++) = luma; //G
-				*(dest++) = luma; //B
-				*(dest++) = 0xFF; //A
+				while (p < &( luma[16] )) {
+					*(dest++) = *p; //R
+					*(dest++) = *p; //G
+					*(dest++) = *p; //B
+					*(dest++) = 0xFF; //A
+					p++;
+				}
 			}
 		}
 		else if (this->colorScheme == 3) {
-			uint8_t rgb[3];
-			while (size--) {
-				if (!fread(rgb, 3, 1, fp)) {
+			uint8_t rgb[bucketSize * 3];
+			while (iter--) {
+				uint8_t* p = &(rgb[0]);
+				if (!fread(p, 3, bucketSize, fp)) {
 					fileValid = 0;
 					break;
 				}
-				*(dest++) = rgb[2]; //R
-				*(dest++) = rgb[0]; //G
-				*(dest++) = rgb[1]; //B
-				*(dest++) = 0xFF; //A
+				while (p < &( rgb[bucketSize * 3] )) {
+					*(dest++) = p[2]; //R
+					*(dest++) = p[0]; //G
+					*(dest++) = p[1]; //B
+					*(dest++) = 0xFF; //A
+					p += 3;
+				}
+			}
+		}
+		else if (this->colorScheme == 4) {
+			uint8_t rgba[bucketSize * 4];
+			while (iter--) {
+				uint8_t* p = &(rgba[0]);
+				if (!fread(rgba, 4, bucketSize, fp)) {
+					fileValid = 0;
+					break;
+				}
+				while (p < &( rgba[bucketSize * 4] )) {
+					*(dest++) = p[2]; //R
+					*(dest++) = p[0]; //G
+					*(dest++) = p[1]; //B
+					*(dest++) = p[3]; //A
+					p += 4;
+				}
 			}
 		}
 		else {
-			uint8_t rgba[4];
-			while (size--) {
-				if (!fread(rgba, 4, 1, fp)) {
-					fileValid = 0;
-					break;
-				}
-				*(dest++) = rgba[2]; //R
-				*(dest++) = rgba[0]; //G
-				*(dest++) = rgba[1]; //B
-				*(dest++) = rgba[3]; //A
+			if (!fread(dest, 4, this->size, fp)) {
+				fileValid = 0;
 			}
-//			if (!fread(dest, 4, size, fp)) {
-//				fileValid = 0;
-//			}
 		}
 
 		fputc('R', stdout);
@@ -141,11 +157,11 @@ int main(int argc, char* argv[]) {
 	fprintf(stdout, "Video info = Width: %upx, Height: %upx, FPS: %u, Color: %u\n", width, height, fps, color);
 
 	if (width & 0b11 || width < 320 || width > 4056) {
-		fputs("Bad width: Width must be multiply of 4, 320 <= width <= 4056\n", stderr);
+		fputs("Bad width: Width must be multiple of 4, 320 <= width <= 4056\n", stderr);
 		return status;
 	}
 	if (height & 0b11 || height < 240 || height > 3040) {
-		fputs("Bad height: Height must be multiply of 4, 240 <= height <= 3040\n", stderr);
+		fputs("Bad height: Height must be multiple of 4, 240 <= height <= 3040\n", stderr);
 		return status;
 	}
 	if (color != 1 && color != 3 && color != 4) {
