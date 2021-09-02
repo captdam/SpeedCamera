@@ -210,6 +210,10 @@ int main(int argc, char* argv[]) {
 	gl_fb* fb_new;
 	gl_fb* fb_old;
 
+	//Program[Debug] - Roadmap check
+	gl_shader shader_roadmapCheck = GL_INIT_DEFAULT_SHADER;
+	gl_param shader_roadmapCheck_paramRoadmap;
+
 	//Program - Blit: Copy from one texture to another
 	gl_shader shader_blit = GL_INIT_DEFAULT_SHADER;
 	gl_param shader_blit_paramPStage;
@@ -334,6 +338,27 @@ int main(int argc, char* argv[]) {
 		fb_new = &framebuffer_stageA;
 		fb_old = &framebuffer_stageB;
 		#define swap(a, b) {gl_fb* temp = a; a = b; b = temp;}
+	}
+
+	/* Create program: Roadmap check: Test roadmap geo data texture */ {
+		const char* pName[] = {"size", "roadmap"};
+		unsigned int pCount = sizeof(pName) / sizeof(pName[0]);
+		gl_param pId[pCount];
+
+		const char* bName[] = {};
+		unsigned int bCount = sizeof(bName) / sizeof(bName[0]);
+		gl_param bId[bCount];
+
+		shader_roadmapCheck = gl_shader_load("shader/stdRect.vs.glsl", "shader/roadmapcheck.fs.glsl", 1, pName, pId, pCount, bName, bId, bCount);
+		if (!gl_shader_check(&shader_roadmapCheck)) {
+			fputs("Cannot load shader: roadmapcheck\n", stderr);
+			goto label_exit;
+		}
+
+		gl_shader_use(&shader_roadmapCheck);
+		gl_shader_setParam(pId[0], 2, gl_type_float, fsize);
+
+		shader_roadmapCheck_paramRoadmap = pId[1];
 	}
 
 	/* Create program: Blit: Copy from one texture to another texture */ {
@@ -468,6 +493,13 @@ int main(int argc, char* argv[]) {
 		gl_mesh_draw(&mesh_StdRect);
 		swap(fb_new, fb_old);
 
+		/* Debug use ONLY */
+		gl_frameBuffer_bind(fb_new, size2d, 0);
+		gl_shader_use(&shader_roadmapCheck);
+		gl_texture_bind(&texture_road, shader_roadmapCheck_paramRoadmap, 0);
+		gl_mesh_draw(&mesh_StdRect);
+		swap(fb_new, fb_old);
+
 /*		gl_frameBuffer_bind(frameBuffer_new, size, 0);
 		gl_shader_use(&shader_history);
 		gl_texture_bind(&frameBuffer_old->texture, shader_history_paramPStage, 0);
@@ -513,6 +545,7 @@ label_exit:
 	gl_shader_unload(&shader_filter3);
 	gl_shader_unload(&shader_nonMaxSup);
 	gl_shader_unload(&shader_blit);
+	gl_shader_unload(&shader_roadmapCheck);
 
 	gl_frameBuffer_delete(&framebuffer_stageB);
 	gl_frameBuffer_delete(&framebuffer_stageA);
