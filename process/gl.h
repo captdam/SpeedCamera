@@ -46,7 +46,11 @@ typedef unsigned int gl_tex;
 #define GL_INIT_DEFAULT_TEX (gl_tex)0
 typedef unsigned int gl_pbo;
 #define GL_INIT_DEFAULT_PBO (gl_pbo)0
-typedef enum gl_texformat {gl_texformat_R8, gl_texformat_RG8, gl_texformat_RGB8, gl_texformat_RGBA8, gl_texformat_placeholderEnd} gl_texformat;
+typedef enum gl_texformat {
+	gl_texformat_R8, gl_texformat_RG8, gl_texformat_RGB8, gl_texformat_RGBA8,
+	gl_texformat_R8UI, gl_texformat_RG8UI, gl_texformat_RGB8UI, gl_texformat_RGBA8UI,
+	gl_texformat_R16F, gl_texformat_RG16F, gl_texformat_RGB16F, gl_texformat_RGBA16F,
+gl_texformat_placeholderEnd} gl_texformat;
 
 /** Frame buffer objects (multi-stage rendering)
  */
@@ -122,6 +126,12 @@ gl_shader gl_shader_load(
 	const char* blockName[], gl_param* blockId, const unsigned int blockCount
 );
 
+/** Check a shader
+ * @param shader Shader to check, previously returned by gl_shader_load()
+ * @return 1 if good, 0 if not
+ */
+int gl_shader_check(gl_shader* shader);
+
 /** Use a shader (bind a shader to current)
  * @param shader Shader to bind, previously returned by gl_shader_load()
  */
@@ -148,6 +158,12 @@ void gl_shader_unload(gl_shader* shader);
  * @return GL uniform buffer object
  */
 gl_ubo gl_uniformBuffer_create(unsigned int bindingPoint, size_t size);
+
+/** Check an uniform buffer
+ * @param ubo A gl_ubo previously created by gl_uniformBuffer_create()
+ * @return 1 if good, 0 if not
+ */
+int gl_uniformBuffer_check(gl_ubo* ubo);
 
 /** Bind a shader's block to a uniform buffer in the binding point. 
  * @param bindingPoint Binding point to bind
@@ -180,6 +196,12 @@ void gl_unifromBuffer_delete(gl_ubo* ubo);
  */
 gl_mesh gl_mesh_create(size2d_t vertexSize, size_t indexCount, gl_index_t* elementsSize, gl_vertex_t* vertices, gl_index_t* indices);
 
+/** Check an uniform buffer
+ * @param mesh A gl_mesh object previously created by gl_mesh_create()
+ * @return 1 if good, 0 if not
+ */
+int gl_mesh_check(gl_mesh* mesh);
+
 /** Draw a gl_mesh object. 
  * @param mesh A gl_mesh object previously created by gl_mesh_create()
  */
@@ -191,14 +213,20 @@ void gl_mesh_draw(gl_mesh* mesh);
 void gl_mesh_delete(gl_mesh* mesh);
 
 /** Create gl_tex object whit empty content 
- * @param format Format of the texture, can be gl_texformat_R8, gl_texformat_RG8, gl_texformat_RGB8 or gl_texformat_RGBA8
+ * @param format Format of the texture, can be gl_texformat_*
  * @param size Width and height of the gl_tex in unit of pixel
  * @return gl_tex object
  */
 gl_tex gl_texture_create(gl_texformat format, size2d_t size);
 
+/** Check a texture
+ * @param texture A gl_mesh object previously created by gl_mesh_create()
+ * @return 1 if good, 0 if not
+ */
+int gl_texture_check(gl_tex* texture);
+
 /** Update a gl_tex object 
- * @param format Format of the texture, can be gl_texformat_R8, gl_texformat_RG8, gl_texformat_RGB8 or gl_texformat_RGBA8, need to be same as it when create
+ * @param format Format of the texture, can be gl_texformat_*, need to be same as it when create
  * @param texture A gl_tex object previously created by gl_texture_create()
  * @param size Width and height of the texture in unit of pixel
  * @param data Pointer to the texture data
@@ -222,6 +250,12 @@ void gl_texture_delete(gl_tex* texture);
  */
 gl_pbo gl_pixelBuffer_create(size_t size);
 
+/** Check a pixel buffer
+ * @param pbo A gl_pbo previously created by gl_pixelBuffer_create()
+ * @return 1 if good, 0 if not
+ */
+int gl_pixelBuffer_check(gl_pbo* pbo);
+
 /** Start a transfer by obtain the pointer to the GPU memory
  * @param pbo A gl_pbo previously created by gl_pixelBuffer_create()
  * @param size Size of the PBO/texture data in bytes (pixel * bytes_of_one_pixel)
@@ -238,7 +272,7 @@ void gl_pixelBuffer_updateFinish();
 void gl_pixelBuffer_delete(gl_pbo* pbo);
 
 /** Transfer data from PBO to actual texture 
- * @param format Format of the texture, can be gl_texformat_R8, gl_texformat_RG8, gl_texformat_RGB8 or gl_texformat_RGBA8, need to be same as it when create
+ * @param format Format of the texture, can be gl_texformat_*, need to be same as it when create
  * @param pbo A gl_pbo previously created by gl_pixelBuffer_create()
  * @param texture Dest gl_tex object previously created by gl_texture_createRGB()
  * @param size Width and height of the texture in unit of pixel
@@ -246,22 +280,28 @@ void gl_pixelBuffer_delete(gl_pbo* pbo);
 void gl_pixelBuffer_updateToTexture(gl_texformat format, gl_pbo* pbo, gl_tex* texture, size2d_t size);
 
 /** Create a frame buffer used for multi-stage rendering 
- * @param format Format of the texture, can be gl_texformat_R8, gl_texformat_RG8, gl_texformat_RGB8 or gl_texformat_RGBA8
+ * @param format Format of the texture, can be gl_texformat_*
  * @param size Width and height of the texture in unit of pixel
  * @return GL frame buffer object
  */
 gl_fb gl_frameBuffer_create(gl_texformat format, size2d_t size);
 
+/** Check a frame buffer
+ * @param fb A frame buffer previously created by gl_frameBuffer_create()
+ * @return 1 if good, 0 if not
+ */
+int gl_frameBuffer_check(gl_fb* fb);
+
 /** Bind a frame buffer to current. 
  * To bind the default buffer (window), pass this with child frame = 0. 
- * @param fb A frame buffer object previously created by gl_frameBuffer_create()
+ * @param fb A frame buffer previously created by gl_frameBuffer_create()
  * @param size Set the size of view port. Pass {0,0} to skip this step
  * @param clear Set to true (non-zero value) to clear the buffer, use 0 to skip
  */
 void gl_frameBuffer_bind(gl_fb* fb, size2d_t size, int clear);
 
-/** Delete a frame buffer object. 
- * @param fb A frame buffer object previously created by gl_frameBuffer_create()
+/** Delete a frame buffer. 
+ * @param fb A frame buffer previously created by gl_frameBuffer_create()
  */
 void gl_frameBuffer_delete(gl_fb* fb);
 

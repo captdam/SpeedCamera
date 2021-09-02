@@ -31,10 +31,18 @@ const struct GL_TexFormat_LookUp {
 	GLenum format;
 	GLenum type;
 } gl_texformat_lookup[gl_texformat_placeholderEnd] = {
-	{gl_texformat_R8,		GL_R8,		GL_RED,		GL_UNSIGNED_BYTE	},
-	{gl_texformat_RG8,		GL_RG8,		GL_RG,		GL_UNSIGNED_BYTE	},
-	{gl_texformat_RGB8,		GL_RGB8,	GL_RGB,		GL_UNSIGNED_BYTE	},
-	{gl_texformat_RGBA8,		GL_RGBA8,	GL_RGBA,	GL_UNSIGNED_BYTE	}
+	{gl_texformat_R8,		GL_R8,		GL_RED,			GL_UNSIGNED_BYTE	},
+	{gl_texformat_RG8,		GL_RG8,		GL_RG,			GL_UNSIGNED_BYTE	},
+	{gl_texformat_RGB8,		GL_RGB8,	GL_RGB,			GL_UNSIGNED_BYTE	},
+	{gl_texformat_RGBA8,		GL_RGBA8,	GL_RGBA,		GL_UNSIGNED_BYTE	},
+	{gl_texformat_R8UI,		GL_R8UI,	GL_RED_INTEGER,		GL_UNSIGNED_BYTE	},
+	{gl_texformat_RG8UI,		GL_RG8UI,	GL_RG_INTEGER,		GL_UNSIGNED_BYTE	},
+	{gl_texformat_RGB8UI,		GL_RGB8UI,	GL_RGB_INTEGER,		GL_UNSIGNED_BYTE	},
+	{gl_texformat_RGBA8UI,		GL_RGBA8UI,	GL_RGBA_INTEGER,	GL_UNSIGNED_BYTE	},
+	{gl_texformat_R16F,		GL_R16F,	GL_RED,			GL_FLOAT		},
+	{gl_texformat_RG16F,		GL_RG16F,	GL_RG,			GL_FLOAT		},
+	{gl_texformat_RGB16F,		GL_RGB16F,	GL_RGB,			GL_FLOAT		},
+	{gl_texformat_RGBA16F,		GL_RGBA16F,	GL_RGBA,		GL_FLOAT		}
 };
 //GL_TexFormat_LookUp.eFormat should be in increase order and start from 0
 int gl_texformat_lookup_check() {
@@ -399,7 +407,7 @@ gl_shader gl_shader_load(
 
 	for (size_t i = paramCount; i; i--) {
 		*paramId = glGetUniformLocation(shader, *paramName);
-		#ifdef VERBOSE
+		#ifdef VERBOSE_SHADERPARAM
 			fprintf(stdout, "\tParam '%s' location: %d\n", *paramName, *paramId);
 			fflush(stdout);
 		#endif
@@ -409,7 +417,7 @@ gl_shader gl_shader_load(
 
 	for (size_t i = blockCount; i; i--) {
 		*blockId = glGetUniformBlockIndex(shader, *blockName);
-		#ifdef VERBOSE
+		#ifdef VERBOSE_SHADERPARAM
 			fprintf(stdout, "\tBlock '%s' location: %d\n", *blockName, *paramId);
 			fflush(stdout);
 		#endif
@@ -426,6 +434,12 @@ gl_shader gl_shader_load(
 	if (shaderF) glDeleteShader(shaderF);
 	if (shader) glDeleteProgram(shader); //A value of 0 for program will be silently ignored
 	return GL_INIT_DEFAULT_SHADER;
+}
+
+int gl_shader_check(gl_shader* shader) {
+	if (*shader == GL_INIT_DEFAULT_SHADER)
+		return 0;
+	return 1;
 }
 
 void gl_shader_use(gl_shader* shader) {
@@ -487,6 +501,12 @@ gl_ubo gl_uniformBuffer_create(unsigned int bindingPoint, size_t size) {
 	return ubo;
 }
 
+int gl_uniformBuffer_check(gl_ubo* ubo) {
+	if (*ubo == GL_INIT_DEFAULT_UBO)
+		return 0;
+	return 1;
+}
+
 void gl_uniformBuffer_bindShader(unsigned int bindingPoint, gl_shader* shader, gl_param blockId) {
 	glUniformBlockBinding(*shader, blockId, bindingPoint);
 }
@@ -530,6 +550,16 @@ gl_mesh gl_mesh_create(size2d_t vertexSize, size_t indexCount, gl_index_t* eleme
 	return mesh;
 }
 
+int gl_mesh_check(gl_mesh* mesh) {
+	if (mesh->vao == GL_INIT_DEFAULT_MESH.vao)
+		return 0;
+	if (mesh->vbo == GL_INIT_DEFAULT_MESH.vbo)
+		return 0;
+	if (mesh->ebo == GL_INIT_DEFAULT_MESH.ebo)
+		return 0;
+	return 1;
+}
+
 void gl_mesh_draw(gl_mesh* mesh) {
 	glBindVertexArray(mesh->vao);
 	glDrawElements(GL_TRIANGLES, mesh->drawSize, GL_UNSIGNED_INT, 0);
@@ -559,6 +589,12 @@ gl_tex gl_texture_create(gl_texformat format, size2d_t size) {
 	return texture;
 }
 
+int gl_texture_check(gl_tex* texture) {
+	if (*texture == GL_INIT_DEFAULT_TEX)
+		return 0;
+	return 1;
+}
+
 void gl_texture_update(gl_texformat format, gl_tex* texture, size2d_t size, void* data) {
 	glBindTexture(GL_TEXTURE_2D, *texture);
 	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size.width, size.height, gl_texformat_lookup[format].format, gl_texformat_lookup[format].type, data);
@@ -584,6 +620,12 @@ gl_pbo gl_pixelBuffer_create(size_t size) {
 	glBufferData(GL_PIXEL_UNPACK_BUFFER, size, NULL, GL_DYNAMIC_DRAW);
 	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, GL_INIT_DEFAULT_PBO);
 	return pbo;
+}
+
+int gl_pixelBuffer_check(gl_pbo* pbo) {
+	if (*pbo == GL_INIT_DEFAULT_FBO)
+		return 0;
+	return 1;
 }
 
 void* gl_pixelBuffer_updateStart(gl_pbo* pbo, size_t size) {
@@ -622,6 +664,14 @@ gl_fb gl_frameBuffer_create(gl_texformat format, size2d_t size) {
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, buffer.texture, 0);
 
 	return buffer;
+}
+
+int gl_frameBuffer_check(gl_fb* fb) {
+	if (fb->frame == GL_INIT_DEFAULT_FB.frame)
+		return 0;
+	if (fb->texture == GL_INIT_DEFAULT_FB.texture)
+		return 0;
+	return 1;
 }
 
 void gl_frameBuffer_bind(gl_fb* fb, size2d_t size, int clear) {
