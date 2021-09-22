@@ -12,7 +12,8 @@ struct Roadmap_ClassDataStructure {
 	float* vertices; //{screen-x, screen-y}[vCount]
 	unsigned int* indices; //{tri1, tri2, tri3}[iCount]
 	size_t vCount, iCount;
-	float* geographic; //{road-x, road-y}
+	float* geographic; //{road-x, road-y, srarch-x, search-y}
+	float threshold;
 };
 
 Roadmap roadmap_init(const char* focusRegionFile, const char* distanceMapFile, size_t size) {
@@ -33,7 +34,8 @@ Roadmap roadmap_init(const char* focusRegionFile, const char* distanceMapFile, s
 		.indices = NULL,
 		.vCount = 0,
 		.iCount = 0,
-		.geographic = NULL
+		.geographic = NULL,
+		.threshold = 0.0f
 	};
 
 	FILE* fp;
@@ -111,7 +113,7 @@ Roadmap roadmap_init(const char* focusRegionFile, const char* distanceMapFile, s
 		return NULL;
 	}
 
-	this->geographic = malloc(size * sizeof(float) * 2);
+	this->geographic = malloc(size * sizeof(float) * 4);
 	if (!this->geographic) {
 		#ifdef VERBOSE
 			fputs("Fail to create buffer for geographic map\n", stderr);
@@ -121,9 +123,18 @@ Roadmap roadmap_init(const char* focusRegionFile, const char* distanceMapFile, s
 		return NULL;
 	}
 
-	if (!fread(this->geographic, sizeof(float) * 2, size, fp)) {
+	if (!fread(this->geographic, sizeof(float) * 4, size, fp)) {
 		#ifdef VERBOSE
-			fputs("Error in geographic map file: Size of file not matched\n", stderr);
+			fputs("Error in geographic map file: Cannot get geographic data\n", stderr);
+		#endif
+		fclose(fp);
+		roadmap_destroy(this);
+		return NULL;
+	}
+
+	if (!fread(&this->threshold, sizeof(float), 1, fp)) {
+		#ifdef VERBOSE
+			fputs("Error in geographic map file: Cannot get threshold\n", stderr);
 		#endif
 		fclose(fp);
 		roadmap_destroy(this);
@@ -147,6 +158,10 @@ unsigned int* roadmap_getIndices(Roadmap this, size_t* size) {
 
 float* roadmap_getGeographic(Roadmap this) {
 	return this->geographic;
+}
+
+float roadmap_getThreshold(Roadmap this) {
+	return this->threshold;
 }
 
 void roadmap_destroy(Roadmap this) {
