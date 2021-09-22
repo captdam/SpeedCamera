@@ -17,10 +17,12 @@ void main() {
 	vec4 left =	texelFetchOffset(roadmap, texelIndex, 0, ivec2(-1,  0));
 	vec4 right =	texelFetchOffset(roadmap, texelIndex, 0, ivec2(+1,  0));
 	
-	float diff = 0.0;
-	if (floor(left) != floor(right))
-		diff = 1.0;
-	if (floor(up) != floor(down))
-		diff = 1.0;
-	nStage = vec4(diff, diff, diff, 1.0);
+	vec3 diff = vec3(0.0, 0.0, 0.0);
+	if ( (up.y < 0.0 && down.y > 0.0) || (up.y > 0.0 && down.y < 0.0) )
+		diff = vec3(1.0, 0.0, 0.0);
+	else if (floor(left) != floor(right))
+		diff = vec3(0.8, 0.8, 0.8);
+	else if (floor(up) != floor(down))
+		diff = vec3(0.8, 0.8, 0.8);
+	nStage = vec4(diff, 1.0);
 }
