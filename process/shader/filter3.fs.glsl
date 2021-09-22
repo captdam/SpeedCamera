@@ -30,5 +30,5 @@ void main() {
 	accum += texelFetchOffset(pStage, texelIndex, 0, ivec2( 0, +1)) * maskBottom.y;
 	accum += texelFetchOffset(pStage, texelIndex, 0, ivec2(+1, +1)) * maskBottom.z;
 
-	nStage = vec4(accum.rgb, 1.0);
+	nStage = accum;
 }
