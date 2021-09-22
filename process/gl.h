@@ -240,7 +240,7 @@ void gl_texture_update(gl_texformat format, gl_tex* texture, size2d_t size, void
  */
 void gl_texture_bind(gl_tex* texture, gl_param paramId, unsigned int unit);
 
-/** Delete a gl_tex object, the texture ID be set to GL_INIT_DEFAULT_TEX
+/** Delete a gl_tex object, the texture ID will be set to GL_INIT_DEFAULT_TEX
  * @param texture A gl_tex object previously created by gl_texture_create()
  */
 void gl_texture_delete(gl_tex* texture);
@@ -266,7 +266,7 @@ void* gl_pixelBuffer_updateStart(gl_pbo* pbo, size_t size);
  */
 void gl_pixelBuffer_updateFinish();
 
-/** Delete a gl_pbo
+/** Delete a gl_pbo. The PBO ID will be set the GL_INIT_DEFAULT_PBO. 
  * @param pbo A gl_pbo previously created by gl_pixelBuffer_create()
  */
 void gl_pixelBuffer_delete(gl_pbo* pbo);
@@ -300,18 +300,18 @@ int gl_frameBuffer_check(gl_fb* fb);
  */
 void gl_frameBuffer_bind(gl_fb* fb, size2d_t size, int clear);
 
-/** Delete a frame buffer. 
+/** Delete a frame buffer. The framebuffer ID will be set to GL_INIT_DEFAULT_FB. 
  * @param fb A frame buffer previously created by gl_frameBuffer_create()
  */
 void gl_frameBuffer_delete(gl_fb* fb);
 
-/** Force the GL driver to sync, the frame buffer will be reset to GL_INIT_DEFAULT_FB. 
- * Calling thread will be blocked until all previous GL calls executed completely.
+/** Force the GL driver to sync. 
+ * Calling thread will be blocked until all previous GL calls executed completely. 
  */
 void gl_fsync();
 
 /** Request the GL driver to sync. 
- * Empty the command buffer. Calling thread will not be blocked.
+ * Empty the command buffer. Calling thread will not be blocked. 
  */
 void gl_rsync();
 

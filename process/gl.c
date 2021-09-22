@@ -181,10 +181,11 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 		"uniform float mixLevel;\n"
 		"out vec4 color;\n"
 		"void main() {\n"
-		"	vec4 od = texture(orginalTexture, textpos);\n"
-		"	vec4 pd = texture(processedTexture, textpos);\n"
-		"	vec4 data = mix(od, pd, mixLevel);\n"
-		"	color = vec4(data.r, data.g, data.b, 1.0);\n"
+		"	vec3 od = texture(orginalTexture, textpos).rgb;\n"
+//		"	vec3 pd = texture(processedTexture, textpos).rgb;\n"
+		"	vec3 pd = texture(processedTexture, textpos).rrr;\n"
+		"	vec3 data = mix(od, pd, mixLevel);\n"
+		"	color = vec4(data, 1.0);\n"
 		"}\n";
 		const char* pName[] = {"orginalTexture", "processedTexture", "mixLevel"};
 		unsigned int pCount = sizeof(pName) / sizeof(pName[0]);
