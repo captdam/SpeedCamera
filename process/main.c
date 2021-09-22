@@ -17,7 +17,7 @@
 #include "roadmap.h"
 
 #define WINDOW_RATIO 1
-#define MIXLEVEL 0.88f
+#define MIXLEVEL 0.93f //0.88f
 
 #define FIFONAME "tmpframefifo.data"
 
@@ -168,11 +168,11 @@ int main(int argc, char* argv[]) {
 	fprintf(stdout, "\tFocus region: %s\n", focusRegionFile);
 	fprintf(stdout, "\tDistance map: %s\n", distanceMapFile);
 
-	if (width & 0b11 || width < 320 || width > 4056) {
+	if ((unsigned int)width & (unsigned int)0b11 || width < 320 || width > 4056) {
 		fputs("Bad width: Width must be multiple of 4, 320 <= width <= 4056\n", stderr);
 		return status;
 	}
-	if (height & 0b11 || height < 240 || height > 3040) {
+	if ((unsigned int)height & (unsigned int)0b11 || height < 240 || height > 3040) {
 		fputs("Bad height: Height must be multiple of 4, 240 <= height <= 3040\n", stderr);
 		return status;
 	}
@@ -182,6 +182,9 @@ int main(int argc, char* argv[]) {
 	}
 
 	/* Program variables declaration */
+
+	//Max distance an object could possibly travel between two frame
+	float distanceThreshold;
 
 	//OpenGL root (OpenGL init, default frame buffer...)
 	GL gl = NULL;
@@ -199,18 +202,20 @@ int main(int argc, char* argv[]) {
 	struct th_reader_arg arg;
 	int th_reader_idValid = 0;
 
-	//A mesh to store focus region, and a texture texture to store road-domain data
-	gl_mesh mesh_StdRect = GL_INIT_DEFAULT_MESH;
+	//A mesh to store focus region, and a texture to store road-domain data
+	gl_mesh mesh_region = GL_INIT_DEFAULT_MESH;
 	gl_tex texture_road = GL_INIT_DEFAULT_TEX;
 
-	//Work buffer: Use off-screen render, one frame buffer as input data and one as output, an extra one to save previous frame
-	gl_fb framebuffer_history = GL_INIT_DEFAULT_FB;
+	//Work stages: To save intermediate result during the process
+	gl_fb framebuffer_edge[2] = {GL_INIT_DEFAULT_FB, GL_INIT_DEFAULT_FB}; //Edge of current and previous frame
+	gl_fb framebuffer_move[2] = {GL_INIT_DEFAULT_FB, GL_INIT_DEFAULT_FB}; //Moving edge of current and previous frame
+	gl_fb framebuffer_speed = GL_INIT_DEFAULT_FB; //Displacement of two moving edge (speed of moving edge)
+
+	//Work buffer: Temp buffer
 	gl_fb framebuffer_stageA = GL_INIT_DEFAULT_FB;
 	gl_fb framebuffer_stageB = GL_INIT_DEFAULT_FB;
-	gl_fb* fb_new;
-	gl_fb* fb_old;
 
-	//Program[Debug] - Roadmap check
+	//Program[Debug] - Roadmap check: Roadmap match with video
 	gl_shader shader_roadmapCheck = GL_INIT_DEFAULT_SHADER;
 	gl_param shader_roadmapCheck_paramRoadmap;
 
@@ -223,13 +228,22 @@ int main(int argc, char* argv[]) {
 	gl_param shader_filter3_paramPStage;
 	gl_param shader_filter3_blockMask;
 
-	gl_shader shader_nonMaxSup = GL_INIT_DEFAULT_SHADER;
-	gl_param shader_nonMaxSup_paramPStage;
+	//Program - Edge refine: Refine the result of edge detection
+	gl_shader shader_edgerefine = GL_INIT_DEFAULT_SHADER;
+	gl_param shader_edgerefine_paramPStage;
 
-	gl_shader shader_history = GL_INIT_DEFAULT_SHADER;
-	gl_param shader_history_paramPStage;
-	gl_param shader_history_paramHistory;
+	//Program - Compare different: Find different between two textures
+	gl_shader shader_different = GL_INIT_DEFAULT_SHADER;
+	gl_param shader_different_paramA;
+	gl_param shader_different_paramB;
 
+	//Program - Distance: Find the distance of moving edge
+	gl_shader shader_distance = GL_INIT_DEFAULT_SHADER;
+	gl_param shader_distance_paramRoadmap;
+	gl_param shader_distance_paramA;
+	gl_param shader_distance_paramB;
+
+	//Param - 3x3 filter masks
 	const unsigned int bindingPoint_ubo_gussianMask =	0;
 	const unsigned int bindingPoint_ubo_edgeMask =		1;
 	gl_ubo shader_ubo_gussianMask = GL_INIT_DEFAULT_UBO;
@@ -302,21 +316,24 @@ int main(int argc, char* argv[]) {
 		gl_vertex_t* vertices = roadmap_getVertices(roadmap, &vCount);
 		gl_index_t* indices = roadmap_getIndices(roadmap, &iCount);
 		gl_index_t attributes[] = {2};
-		mesh_StdRect = gl_mesh_create((size2d_t){.height=vCount, .width=2}, 3 * iCount, attributes, vertices, indices);
-		if (!gl_mesh_check(&mesh_StdRect)) {
+		mesh_region = gl_mesh_create((size2d_t){.height=vCount, .width=2}, 3 * iCount, attributes, vertices, indices);
+		if (!gl_mesh_check(&mesh_region)) {
 			roadmap_destroy(roadmap);
 			fputs("Fail to create mesh for roadmap - focus region\n", stderr);
 			goto label_exit;
 		}
 
 		float* geo = roadmap_getGeographic(roadmap);
-		texture_road = gl_texture_create(gl_texformat_RG16F, size2d);
+		texture_road = gl_texture_create(gl_texformat_RGBA16F, size2d);
 		if (!gl_texture_check(&texture_road)) {
 			roadmap_destroy(roadmap);
 			fputs("Fail to create texture buffer for roadmap - road-domain data storage\n", stderr);
 			goto label_exit;
 		}
-		gl_texture_update(gl_texformat_RG16F, &texture_road, size2d, geo);
+		gl_texture_update(gl_texformat_RGBA16F, &texture_road, size2d, geo);
+
+		distanceThreshold = roadmap_getThreshold(roadmap);
+		fprintf(stdout, "Roadmap threshold: %f/frame\n", distanceThreshold);
 
 //		gl_fsync();
 		roadmap_destroy(roadmap); //Free roadmap memory after data uploading finished
@@ -324,20 +341,32 @@ int main(int argc, char* argv[]) {
 	}
 
 	/* Create work buffer */ {
-		framebuffer_history = gl_frameBuffer_create(RAW_COLORFORMAT, size2d);
-		if (!gl_frameBuffer_check(&framebuffer_history)) {
-			fputs("Fail to create frame buffer to store previous frames\n", stderr);
+		framebuffer_edge[0] = gl_frameBuffer_create(RAW_COLORFORMAT, size2d);
+		framebuffer_edge[1] = gl_frameBuffer_create(RAW_COLORFORMAT, size2d);
+		if (!gl_frameBuffer_check(&framebuffer_edge[0]) || !gl_frameBuffer_check(&framebuffer_edge[1])) {
+			fputs("Fail to create frame buffers to store edge\n", stderr);
 			goto label_exit;
 		}
+
+		framebuffer_move[0] = gl_frameBuffer_create(RAW_COLORFORMAT, size2d);
+		framebuffer_move[1] = gl_frameBuffer_create(RAW_COLORFORMAT, size2d);
+		if (!gl_frameBuffer_check(&framebuffer_move[0]) || !gl_frameBuffer_check(&framebuffer_move[1])) {
+			fputs("Fail to create frame buffers to store moving edge\n", stderr);
+			goto label_exit;
+		}
+
+		framebuffer_speed = gl_frameBuffer_create(RAW_COLORFORMAT, size2d);
+		if (!gl_frameBuffer_check(&framebuffer_speed)) {
+			fputs("Fail to create frame buffers to store speed\n", stderr);
+			goto label_exit;
+		}
+		
 		framebuffer_stageA = gl_frameBuffer_create(RAW_COLORFORMAT, size2d);
 		framebuffer_stageB = gl_frameBuffer_create(RAW_COLORFORMAT, size2d);
 		if (!gl_frameBuffer_check(&framebuffer_stageA) || !gl_frameBuffer_check(&framebuffer_stageB)) {
 			fputs("Fail to create work frame buffer A and/or B\n", stderr);
 			goto label_exit;
 		}
-		fb_new = &framebuffer_stageA;
-		fb_old = &framebuffer_stageB;
-		#define swap(a, b) {gl_fb* temp = a; a = b; b = temp;}
 	}
 
 	/* Create program: Roadmap check: Test roadmap geo data texture */ {
@@ -361,7 +390,7 @@ int main(int argc, char* argv[]) {
 		shader_roadmapCheck_paramRoadmap = pId[1];
 	}
 
-	/* Create program: Blit: Copy from one texture to another texture */ {
+	/* Create program: Blit */ {
 		const char* pName[] = {"size", "pStage"};
 		unsigned int pCount = sizeof(pName) / sizeof(pName[0]);
 		gl_param pId[pCount];
@@ -404,8 +433,8 @@ int main(int argc, char* argv[]) {
 		shader_filter3_blockMask = bId[0];
 	}
 
-	/* Process - Check pervious frames */ {
-		const char* pName[] = {"size", "pStage", "history"};
+	/* Create program: Edge refine */ {
+		const char* pName[] = {"size", "pStage", "threshold"};
 		unsigned int pCount = sizeof(pName) / sizeof(pName[0]);
 		gl_param pId[pCount];
 
@@ -413,20 +442,68 @@ int main(int argc, char* argv[]) {
 		unsigned int bCount = sizeof(bName) / sizeof(bName[0]);
 		gl_param bId[bCount];
 
-		shader_history = gl_shader_load("shader/stdRect.vs.glsl", "shader/history.fs.glsl", 1, pName, pId, pCount, bName, bId, bCount);
-		if (!gl_shader_check(&shader_history)) {
-			fputs("Cannot load shader: History frame lookback\n", stderr);
+		shader_edgerefine = gl_shader_load("shader/stdRect.vs.glsl", "shader/edgerefine.fs.glsl", 1, pName, pId, pCount, bName, bId, bCount);
+		if (!gl_shader_check(&shader_edgerefine)) {
+			fputs("Cannot load shader: edge refine\n", stderr);
 			goto label_exit;
 		}
 
-		gl_shader_use(&shader_history);
-		gl_shader_setParam(pId[0], 2, gl_type_float, fsize);
+		float threshold = 0.25f; //mat=0, exp=-2, Use >= and < when comparing, so the hardware only looks the exp
 
-		shader_history_paramPStage = pId[1];
-		shader_history_paramHistory = pId[2];
+		gl_shader_use(&shader_edgerefine);
+		gl_shader_setParam(pId[0], 2, gl_type_float, fsize);
+		gl_shader_setParam(pId[2], 1, gl_type_float, &threshold);
+
+		shader_edgerefine_paramPStage = pId[1];
 	}
 
-	/* Process - Kernel filter 3*3 masks */ {
+	/* Create program: Finding the difference between two texture (result = a - b) */ {
+		const char* pName[] = {"size", "ta", "tb"};
+		unsigned int pCount = sizeof(pName) / sizeof(pName[0]);
+		gl_param pId[pCount];
+
+		const char* bName[] = {};
+		unsigned int bCount = sizeof(bName) / sizeof(bName[0]);
+		gl_param bId[bCount];
+
+		shader_different = gl_shader_load("shader/stdRect.vs.glsl", "shader/different.fs.glsl", 1, pName, pId, pCount, bName, bId, bCount);
+		if (!gl_shader_check(&shader_different)) {
+			fputs("Cannot load shader: find difference\n", stderr);
+			goto label_exit;
+		}
+
+		gl_shader_use(&shader_different);
+		gl_shader_setParam(pId[0], 2, gl_type_float, fsize);
+
+		shader_different_paramA = pId[1];
+		shader_different_paramB = pId[2];
+	}
+
+	/* Create program: Finding the displacement of (new edge in A) and (any edge in B) in road-domain */ {
+		const char* pName[] = {"size", "threshold", "roadmap", "ta", "tb"};
+		unsigned int pCount = sizeof(pName) / sizeof(pName[0]);
+		gl_param pId[pCount];
+
+		const char* bName[] = {};
+		unsigned int bCount = sizeof(bName) / sizeof(bName[0]);
+		gl_param bId[bCount];
+
+		shader_distance = gl_shader_load("shader/stdRect.vs.glsl", "shader/distance.fs.glsl", 1, pName, pId, pCount, bName, bId, bCount);
+		if (!gl_shader_check(&shader_distance)) {
+			fputs("Cannot load shader: distance\n", stderr);
+			goto label_exit;
+		}
+
+		gl_shader_use(&shader_distance);
+		gl_shader_setParam(pId[0], 2, gl_type_float, fsize);
+		gl_shader_setParam(pId[1], 1, gl_type_float, &distanceThreshold);
+
+		shader_distance_paramRoadmap = pId[2];
+		shader_distance_paramA = pId[3];
+		shader_distance_paramB = pId[4];
+	}
+
+	/* Param - Kernel filter 3*3 masks */ {
 		const float gussianMask[] = {
 			1.0f/16,	2.0f/16,	1.0f/16,	0.0f, //vec4 alignment
 			2.0f/16,	4.0f/16,	2.0f/16,	0.0f,
@@ -465,59 +542,117 @@ int main(int argc, char* argv[]) {
 	while(!gl_close(gl, -1)) {
 		fputc('\r', stdout);
 		startTime = nanotime();
+		unsigned int rri = (unsigned int)(frameCount+0) & (unsigned int)1; //round-robin index - current
+		unsigned int rrj = (unsigned int)(frameCount+1) & (unsigned int)1; //round-robin index - previous
 		gl_drawStart(gl);
 		
-		/* Give next frame PBO to reader while using current PBO for rendering */
-		#ifdef USE_PBO_UPLOAD
-			gl_pixelBuffer_updateToTexture(RAW_COLORFORMAT, &cameraData[ (frameCount+0)&1 ], &texture_orginalBuffer, size2d); //Current frame PBO (index = +0) <-- Data already in GPU, this operation is fast
-			rawDataPtr = gl_pixelBuffer_updateStart(&cameraData[ (frameCount+1)&1 ], size1d * 4); //Next frame PBO (index = +1)
-		#else
-			gl_texture_update(RAW_COLORFORMAT, &texture_orginalBuffer, size2d, rawData[ (frameCount+0)&1 ]);
-			rawDataPtr = rawData[ (frameCount+1)&1 ];
-		#endif
-		sem_post(&sem_readerJobStart); //New GPU address ready, start to reader thread
+		/* Give next frame PBO to reader while using current PBO for rendering */ {
+			#ifdef USE_PBO_UPLOAD
+				gl_pixelBuffer_updateToTexture(RAW_COLORFORMAT, &cameraData[ (frameCount+0)&1 ], &texture_orginalBuffer, size2d); //Current frame PBO (index = +0) <-- Data already in GPU, this operation is fast
+				rawDataPtr = gl_pixelBuffer_updateStart(&cameraData[ (frameCount+1)&1 ], size1d * 4); //Next frame PBO (index = +1)
+			#else
+				gl_texture_update(RAW_COLORFORMAT, &texture_orginalBuffer, size2d, rawData[ (frameCount+0)&1 ]);
+				rawDataPtr = rawData[ (frameCount+1)&1 ];
+			#endif
+			sem_post(&sem_readerJobStart); //New GPU address ready, start to reader thread
+		}
 
-		/* Remove noise by using gussian blur mask */
-		gl_frameBuffer_bind(fb_new, size2d, 0); //Use video full-resolution for render
-		gl_shader_use(&shader_filter3);
-		gl_uniformBuffer_bindShader(bindingPoint_ubo_gussianMask, &shader_filter3, shader_filter3_blockMask);
-		gl_texture_bind(&texture_orginalBuffer, shader_filter3_paramPStage, 0);
-		gl_mesh_draw(&mesh_StdRect);
-		swap(fb_new, fb_old);
+		/* Remove noise by using gussian blur mask */ {
+			gl_shader* program = &shader_filter3;
+			gl_fb* nextStage = &framebuffer_stageA;
+			gl_param previousStageParam = shader_filter3_paramPStage;
+			gl_tex* previousStage = &texture_orginalBuffer;
+			gl_param param1 = shader_filter3_blockMask;
+			unsigned int value1 = bindingPoint_ubo_gussianMask;
+			gl_frameBuffer_bind(nextStage, size2d, 0);
+			gl_shader_use(program);
+			gl_uniformBuffer_bindShader(value1, program, param1);
+			gl_texture_bind(previousStage, previousStageParam, 0);
+			gl_mesh_draw(&mesh_region);
+		}
 
-		/* Apply edge detection mask */
-		gl_frameBuffer_bind(fb_new, size2d, 0);
-		gl_shader_use(&shader_filter3);
-		gl_uniformBuffer_bindShader(bindingPoint_ubo_edgeMask, &shader_filter3, shader_filter3_blockMask);
-		gl_texture_bind(&fb_old->texture, shader_filter3_paramPStage, 0);
-		gl_mesh_draw(&mesh_StdRect);
-		swap(fb_new, fb_old);
+		/* Apply edge detection mask to find edge */ {
+			gl_shader* program = &shader_filter3;
+			gl_fb* nextStage = &framebuffer_stageB;
+			gl_param previousStageParam = shader_filter3_paramPStage;
+			gl_tex* previousStage = &framebuffer_stageA.texture;
+			gl_param param1 = shader_filter3_blockMask;
+			unsigned int value1 = bindingPoint_ubo_edgeMask;
+			gl_frameBuffer_bind(nextStage, size2d, 0);
+			gl_shader_use(program);
+			gl_uniformBuffer_bindShader(value1, program, param1);
+			gl_texture_bind(previousStage, previousStageParam, 0);
+			gl_mesh_draw(&mesh_region);
+		}
 
-		/* Debug use ONLY */
-		gl_frameBuffer_bind(fb_new, size2d, 0);
-		gl_shader_use(&shader_roadmapCheck);
-		gl_texture_bind(&texture_road, shader_roadmapCheck_paramRoadmap, 0);
-		gl_mesh_draw(&mesh_StdRect);
-		swap(fb_new, fb_old);
+		/* Refine the result of edge detection, remove noise, normalize */ {
+			gl_shader* program = &shader_edgerefine;
+			gl_fb* nextStage = &framebuffer_edge[rri];
+			gl_param previousStageParam = shader_edgerefine_paramPStage;
+			gl_tex* previousStage = &framebuffer_stageB.texture;
+			gl_frameBuffer_bind(nextStage, size2d, 0);
+			gl_shader_use(program);
+			gl_texture_bind(previousStage, previousStageParam, 0);
+			gl_mesh_draw(&mesh_region);
+		}
 
-/*		gl_frameBuffer_bind(frameBuffer_new, size, 0);
-		gl_shader_use(&shader_history);
-		gl_texture_bind(&frameBuffer_old->texture, shader_history_paramPStage, 0);
-		gl_texture_bind(&framebuffer_history.texture, shader_history_paramHistory, 1);
-		gl_mesh_draw(&mesh_StdRect);
-		swapFrameBuffer(frameBuffer_old, frameBuffer_new);
+		/* Compare current edge and previous edge to find moving edge */ {
+			gl_shader* program = &shader_different;
+			gl_fb* nextStage = &framebuffer_stageA;
+			gl_param param1 = shader_different_paramA;
+			gl_tex* value1 = &framebuffer_edge[rri].texture;
+			gl_param param2 = shader_different_paramB;
+			gl_tex* value2 = &framebuffer_edge[rrj].texture;
+			gl_frameBuffer_bind(nextStage, size2d, 0);
+			gl_shader_use(program);
+			gl_texture_bind(value1, param1, 0);
+			gl_texture_bind(value2, param2, 1);
+			gl_mesh_draw(&mesh_region);
+		}
 
-		gl_frameBuffer_bind(&framebuffer_history, size, 0); //Render to history framebuffer instead frameBuffer_new
-		gl_shader_use(&shader_blit); //So, DON'T swap framebuffer after rendering
-		gl_texture_bind(&frameBuffer_old->texture, shader_blit_paramPStage, 0);
-		gl_mesh_draw(&mesh_StdRect);*/
+		/* Refine the result of edge detection, remove noise, normalize */ {
+			gl_shader* program = &shader_edgerefine;
+			gl_fb* nextStage = &framebuffer_move[rri];
+			gl_param previousStageParam = shader_edgerefine_paramPStage;
+			gl_tex* previousStage = &framebuffer_stageA.texture;
+			gl_frameBuffer_bind(nextStage, size2d, 0);
+			gl_shader_use(program);
+			gl_texture_bind(previousStage, previousStageParam, 0);
+			gl_mesh_draw(&mesh_region);
+		}
 
-		gl_drawWindow(gl, &texture_orginalBuffer, &fb_old->texture);
+		/* Compare current moving edge and previous moving edge to find displacement of moving edge. New in A to nearest in B */ {
+			gl_shader* program = &shader_distance;
+			gl_fb* nextStage = &framebuffer_stageA;
+			gl_param param1 = shader_distance_paramA;
+			gl_tex* value1 = &framebuffer_move[rri].texture;
+			gl_param param2 = shader_distance_paramB;
+			gl_tex* value2 = &framebuffer_move[rrj].texture;
+			gl_frameBuffer_bind(nextStage, size2d, 0);
+			gl_shader_use(program);
+			gl_texture_bind(value1, param1, 0);
+			gl_texture_bind(value2, param2, 1);
+			gl_mesh_draw(&mesh_region);
+		}
+
+		/* Debug use ONLY: Check roadmap */ /*{
+			gl_shader* program = &shader_roadmapCheck;
+			gl_fb* nextStage = &framebuffer_stageA;
+			gl_param previousStageParam = shader_roadmapCheck_paramRoadmap;
+			gl_tex* previousStage = &texture_road;
+			gl_frameBuffer_bind(nextStage, size2d, 0);
+			gl_shader_use(program);
+			gl_texture_bind(previousStage, previousStageParam, 0);
+			gl_mesh_draw(&mesh_region);
+		}*/
+
+		gl_drawWindow(gl, &texture_orginalBuffer, &framebuffer_edge[rri].texture);
 
 		char title[60];
 		sprintf(title, "Viewer - frame %u", frameCount);
 		gl_drawEnd(gl, title);
 
+		gl_fsync();
 		fputc('M', stdout);
 		sem_wait(&sem_readerJobDone); //Wait reader thread finish uploading frame data
 		#ifdef USE_PBO_UPLOAD
@@ -525,11 +660,11 @@ int main(int argc, char* argv[]) {
 		#endif
 
 		endTime = nanotime();
-		fprintf(stdout, "Loop %u takes %lfms/frame.", frameCount, (endTime - startTime) / 1e6);
+		fprintf(stdout, " - Loop %u takes %lfms/frame.", frameCount, (endTime - startTime) / 1e6);
 		fflush(stdout);
 	
 		frameCount++;
-//		usleep(10e3);
+		usleep(20e3);
 	}
 
 
@@ -541,18 +676,23 @@ label_exit:
 	gl_unifromBuffer_delete(&shader_ubo_gussianMask);
 	gl_unifromBuffer_delete(&shader_ubo_edgeMask);
 
-	gl_shader_unload(&shader_history);
+	gl_shader_unload(&shader_distance);
+	gl_shader_unload(&shader_different);
+	gl_shader_unload(&shader_edgerefine);
 	gl_shader_unload(&shader_filter3);
-	gl_shader_unload(&shader_nonMaxSup);
 	gl_shader_unload(&shader_blit);
 	gl_shader_unload(&shader_roadmapCheck);
 
 	gl_frameBuffer_delete(&framebuffer_stageB);
 	gl_frameBuffer_delete(&framebuffer_stageA);
-	gl_frameBuffer_delete(&framebuffer_history);
+	gl_frameBuffer_delete(&framebuffer_speed);
+	gl_frameBuffer_delete(&framebuffer_move[1]);
+	gl_frameBuffer_delete(&framebuffer_move[0]);
+	gl_frameBuffer_delete(&framebuffer_edge[1]);
+	gl_frameBuffer_delete(&framebuffer_edge[0]);
 
 	gl_texture_delete(&texture_road);
-	gl_mesh_delete(&mesh_StdRect);
+	gl_mesh_delete(&mesh_region);
 
 	if (th_reader_idValid) {
 		pthread_cancel(th_reader_id);
