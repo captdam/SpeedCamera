@@ -33,42 +33,21 @@ void main() {
 	float  s = dot( texelFetchOffset(pStage, texelIndex, 0, ivec2( 0, +1)) , rgb2g);
 	float se = dot( texelFetchOffset(pStage, texelIndex, 0, ivec2(+1, +1)) , rgb2g);
 
-	float dnw = x - nw;
-	float  dn = x - n;
-	float dne = x - ne;
-	float  dw = x - w;
-	float  de = x - e;
-	float dsw = x - sw;
-	float  ds = x - s;
-	float dse = x - se;
-
 	vec4 result = vec4(0.0, 0.0, 0.0, 0.0);
-
-/*	if (min(dn, ds) > threshold)
-		result = 1.0;
-	else if (min(dw, de) > threshold)
-		result = 1.0;
-	else if (min(dnw, dse) > threshold)
-		result = 1.0;
-	else if (min(dne, dsw) > threshold)
-		result = 1.0;*/
-	
-/*	if (x > threshold && !(min(dn, ds) > threshold && min(dw, de) > threshold) )
-		result = 1.0;*/
 	
 	float tx = threshold;
 	float tn = threshold;
 
 	if (x > tx) {
 		int flag = 0;
-		if (nw > tn) flag++;
-		if (n > tn) flag++;
-		if (ne > tn) flag++;
-		if (w > tn) flag++;
-		if (e > tn) flag++;
-		if (sw > tn) flag++;
-		if (s > tn) flag++;
-		if (se > tn) flag++;
+		if (nw >= tn) flag++;
+		if (n >= tn) flag++;
+		if (ne >= tn) flag++;
+		if (w >= tn) flag++;
+		if (e >= tn) flag++;
+		if (sw >= tn) flag++;
+		if (s >= tn) flag++;
+		if (se >= tn) flag++;
 		if (flag >= 2) result = vec4(1.0, 1.0, 1.0, 1.0);
 	}
 

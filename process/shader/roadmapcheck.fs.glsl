@@ -12,6 +12,8 @@ void main() {
 		int(textpos.x * size.x),
 		int(textpos.y * size.y)
 	);
+
+/*	//Position
 	vec4 up =	texelFetchOffset(roadmap, texelIndex, 0, ivec2( 0, -1));
 	vec4 down =	texelFetchOffset(roadmap, texelIndex, 0, ivec2( 0, +1));
 	vec4 left =	texelFetchOffset(roadmap, texelIndex, 0, ivec2(-1,  0));
@@ -24,5 +26,10 @@ void main() {
 		diff = vec3(0.8, 0.8, 0.8);
 	else if (floor(up) != floor(down))
 		diff = vec3(0.8, 0.8, 0.8);
-	nStage = vec4(diff, 1.0);
+	nStage = vec4(diff, 1.0);*/
+
+	//Search region
+	float dx = texelFetch(roadmap, texelIndex, 0).z;
+	float dy = texelFetch(roadmap, texelIndex, 0).w;
+	nStage = vec4(dx/200.0, 1.0, 1.0, 1.0);
 }

@@ -10,7 +10,7 @@ out vec4 nStage;
 uniform sampler2D roadmap;
 uniform sampler2D ta;
 uniform sampler2D tb;
-uniform float threshold;
+uniform float maxDistance;
 
 void main() {
 	const float et = 0.5; //Edge threshold. mat=0, exp=-1, Use >= and < so the hardware only looks the exp
@@ -21,21 +21,21 @@ void main() {
 		int(textpos.y * size.y)
 	);
 
-	float currentEdge = texelFetch(ta, texelIndex, 0).r;
-	float previousEdge = texelFetch(tb, texelIndex, 0).r;
-	vec2 currentPos = texelFetch(roadmap, texelIndex, 0).xy;
-	ivec2 searchRegion = ivec2(texelFetch(roadmap, texelIndex, 0).zw);
+	vec4 currentRoadmap = texelFetch(roadmap, texelIndex, 0);
+	vec2 currentPos = currentRoadmap.xy;
+	ivec2 searchRegion = ivec2(currentRoadmap.zw);
 
-	float dis = threshold; //Displacement of edge
+	float dis = maxDistance; //Displacement of edge
 
 	vec4 result = vec4(0.0, 0.0, 0.0, 0.0);;
 
-	if (currentEdge >= et && previousEdge < et) { //Edge is new in current frame
-/*		for (int left = 1; left < searchRegion.x && left < texelIndex.x; left++) { //Do not continue search if out of region. The OpenGL takes care of index fault, but dry-run costs performance
+	if (texelFetch(ta, texelIndex, 0).r >= et) { //Edge is new in current frame
+		for (int left = 1; left < searchRegion.x && left < texelIndex.x; left++) { //Do not continue search if out of region. The OpenGL takes care of index fault, but dry-run costs performance
 			ivec2 targetIndex = texelIndex + ivec2(-left, 0);
 			if (texelFetch(tb, targetIndex, 0).r >= et) {
 				vec2 targetPos = texelFetch(roadmap, targetIndex, 0).xy;
 				dis = min(dis, distance(currentPos, targetPos));
+				break;
 			}
 		}
 		for (int right = 1; right < searchRegion.x && right + texelIndex.x < isize.x; right++) {
@@ -43,6 +43,7 @@ void main() {
 			if (texelFetch(tb, targetIndex, 0).r >= et) {
 				vec2 targetPos = texelFetch(roadmap, targetIndex, 0).xy;
 				dis = min(dis, distance(currentPos, targetPos));
+				break;
 			}
 		}
 		for (int up = 1; up < searchRegion.y && up < texelIndex.y; up++) {
@@ -50,6 +51,7 @@ void main() {
 			if (texelFetch(tb, targetIndex, 0).r >= et) {
 				vec2 targetPos = texelFetch(roadmap, targetIndex, 0).xy;
 				dis = min(dis, distance(currentPos, targetPos));
+				break;
 			}
 		}
 		for (int down = 1; down < searchRegion.y && down + texelIndex.y < isize.y; down++) {
@@ -57,14 +59,14 @@ void main() {
 			if (texelFetch(tb, targetIndex, 0).r >= et) {
 				vec2 targetPos = texelFetch(roadmap, targetIndex, 0).xy;
 				dis = min(dis, distance(currentPos, targetPos));
+				break;
 			}
 		}
 		
-		if (dis != threshold) { //Nearest edge found in previous frame, hence the dis has been modified
-			dis = dis / threshold; //Normalize to [0,1]
-			result = vec4(1.0, 1.0, 1.0, 1.0);
-		}*/
-		result = vec4(1.0, 1.0, 1.0, 1.0);
+		if (dis != maxDistance) { //Nearest edge found in previous frame, hence the dis has been modified
+			dis = dis / maxDistance; //Normalize to [0,1]
+			result = vec4(dis, dis, dis, dis);
+		}
 	}
 
 	nStage = result;
