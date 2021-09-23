@@ -448,7 +448,7 @@ int main(int argc, char* argv[]) {
 			goto label_exit;
 		}
 
-		float threshold = 0.25f; //mat=0, exp=-2, Use >= and < when comparing, so the hardware only looks the exp
+		float threshold = 0.125f; //mat=0, exp=-3, Use >= and < when comparing, so the hardware only looks the exp
 
 		gl_shader_use(&shader_edgerefine);
 		gl_shader_setParam(pId[0], 2, gl_type_float, fsize);
@@ -480,7 +480,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	/* Create program: Finding the displacement of (new edge in A) and (any edge in B) in road-domain */ {
-		const char* pName[] = {"size", "threshold", "roadmap", "ta", "tb"};
+		const char* pName[] = {"size", "maxDistance", "roadmap", "ta", "tb"};
 		unsigned int pCount = sizeof(pName) / sizeof(pName[0]);
 		gl_param pId[pCount];
 
@@ -628,10 +628,13 @@ int main(int argc, char* argv[]) {
 			gl_tex* value1 = &framebuffer_move[rri].texture;
 			gl_param param2 = shader_distance_paramB;
 			gl_tex* value2 = &framebuffer_move[rrj].texture;
+			gl_param param3 = shader_distance_paramRoadmap;
+			gl_tex* value3 = &texture_road;
 			gl_frameBuffer_bind(nextStage, size2d, 0);
 			gl_shader_use(program);
 			gl_texture_bind(value1, param1, 0);
 			gl_texture_bind(value2, param2, 1);
+			gl_texture_bind(value3, param3, 2);
 			gl_mesh_draw(&mesh_region);
 		}
 
@@ -646,14 +649,20 @@ int main(int argc, char* argv[]) {
 			gl_mesh_draw(&mesh_region);
 		}*/
 
-		gl_drawWindow(gl, &texture_orginalBuffer, &framebuffer_edge[rri].texture);
+		gl_drawWindow(gl, &texture_orginalBuffer, &framebuffer_stageA.texture);
+		gl_synch barrier = gl_synchSet();
 
 		char title[60];
 		sprintf(title, "Viewer - frame %u", frameCount);
 		gl_drawEnd(gl, title);
 
-		gl_fsync();
+		if (gl_synchWait(barrier, 5000000000LLU) == gl_synch_timeout) { //timeout = 5e9 ns = 5s
+			fputs("Render loop fatal stall\n", stderr);
+			goto label_exit;
+		}
+		gl_synchDelete(barrier);
 		fputc('M', stdout);
+		
 		sem_wait(&sem_readerJobDone); //Wait reader thread finish uploading frame data
 		#ifdef USE_PBO_UPLOAD
 			gl_pixelBuffer_updateFinish();
@@ -664,7 +673,7 @@ int main(int argc, char* argv[]) {
 		fflush(stdout);
 	
 		frameCount++;
-		usleep(20e3);
+//		usleep(20e3);
 	}
 
 
