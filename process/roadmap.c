@@ -38,7 +38,7 @@ Roadmap roadmap_init(const char* focusRegionFile, const char* distanceMapFile, s
 		.threshold = 0.0f
 	};
 
-	FILE* fp;
+	FILE* fp = NULL;
 
 	/* Focus region */
 
@@ -101,6 +101,7 @@ Roadmap roadmap_init(const char* focusRegionFile, const char* distanceMapFile, s
 	}
 
 	fclose(fp);
+	fp = NULL;
 
 	/* Geographic data */
 
