@@ -631,7 +631,7 @@ int gl_pixelBuffer_check(gl_pbo* pbo) {
 
 void* gl_pixelBuffer_updateStart(gl_pbo* pbo, size_t size) {
 	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, *pbo);
-	return glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, size, GL_MAP_WRITE_BIT/* | GL_MAP_INVALIDATE_BUFFER_BIT*//* | GL_MAP_UNSYNCHRONIZED_BIT*/);
+	return glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, size, GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT | GL_MAP_UNSYNCHRONIZED_BIT);
 }
 
 void gl_pixelBuffer_updateFinish() {
@@ -701,4 +701,29 @@ void gl_fsync() {
 }
 void gl_rsync() {
 	glFlush();
+}
+
+gl_synch gl_synchSet() {
+	return glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+}
+gl_synch_statue gl_synchWait(gl_synch s, uint64_t timeout) {
+	gl_synch_statue statue;
+	switch (glClientWaitSync(s, GL_SYNC_FLUSH_COMMANDS_BIT, timeout)) {
+		case GL_ALREADY_SIGNALED:
+			statue = gl_synch_done;
+			break;
+		case GL_CONDITION_SATISFIED:
+			statue = gl_synch_ok;
+			break;
+		case GL_TIMEOUT_EXPIRED:
+			statue = gl_synch_timeout;
+			break;
+		default:
+			statue = gl_synch_error;
+			break;
+	}
+	return statue;
+}
+void gl_synchDelete(gl_synch s) {
+	glDeleteSync(s);
 }

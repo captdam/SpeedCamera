@@ -62,6 +62,11 @@ typedef struct GL_FrameBuffer {
 } gl_fb;
 #define GL_INIT_DEFAULT_FB (gl_fb){GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX}
 
+/** Synch
+ */
+typedef void* gl_synch;
+typedef enum gl_synch_statue {gl_synch_error = -1, gl_synch_timeout, gl_synch_done, gl_synch_ok} gl_synch_statue;
+
 /* == Window management and driver init ===================================================== */
 
 /** Init the GL class (only one allowed). 
@@ -314,5 +319,22 @@ void gl_fsync();
  * Empty the command buffer. Calling thread will not be blocked. 
  */
 void gl_rsync();
+
+/** Set a point in the GPU command queue for a later gl_synchWait() call. 
+ * @return A gl_synch object
+ */
+gl_synch gl_synchSet();
+
+/** Wait GPU command queue. 
+ * @param s A gl_synch object previous returned by gl_synchSet()
+ * @param timeout Timeout in nano seconds. This functionn will return gl_synch_timeout if the GPU commands before the synch point cannot be preformed before the timeout. This value can be 0
+ * @return gl_synch_ok or gl_synch_done if the all commands before the synch point in the GPU queue are done before this call or before the timeout; gl_synch_timeout if timeout passed bu command has not done; gl_synch_error if any error
+ */
+gl_synch_statue gl_synchWait(gl_synch s, uint64_t timeout);
+
+/** Delete a gl_synch object if no longer need
+ * @param s A gl_synch object previous returned by gl_synchSet()
+ */
+void gl_synchDelete(gl_synch s);
 
 #endif /* #ifndef INCLUDE_GL_H */
