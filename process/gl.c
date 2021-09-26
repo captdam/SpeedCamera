@@ -590,6 +590,19 @@ gl_tex gl_texture_create(gl_texformat format, size2d_t size) {
 	return texture;
 }
 
+gl_tex gl_texture3d_create(gl_texformat format, size2d_t size, size_t depth) {
+	gl_tex texture;
+	glGenTextures(1, &texture);
+	glBindTexture(GL_TEXTURE_3D, texture);
+	
+	glTexImage3D(GL_TEXTURE_3D, 0, gl_texformat_lookup[format].internalFormat, size.width, size.height, size.depth, 0, gl_texformat_lookup[format].format, gl_texformat_lookup[format].type, NULL);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+	glBindTexture(GL_TEXTURE_3D, GL_INIT_DEFAULT_TEX);
+	return texture;
+}
+
 int gl_texture_check(gl_tex* texture) {
 	if (*texture == GL_INIT_DEFAULT_TEX)
 		return 0;
@@ -602,9 +615,21 @@ void gl_texture_update(gl_texformat format, gl_tex* texture, size2d_t size, void
 	glBindTexture(GL_TEXTURE_2D, GL_INIT_DEFAULT_TEX);
 }
 
+void gl_texture3d_update(gl_texformat format, gl_tex* texture, size3d_t size, void* data) {
+	glBindTexture(GL_TEXTURE_3D, *texture);
+	glTexSubImage3D(GL_TEXTURE_3D, 0, 0, 0, 0, size.width, size.height, size.depth, gl_texformat_lookup[format].format, gl_texformat_lookup[format].type, data);
+	glBindTexture(GL_TEXTURE_3D, GL_INIT_DEFAULT_TEX);
+}
+
 void gl_texture_bind(gl_tex* texture, gl_param paramId, unsigned int unit) {
 	glActiveTexture(GL_TEXTURE0 + unit);
 	glBindTexture(GL_TEXTURE_2D, *texture);
+	glUniform1i(paramId, unit);
+}
+
+void gl_texture3d_bind(gl_tex* texture, gl_param paramId, unsigned int unit) {
+	glActiveTexture(GL_TEXTURE0 + unit);
+	glBindTexture(GL_TEXTURE_3D, *texture);
 	glUniform1i(paramId, unit);
 }
 

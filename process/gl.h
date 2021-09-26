@@ -217,20 +217,28 @@ void gl_mesh_draw(gl_mesh* mesh);
  */
 void gl_mesh_delete(gl_mesh* mesh);
 
-/** Create gl_tex object whit empty content 
+/** Create gl_tex (2D) object whit empty content 
  * @param format Format of the texture, can be gl_texformat_*
  * @param size Width and height of the gl_tex in unit of pixel
  * @return gl_tex object
  */
 gl_tex gl_texture_create(gl_texformat format, size2d_t size);
 
-/** Check a texture
+/** Create gl_tex (3D) object whit empty content 
+ * @param format Format of the texture, can be gl_texformat_*
+ * @param size Width, height and depth of the gl_tex in unit of pixel
+ * @param depth Depth of gl_tex in unit of layer
+ * @return gl_tex object
+ */
+gl_tex gl_texture3d_create(gl_texformat format, size3_t size);
+
+/** Check a texture (2D or 3D)
  * @param texture A gl_mesh object previously created by gl_mesh_create()
  * @return 1 if good, 0 if not
  */
 int gl_texture_check(gl_tex* texture);
 
-/** Update a gl_tex object 
+/** Update a gl_tex (2D) object 
  * @param format Format of the texture, can be gl_texformat_*, need to be same as it when create
  * @param texture A gl_tex object previously created by gl_texture_create()
  * @param size Width and height of the texture in unit of pixel
@@ -238,14 +246,30 @@ int gl_texture_check(gl_tex* texture);
  */
 void gl_texture_update(gl_texformat format, gl_tex* texture, size2d_t size, void* data);
 
-/** Bind a texture object to OpenGL engine texture unit 
+/** Update a gl_tex (3D) object 
+ * @param format Format of the texture, can be gl_texformat_*, need to be same as it when create
+ * @param texture A gl_tex object previously created by gl_texture_create()
+ * @param size Width, height and depth of the texture in unit of pixel
+ * @param data Pointer to the texture data
+ */
+void gl_texture3d_update(gl_texformat format, gl_tex* texture, size3d_t size, void* data);
+
+/** Bind a texture (2D) object to OpenGL engine texture unit 
  * @param texture A gl_tex object previously created by gl_texture_create()
  * @param paramId ID of texture parameter returned by gl_shader_load()
  * @param unit OpenGL texture unit, same as the GL_TEXTUREX
  */
 void gl_texture_bind(gl_tex* texture, gl_param paramId, unsigned int unit);
 
-/** Delete a gl_tex object, the texture ID will be set to GL_INIT_DEFAULT_TEX
+/** Bind a texture (3D) object to OpenGL engine texture unit 
+ * @param texture A gl_tex object previously created by gl_texture_create()
+ * @param paramId ID of texture parameter returned by gl_shader_load()
+ * @param depth Depth of texture in unit of layer
+ * @param unit OpenGL texture unit, same as the GL_TEXTUREX
+ */
+void gl_texture3d_bind(gl_tex* texture, gl_param paramId, unsigned int unit);
+
+/** Delete a gl_tex (2D or 3D) object, the texture ID will be set to GL_INIT_DEFAULT_TEX
  * @param texture A gl_tex object previously created by gl_texture_create()
  */
 void gl_texture_delete(gl_tex* texture);
