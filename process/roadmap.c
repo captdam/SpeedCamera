@@ -170,7 +170,7 @@ void roadmap_destroy(Roadmap this) {
 		return;
 
 	#ifdef VERBOSE
-		fputs("Destroy road class object\n", stdout);
+		fputs("Destroy roadmap class object\n", stdout);
 		fflush(stdout);
 	#endif
 

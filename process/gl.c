@@ -590,7 +590,7 @@ gl_tex gl_texture_create(gl_texformat format, size2d_t size) {
 	return texture;
 }
 
-gl_tex gl_texture3d_create(gl_texformat format, size2d_t size, size_t depth) {
+gl_tex gl_texture3d_create(gl_texformat format, size3d_t size) {
 	gl_tex texture;
 	glGenTextures(1, &texture);
 	glBindTexture(GL_TEXTURE_3D, texture);

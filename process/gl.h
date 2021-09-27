@@ -230,7 +230,7 @@ gl_tex gl_texture_create(gl_texformat format, size2d_t size);
  * @param depth Depth of gl_tex in unit of layer
  * @return gl_tex object
  */
-gl_tex gl_texture3d_create(gl_texformat format, size3_t size);
+gl_tex gl_texture3d_create(gl_texformat format, size3d_t size);
 
 /** Check a texture (2D or 3D)
  * @param texture A gl_mesh object previously created by gl_mesh_create()

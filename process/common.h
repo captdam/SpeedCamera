@@ -28,6 +28,23 @@ typedef struct Size2D_t {
 	};
 } size2d_t;
 
+/** Size of 3D object (image): width, height and depth
+ */
+typedef struct Size3D_t {
+	union {
+		size_t width;
+		size_t x;
+	};
+	union {
+		size_t height;
+		size_t y;
+	};
+	union {
+		size_t depth;
+		size_t z;
+	};
+} size3d_t;
+
 /** Describe a real-world location 
  */
 typedef struct Location3D_t {

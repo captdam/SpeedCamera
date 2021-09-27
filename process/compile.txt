@@ -1,0 +1,1 @@
+gcc *.c -D_FILE_OFFSET_BITS=64 -DVERBOSE -O3 -lX11 -lGLEW -lGL -lglfw3 -lpthread -lm -ldl && time ./a.out 1920 1080 20 3 ../v3map.txt ../v3map.data
