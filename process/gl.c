@@ -130,6 +130,23 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 
 	#ifdef VERBOSE 
 		fprintf(stdout, "OpenGL driver: %s\n", glGetString(GL_VERSION));
+		GLint queue_int;
+
+		const GLenum queueParamInt[] = {
+			GL_MAX_TEXTURE_SIZE,
+			GL_MAX_ARRAY_TEXTURE_LAYERS
+		};
+		const char* queueTextInt[] = {
+			"Max texture size",
+			"Max array texture layers"
+		};
+		for (size_t i = 0; i < sizeof(queueParamInt) / sizeof(queueParamInt[0]); i++) {
+			glGetIntegerv(queueParamInt[i], &queue_int);
+			fputc('\t', stdout);
+			fputs(queueTextInt[i], stdout);
+			fprintf(stdout, ": %d\n", queue_int);
+		}
+
 		fflush(stdout);
 	#endif
 
@@ -150,8 +167,8 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 
 	/* OpenGL config */
 //	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-	glPixelStorei(GL_UNPACK_ROW_LENGTH, frameSize.width);
-	glPixelStorei(GL_UNPACK_IMAGE_HEIGHT, frameSize.height);
+//	glPixelStorei(GL_UNPACK_ROW_LENGTH, frameSize.width);
+//	glPixelStorei(GL_UNPACK_IMAGE_HEIGHT, frameSize.height);
 //	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
 	/* Draw window - mesh */ {
@@ -182,8 +199,8 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 		"out vec4 color;\n"
 		"void main() {\n"
 		"	vec3 od = texture(orginalTexture, textpos).rgb;\n"
-//		"	vec3 pd = texture(processedTexture, textpos).rgb;\n"
-		"	vec3 pd = texture(processedTexture, textpos).rrr;\n"
+		"	vec3 pd = texture(processedTexture, textpos).rgb;\n"
+//		"	vec3 pd = texture(processedTexture, textpos).rrr;\n"
 		"	vec3 data = mix(od, pd, mixLevel);\n"
 		"	color = vec4(data, 1.0);\n"
 		"}\n";
@@ -583,23 +600,12 @@ gl_tex gl_texture_create(gl_texformat format, size2d_t size) {
 	glBindTexture(GL_TEXTURE_2D, texture);
 	
 	glTexImage2D(GL_TEXTURE_2D, 0, gl_texformat_lookup[format].internalFormat, size.width, size.height, 0, gl_texformat_lookup[format].format, gl_texformat_lookup[format].type, NULL);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
 
 	glBindTexture(GL_TEXTURE_2D, GL_INIT_DEFAULT_TEX);
-	return texture;
-}
-
-gl_tex gl_texture3d_create(gl_texformat format, size3d_t size) {
-	gl_tex texture;
-	glGenTextures(1, &texture);
-	glBindTexture(GL_TEXTURE_3D, texture);
-	
-	glTexImage3D(GL_TEXTURE_3D, 0, gl_texformat_lookup[format].internalFormat, size.width, size.height, size.depth, 0, gl_texformat_lookup[format].format, gl_texformat_lookup[format].type, NULL);
-	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-	glBindTexture(GL_TEXTURE_3D, GL_INIT_DEFAULT_TEX);
 	return texture;
 }
 
@@ -615,21 +621,9 @@ void gl_texture_update(gl_texformat format, gl_tex* texture, size2d_t size, void
 	glBindTexture(GL_TEXTURE_2D, GL_INIT_DEFAULT_TEX);
 }
 
-void gl_texture3d_update(gl_texformat format, gl_tex* texture, size3d_t size, void* data) {
-	glBindTexture(GL_TEXTURE_3D, *texture);
-	glTexSubImage3D(GL_TEXTURE_3D, 0, 0, 0, 0, size.width, size.height, size.depth, gl_texformat_lookup[format].format, gl_texformat_lookup[format].type, data);
-	glBindTexture(GL_TEXTURE_3D, GL_INIT_DEFAULT_TEX);
-}
-
 void gl_texture_bind(gl_tex* texture, gl_param paramId, unsigned int unit) {
 	glActiveTexture(GL_TEXTURE0 + unit);
 	glBindTexture(GL_TEXTURE_2D, *texture);
-	glUniform1i(paramId, unit);
-}
-
-void gl_texture3d_bind(gl_tex* texture, gl_param paramId, unsigned int unit) {
-	glActiveTexture(GL_TEXTURE0 + unit);
-	glBindTexture(GL_TEXTURE_3D, *texture);
 	glUniform1i(paramId, unit);
 }
 
