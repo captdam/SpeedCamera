@@ -18,12 +18,14 @@ int main() {
 	int statue = EXIT_FAILURE;
 	FILE* fp = NULL;
 	uint32_t (* src)[TEXT_HEIGHT][TEXT_WIDTH] = NULL; //From source text bitmap: 11 characters (0-9, deli), height (y-axis), width (x-axis)
-	uint32_t (* buffer)[4*TEXT_WIDTH] = NULL; //Output buffer: height, width (4 characters, deli + 3 numbers), RGBA
+	uint32_t (* buffer)[4*TEXT_WIDTH] = NULL; //Temp buffer: height, width (4 characters, deli + 3 numbers), RGBA
+	uint32_t (* dest)[16 * 4*TEXT_WIDTH]; //Dest: Collection of glphy: 16 * 16 glyphs, each glyph has 4 characters
 
 	/* Allocate memory */
 	src = malloc(11 * TEXT_HEIGHT * TEXT_WIDTH * sizeof(uint32_t));
 	buffer = malloc(TEXT_HEIGHT * TEXT_WIDTH * 4 * sizeof(uint32_t));
-	if (!src || !buffer) {
+	dest = malloc(16 * TEXT_HEIGHT * 16 * 4 * TEXT_WIDTH * sizeof(uint32_t));
+	if (!src || !buffer || !dest) {
 		fprintf(stderr, "Cannot allocate memory (errno = %d)\n", errno);
 		goto label_exit;
 	}
@@ -37,6 +39,13 @@ int main() {
 	if (!fread(src, TEXT_HEIGHT * TEXT_WIDTH * sizeof(uint32_t), 11, fp)) {
 		fprintf(stderr, "Cannot read source text bitmap file (errno = %d)\n", errno);
 		goto label_exit;
+	}
+	for (size_t i = 0; i < 11; i++) {
+		for (size_t y = 0; y < TEXT_HEIGHT; y++) {
+			for (size_t x = 0; x < TEXT_WIDTH; x++) {
+				src[i][y][x] &= 0x00FFFFFF; //Mask used to remove alpha channel from the source bitmap
+			}
+		}
 	}
 	fclose(fp);
 	fp = NULL;
@@ -79,9 +88,16 @@ int main() {
 			}
 		}
 		
-
-		fwrite(buffer, sizeof(uint32_t), TEXT_WIDTH * TEXT_HEIGHT * 4, fp);
+		size_t offsetY = TEXT_HEIGHT * (i / 16), offsetX = 4 * TEXT_WIDTH * (i % 16);
+		for (size_t y = 0; y < TEXT_HEIGHT; y++) {
+			for (size_t x = 0; x < 4 * TEXT_WIDTH; x++) {
+				dest[offsetY + y][offsetX + x] = buffer[y][x];
+			}
+		}
+		
 	}
+
+	fwrite(dest, sizeof(uint32_t), 16 * TEXT_HEIGHT * 16 * 4 * TEXT_WIDTH, fp);
 	fclose(fp);
 	fp = NULL;
 
