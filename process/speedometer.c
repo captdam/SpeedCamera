@@ -13,11 +13,11 @@ struct Speedometer_ClassDataStructure {
 	float* vertices;
 	unsigned int* indices;
 	float* offsets;
-	size3d_t size;
+	size2d_t size;
 	size2d_t count;
 };
 
-Speedometer speedometer_init(const char* bitmap, size3d_t size, size2d_t count) {
+Speedometer speedometer_init(const char* bitmapfile, size2d_t size, size2d_t count) {
 	#ifdef VERBOSE
 		fputs("Init speedometer class object\n", stdout);
 		fflush(stdout);
@@ -34,41 +34,64 @@ Speedometer speedometer_init(const char* bitmap, size3d_t size, size2d_t count) 
 		.bitmap = NULL,
 		.vertices = NULL,
 		.indices = NULL,
-		.offsets = NULL,
-		.size = {0, 0, 0},
+		.size = {0, 0},
 		.count = {0, 0}
 	};
 
-	this->vertices = malloc(4 * 2 * sizeof(float));
-	this->indices = malloc(2 * 3 * sizeof(unsigned int));
-	this->offsets = malloc(count.width * count.height * 2 * sizeof(float));
-	if (!this->vertices || !this->indices || !this->offsets) {
+	/** Note: Why not use instanced draw?
+	 * - Instanced draw requires a new vbo, means we have to modify the orginal gl lib. 
+	 * - Instanced draw is introduced in GLES3.1, old GPU/driver will not support it, new driver may emulate it. 
+	 * - Our speedometer is small, we only have count * 2 faces, standard draw can handle this load well. 
+	 */
+
+	this->vertices = malloc(count.width * count.height * 4 * 4 * sizeof(float));
+	this->indices = malloc(count.width * count.height * 2 * 3 * sizeof(unsigned int));
+	if (!this->vertices || !this->indices) {
 		#ifdef VERBOSE
-			fputs("Fail to create buffer for speedometer vertices, indices and offsets\n", stderr);
+			fputs("Fail to create buffer for speedometer vertices and indices\n", stderr);
 		#endif
 		speedometer_destroy(this);
 		return NULL;
 	}
 
-	float sizeH = 1.0 / count.width, sizeV = 1.0 / count.height;
+	/* Generate vertices and indices array base on the given param count */ {
+		float sizeH = 1.0 / count.width, sizeV = 1.0 / count.height;
+		float* vptr = this->vertices;
+		unsigned int* iptr = this->indices;
+		for (unsigned int y = 0; y < count.height; y++) {
+			for (unsigned int x = 0; x < count.width; x++) {
+				float centerH = -1.0 + sizeH + sizeH * 2 * x;
+				float centerV = -1.0 + sizeV + sizeV * 2 * y;
+				*(vptr++) = centerH + sizeH; //Top-right
+				*(vptr++) = centerV + sizeV;
+				*(vptr++) = 1.0f;
+				*(vptr++) = 1.0f;
+				*(vptr++) = centerH + sizeH; //Bottom-right
+				*(vptr++) = centerV - sizeV;
+				*(vptr++) = 1.0f;
+				*(vptr++) = 0.0f;
+				*(vptr++) = centerH - sizeH; //Bottom-left
+				*(vptr++) = centerV - sizeV;
+				*(vptr++) = 0.0f;
+				*(vptr++) = 0.0f;
+				*(vptr++) = centerH - sizeH; //Top-left
+				*(vptr++) = centerV + sizeV;
+				*(vptr++) = 0.0f;
+				*(vptr++) = 1.0f;
 
-	this->vertices[0] = +sizeH; this->vertices[1] = +sizeV;
-	this->vertices[2] = +sizeH; this->vertices[3] = -sizeV;
-	this->vertices[4] = -sizeH; this->vertices[5] = -sizeV;
-	this->vertices[6] = -sizeH; this->vertices[7] = +sizeV;
-
-	this->indices[0] = 0; this->indices[1] = 3; this->indices[2] = 2;
-	this->indices[3] = 0; this->indices[4] = 2; this->indices[5] = 1;
-
-	for (unsigned int y = 0; y < count.height; y++) {
-		for (unsigned int x = 0; x < count.width; x++) {
-			unsigned int index = y * count.width + x;
-			this->offsets[(index << 1) + 0] = -1.0 + sizeH + sizeH * 2 * x;
-			this->offsets[(index << 1) + 1] = -1.0 + sizeV + sizeV * 2 * y;
+				unsigned int base = (y * count.width + x) * 4;
+				*(iptr++) = base + 0;
+				*(iptr++) = base + 3;
+				*(iptr++) = base + 2;
+				*(iptr++) = base + 0;
+				*(iptr++) = base + 2;
+				*(iptr++) = base + 1;
+			}
 		}
 	}
 
-	this->bitmap = malloc(size.width * size.height * size.depth * sizeof(uint32_t));
+	this->bitmap = malloc(size.width * size.height * sizeof(uint32_t));
+	fprintf(stderr, "Allocate %zu * %zu pixels to addr %p\n", size.width, size.height, this->bitmap);
 	if (!this->bitmap) {
 		#ifdef VERBOSE
 			fputs("Fail to create buffer for speedometer bitmap\n", stderr);
@@ -77,16 +100,16 @@ Speedometer speedometer_init(const char* bitmap, size3d_t size, size2d_t count) 
 		return NULL;
 	}
 
-	FILE* fp = fopen(bitmap, "rb");
+	FILE* fp = fopen(bitmapfile, "rb");
 	if (!fp) {
 		#ifdef VERBOSE
-			fprintf(stderr, "Fail to open speedometer bitmap file: %s (errno = %d)\n", bitmap, errno);
+			fprintf(stderr, "Fail to open speedometer bitmap file: %s (errno = %d)\n", bitmapfile, errno);
 		#endif
 		speedometer_destroy(this);
 		return NULL;
 	}
 
-	if(!fread(this->bitmap, sizeof(uint32_t), size.width * size.height * size.depth, fp)) {
+	if(!fread(this->bitmap, sizeof(uint32_t), size.width * size.height, fp)) {
 		#ifdef VERBOSE
 			fputs("Fail to read speedometer bitmap from file\n", stderr);
 		#endif
@@ -106,18 +129,13 @@ void* speedometer_getBitmap(Speedometer this) {
 }
 
 float* speedometer_getVertices(Speedometer this, size_t* size) {
-	*size = 4;
+	*size = 4 * this->count.width * this->count.height;
 	return this->vertices;
 }
 
 unsigned int* speedometer_getIndices(Speedometer this, size_t* size) {
-	*size = 2;
+	*size = 2 * this->count.width * this->count.height;
 	return this->indices;
-}
-
-float* speedometer_getOffsets(Speedometer this, size_t* size) {
-	*size = this->count.width * this->count.height;
-	return this->offsets;
 }
 
 void speedometer_destroy(Speedometer this) {
