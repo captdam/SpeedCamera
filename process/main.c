@@ -15,13 +15,19 @@
 #include "common.h"
 #include "gl.h"
 #include "roadmap.h"
+#include "speedometer.h"
 
 #define WINDOW_RATIO 1
 #define MIXLEVEL 0.93f //0.88f
+#define FIVE_SECONDS_IN_NS 5000000000LLU
 
 #define FIFONAME "tmpframefifo.data"
 
 #define RAW_COLORFORMAT gl_texformat_RGBA8
+
+#define SPEEDOMETER_FILE "./textmap.data"
+#define SPEEDOMETER_SIZE (size2d_t){.x = 48 * 16, .y = 24 * 16}
+#define SPEEDOMETER_COUNT (size2d_t){.x = 1, .y = 1}
 
 //#define USE_PBO_UPLOAD
 
@@ -125,7 +131,7 @@ void* th_reader(void* arg) {
 			}
 		}
 
-		fputc('R', stdout);
+		fputc('R', stdout); fflush(stdout);
 		sem_post(&sem_readerJobDone); //Uploading done, allow main thread to use it
 	}
 
@@ -199,12 +205,20 @@ int main(int argc, char* argv[]) {
 
 	//Reader thread used to read orginal video raw data from external source
 	pthread_t th_reader_id;
-	struct th_reader_arg arg;
+	struct th_reader_arg th_reader_arg;
 	int th_reader_idValid = 0;
 
 	//A mesh to store focus region, and a texture to store road-domain data
 	gl_mesh mesh_region = GL_INIT_DEFAULT_MESH;
 	gl_tex texture_road = GL_INIT_DEFAULT_TEX;
+
+	//To display human readable text on screen
+	const char* speedometer_filename = SPEEDOMETER_FILE;
+	size2d_t speedometer_size = SPEEDOMETER_SIZE;
+	size2d_t speedometer_count = SPEEDOMETER_COUNT;
+	float speedometer_sizeFloat[2] = {speedometer_size.width, speedometer_size.height};
+	gl_mesh mesh_speedometer = GL_INIT_DEFAULT_MESH;
+	gl_tex texture_speedometer = GL_INIT_DEFAULT_TEX;
 
 	//Work stages: To save intermediate result during the process
 	gl_fb framebuffer_edge[2] = {GL_INIT_DEFAULT_FB, GL_INIT_DEFAULT_FB}; //Edge of current and previous frame
@@ -242,6 +256,11 @@ int main(int argc, char* argv[]) {
 	gl_param shader_distance_paramRoadmap;
 	gl_param shader_distance_paramA;
 	gl_param shader_distance_paramB;
+
+	//Program - Speedometer: Display human-readable text representing speed
+	gl_shader shader_speedometer = GL_INIT_DEFAULT_SHADER;
+	gl_param shader_speedometer_paramPStage;
+	gl_param shader_speedometer_paramGlyphTexture;
 
 	//Param - 3x3 filter masks
 	const unsigned int bindingPoint_ubo_gussianMask =	0;
@@ -296,8 +315,8 @@ int main(int argc, char* argv[]) {
 		pthread_attr_t attr;
 		pthread_attr_init(&attr);
 		pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-		arg = (struct th_reader_arg){.size = size1d, .colorScheme = color};
-		int err = pthread_create(&th_reader_id, &attr, th_reader, &arg);
+		th_reader_arg = (struct th_reader_arg){.size = size1d, .colorScheme = color};
+		int err = pthread_create(&th_reader_id, &attr, th_reader, &th_reader_arg);
 		if (err) {
 			fprintf(stderr, "Fail to init reader thread (%d)\n", err);
 			goto label_exit;
@@ -311,6 +330,9 @@ int main(int argc, char* argv[]) {
 			fputs("Cannot load roadmap\n", stderr);
 			goto label_exit;
 		}
+		
+		distanceThreshold = roadmap_getThreshold(roadmap);
+		fprintf(stdout, "Roadmap threshold: %f/frame\n", distanceThreshold);
 
 		size_t vCount, iCount;
 		gl_vertex_t* vertices = roadmap_getVertices(roadmap, &vCount);
@@ -323,21 +345,62 @@ int main(int argc, char* argv[]) {
 			goto label_exit;
 		}
 
-		float* geo = roadmap_getGeographic(roadmap);
 		texture_road = gl_texture_create(gl_texformat_RGBA16F, size2d);
 		if (!gl_texture_check(&texture_road)) {
 			roadmap_destroy(roadmap);
 			fputs("Fail to create texture buffer for roadmap - road-domain data storage\n", stderr);
 			goto label_exit;
 		}
-		gl_texture_update(gl_texformat_RGBA16F, &texture_road, size2d, geo);
 
-		distanceThreshold = roadmap_getThreshold(roadmap);
-		fprintf(stdout, "Roadmap threshold: %f/frame\n", distanceThreshold);
+		gl_texture_update(gl_texformat_RGBA16F, &texture_road, size2d, roadmap_getGeographic(roadmap));
+		gl_synch barrier = gl_synchSet();
+		if (gl_synchWait(barrier, FIVE_SECONDS_IN_NS) == gl_synch_timeout) {
+			fputs("Roadmap GPU uploading fatal stall\n", stderr);
+			gl_synchDelete(barrier);
+			roadmap_destroy(roadmap);
+			goto label_exit;
+		}
+		gl_synchDelete(barrier);
 
-//		gl_fsync();
 		roadmap_destroy(roadmap); //Free roadmap memory after data uploading finished
 
+	}
+
+	/* Load speedometer texture: a text bitmap */ {
+		Speedometer speedometer = speedometer_init(speedometer_filename, speedometer_size, speedometer_count);
+		if (!speedometer) {
+			fputs("Cannot load speedometer\n", stderr);
+			goto label_exit;
+		}
+
+		size_t vCount, iCount;
+		gl_vertex_t* vertices = speedometer_getVertices(speedometer, &vCount);
+		gl_index_t* indices = speedometer_getIndices(speedometer, &iCount);
+		gl_index_t attributes[] = {4};
+		mesh_speedometer = gl_mesh_create((size2d_t){.height = vCount, .width = 4}, 3 * iCount, attributes, vertices, indices);
+		if (!gl_mesh_check(&mesh_speedometer)) {
+			speedometer_destroy(speedometer);
+			fputs("Fail to create mesh for speedometer\n", stderr);
+			goto label_exit;
+		}
+
+		texture_speedometer = gl_texture_create(gl_texformat_RGBA8, speedometer_size);
+		if (!gl_texture_check(&texture_speedometer)) {
+			fputs("Fail to create texture buffer for speedometer\n", stderr);
+			goto label_exit;
+		}
+		
+		gl_texture_update(gl_texformat_RGBA8, &texture_speedometer, speedometer_size, speedometer_getBitmap(speedometer));
+		gl_synch barrier = gl_synchSet();
+		if (gl_synchWait(barrier, FIVE_SECONDS_IN_NS) == gl_synch_timeout) {
+			fputs("Speedometer GPU uploading fatal stall\n", stderr);
+			gl_synchDelete(barrier);
+			speedometer_destroy(speedometer);
+			goto label_exit;
+		}
+		gl_synchDelete(barrier);
+
+		speedometer_destroy(speedometer);
 	}
 
 	/* Create work buffer */ {
@@ -503,6 +566,29 @@ int main(int argc, char* argv[]) {
 		shader_distance_paramB = pId[4];
 	}
 
+	/* Create program: Speedometer */ {
+		const char* pName[] = {"size", "pStage", "glyphSize", "glyphTexture"};
+		unsigned int pCount = sizeof(pName) / sizeof(pName[0]);
+		gl_param pId[pCount];
+
+		const char* bName[] = {};
+		unsigned int bCount = sizeof(bName) / sizeof(bName[0]);
+		gl_param bId[bCount];
+
+		shader_speedometer = gl_shader_load("shader/speedometer.vs.glsl", "shader/speedometer.fs.glsl", 1, pName, pId, pCount, bName, bId, bCount);
+		if (!gl_shader_check(&shader_distance)) {
+			fputs("Cannot load shader: speedometer\n", stderr);
+			goto label_exit;
+		}
+
+		gl_shader_use(&shader_speedometer);
+		gl_shader_setParam(pId[0], 2, gl_type_float, fsize);
+		gl_shader_setParam(pId[2], 2, gl_type_float, speedometer_sizeFloat);
+
+		shader_speedometer_paramPStage = pId[1];
+		shader_speedometer_paramGlyphTexture = pId[3];
+	}
+
 	/* Param - Kernel filter 3*3 masks */ {
 		const float gussianMask[] = {
 			1.0f/16,	2.0f/16,	1.0f/16,	0.0f, //vec4 alignment
@@ -528,9 +614,6 @@ int main(int argc, char* argv[]) {
 		}
 		gl_uniformBuffer_update(&shader_ubo_edgeMask, 0, sizeof(edgeMask), edgeMask);
 	}
-
-	
-	
 
 	void ISR_SIGINT() {
 		gl_close(gl, 1);
@@ -623,7 +706,7 @@ int main(int argc, char* argv[]) {
 
 		/* Compare current moving edge and previous moving edge to find displacement of moving edge. New in A to nearest in B */ {
 			gl_shader* program = &shader_distance;
-			gl_fb* nextStage = &framebuffer_stageA;
+			gl_fb* nextStage = &framebuffer_speed;
 			gl_param param1 = shader_distance_paramA;
 			gl_tex* value1 = &framebuffer_move[rri].texture;
 			gl_param param2 = shader_distance_paramB;
@@ -636,6 +719,20 @@ int main(int argc, char* argv[]) {
 			gl_texture_bind(value2, param2, 1);
 			gl_texture_bind(value3, param3, 2);
 			gl_mesh_draw(&mesh_region);
+		}
+
+		/* Display the speedometer on screen */ {
+			gl_shader* program = &shader_speedometer;
+			gl_fb* nextStage = &framebuffer_stageA;
+			gl_param previousStageParam = shader_speedometer_paramPStage;
+			gl_tex* previousStage = &framebuffer_speed.texture;
+			gl_param param1 = shader_speedometer_paramGlyphTexture;
+			gl_tex* value1 = &texture_speedometer;
+			gl_frameBuffer_bind(nextStage, size2d, 1);
+			gl_shader_use(program);
+			gl_texture_bind(previousStage, previousStageParam, 0);
+			gl_texture_bind(value1, param1, 1);
+			gl_mesh_draw(&mesh_speedometer);
 		}
 
 		/* Debug use ONLY: Check roadmap */ /*{
@@ -656,12 +753,12 @@ int main(int argc, char* argv[]) {
 		sprintf(title, "Viewer - frame %u", frameCount);
 		gl_drawEnd(gl, title);
 
-		if (gl_synchWait(barrier, 5000000000LLU) == gl_synch_timeout) { //timeout = 5e9 ns = 5s
+		if (gl_synchWait(barrier, FIVE_SECONDS_IN_NS) == gl_synch_timeout) { //timeout = 5e9 ns = 5s
 			fputs("Render loop fatal stall\n", stderr);
 			goto label_exit;
 		}
 		gl_synchDelete(barrier);
-		fputc('M', stdout);
+		fputc('M', stdout); fflush(stdout);
 		
 		sem_wait(&sem_readerJobDone); //Wait reader thread finish uploading frame data
 		#ifdef USE_PBO_UPLOAD
@@ -685,6 +782,7 @@ label_exit:
 	gl_unifromBuffer_delete(&shader_ubo_gussianMask);
 	gl_unifromBuffer_delete(&shader_ubo_edgeMask);
 
+	gl_shader_unload(&shader_speedometer);
 	gl_shader_unload(&shader_distance);
 	gl_shader_unload(&shader_different);
 	gl_shader_unload(&shader_edgerefine);
@@ -699,6 +797,8 @@ label_exit:
 	gl_frameBuffer_delete(&framebuffer_move[0]);
 	gl_frameBuffer_delete(&framebuffer_edge[1]);
 	gl_frameBuffer_delete(&framebuffer_edge[0]);
+
+	gl_texture_delete(&texture_speedometer);
 
 	gl_texture_delete(&texture_road);
 	gl_mesh_delete(&mesh_region);
