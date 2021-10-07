@@ -1,7 +1,5 @@
 #version 310 es
 
-/* Texture type = R_8 */
-
 precision mediump float;
 
 uniform sampler2D pStage;
@@ -10,12 +8,6 @@ in vec2 textpos;
 out vec4 nStage;
 
 uniform float threshold;
-
-layout (std140) uniform FilterMask {
-	vec3 maskTop;
-	vec3 maskMiddle;
-	vec3 maskBottom;
-};
 
 void main() {
 	const vec4 rgb2g = vec4(0.2989, 0.5870, 0.1140, 0.0);
