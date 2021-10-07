@@ -18,8 +18,9 @@
 #include "speedometer.h"
 
 #define WINDOW_RATIO 1
-#define MIXLEVEL 0.93f //0.88f
-#define FIVE_SECONDS_IN_NS 5000000000LLU
+#define MIXLEVEL 0.58f //0.88f
+#define FRAME_DELAY 0
+#define FIVE_SECONDS_IN_NS 5000000000LLU //For gl sync timeout
 
 #define FIFONAME "tmpframefifo.data"
 
@@ -27,7 +28,7 @@
 
 #define SPEEDOMETER_FILE "./textmap.data"
 #define SPEEDOMETER_SIZE (size2d_t){.x = 48 * 16, .y = 24 * 16}
-#define SPEEDOMETER_COUNT (size2d_t){.x = 1, .y = 1}
+#define SPEEDOMETER_COUNT (size2d_t){.x = 40, .y = 45}
 
 //#define USE_PBO_UPLOAD
 
@@ -36,7 +37,7 @@
 volatile void volatile* rawDataPtr; //Video raw data goes here
 sem_t sem_readerJobStart; //Fired by main thread: when pointer to pbo is ready, reader can begin to upload
 sem_t sem_readerJobDone; //Fired by reader thread: when uploading is done, main thread can use
-int sem_validFlag = 0;
+int sem_validFlag = 0; //For destroyer
 enum sem_validFlag_Id {sem_validFlag_placeholder = 0, sem_validFlag_readerJobStart, sem_validFlag_readerJobDone};
 
 struct th_reader_arg {
@@ -376,8 +377,8 @@ int main(int argc, char* argv[]) {
 		size_t vCount, iCount;
 		gl_vertex_t* vertices = speedometer_getVertices(speedometer, &vCount);
 		gl_index_t* indices = speedometer_getIndices(speedometer, &iCount);
-		gl_index_t attributes[] = {4};
-		mesh_speedometer = gl_mesh_create((size2d_t){.height = vCount, .width = 4}, 3 * iCount, attributes, vertices, indices);
+		gl_index_t attributes[] = {4, 4};
+		mesh_speedometer = gl_mesh_create((size2d_t){.height = vCount, .width = 8}, 3 * iCount, attributes, vertices, indices);
 		if (!gl_mesh_check(&mesh_speedometer)) {
 			speedometer_destroy(speedometer);
 			fputs("Fail to create mesh for speedometer\n", stderr);
@@ -567,7 +568,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	/* Create program: Speedometer */ {
-		const char* pName[] = {"size", "pStage", "glyphSize", "glyphTexture"};
+		const char* pName[] = {"size", "pStage", "glyphSize", "glyphTexture", "bias", "sensitivity"};
 		unsigned int pCount = sizeof(pName) / sizeof(pName[0]);
 		gl_param pId[pCount];
 
@@ -581,9 +582,19 @@ int main(int argc, char* argv[]) {
 			goto label_exit;
 		}
 
+		float bias[4] = {
+			0.0f, //result = bias[2] * input^2 + bias[1] * input + bias[0]
+			distanceThreshold * 3.6f,
+			0.0f,
+			.0f / distanceThreshold //Sensitivity (m/s)
+		};
+		float sensitivity = 0.015625; //Filter output if less than this much pixel has data
+
 		gl_shader_use(&shader_speedometer);
 		gl_shader_setParam(pId[0], 2, gl_type_float, fsize);
 		gl_shader_setParam(pId[2], 2, gl_type_float, speedometer_sizeFloat);
+		gl_shader_setParam(pId[4], 4, gl_type_float, bias);
+		gl_shader_setParam(pId[5], 1, gl_type_float, &sensitivity);
 
 		shader_speedometer_paramPStage = pId[1];
 		shader_speedometer_paramGlyphTexture = pId[3];
@@ -746,6 +757,8 @@ int main(int argc, char* argv[]) {
 			gl_mesh_draw(&mesh_region);
 		}*/
 
+//		gl_drawWindow(gl, &texture_orginalBuffer, &framebuffer_move[rri].texture);
+//		gl_drawWindow(gl, &texture_orginalBuffer, &framebuffer_speed.texture);
 		gl_drawWindow(gl, &texture_orginalBuffer, &framebuffer_stageA.texture);
 		gl_synch barrier = gl_synchSet();
 
@@ -770,7 +783,10 @@ int main(int argc, char* argv[]) {
 		fflush(stdout);
 	
 		frameCount++;
-//		usleep(20e3);
+
+		#if (FRAME_DELAY != 0)
+			usleep(100e3);
+		#endif
 	}
 
 
