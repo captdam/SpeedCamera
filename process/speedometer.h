@@ -32,10 +32,11 @@ Speedometer speedometer_init(const char* bitmapfile, size2d_t size, size2d_t cou
 void* speedometer_getBitmap(Speedometer this);
 
 /** Get a pointer to the vertices array of the speedometer. 
- * A vertex contains 4 float value: x-pos and y-pos of an individual speedometer on screen, x-pos and y-pos of an individual speedometer's texture. 
+ * A vertex contains 8 float value: x-pos and y-pos of an individual speedometer on screen, x-pos and y-pos of an individual speedometer's texture. x-axis and y-axis boundaries of the sampling region. 
+ * Which is: {{screen-x, screen-y, text-x, text-y, boundary-x-left, boundary-x-right, boundary-y-top, boundary-y-bottom}, ...}. 
  * 2 triangles are used to connect 4 vertices into 1 rectangular mesh, each triangle requires 3 vertices. 
  * @param this This speedometer class object
- * @param size Pass by reference: Number of vertex (1 vertex = 4 float), should pass (4 * count) back
+ * @param size Pass by reference: Number of vertex (1 vertex = 8 float), should pass (4 * count) back
  * @return Pointer to vertex array
  */
 float* speedometer_getVertices(Speedometer this, size_t* size);

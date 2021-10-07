@@ -44,7 +44,7 @@ Speedometer speedometer_init(const char* bitmapfile, size2d_t size, size2d_t cou
 	 * - Our speedometer is small, we only have count * 2 faces, standard draw can handle this load well. 
 	 */
 
-	this->vertices = malloc(count.width * count.height * 4 * 4 * sizeof(float));
+	this->vertices = malloc(count.width * count.height * 4 * 8 * sizeof(float));
 	this->indices = malloc(count.width * count.height * 2 * 3 * sizeof(unsigned int));
 	if (!this->vertices || !this->indices) {
 		#ifdef VERBOSE
@@ -62,22 +62,30 @@ Speedometer speedometer_init(const char* bitmapfile, size2d_t size, size2d_t cou
 			for (unsigned int x = 0; x < count.width; x++) {
 				float centerH = -1.0 + sizeH + sizeH * 2 * x;
 				float centerV = -1.0 + sizeV + sizeV * 2 * y;
-				*(vptr++) = centerH + sizeH; //Top-right
+				*(vptr++) = centerH + sizeH; //Top-right - Screen position
 				*(vptr++) = centerV + sizeV;
+				*(vptr++) = 1.0f; //Top-right - Texture coord
 				*(vptr++) = 1.0f;
-				*(vptr++) = 1.0f;
+				*(vptr++) = x * sizeH; *(vptr++) = (x + 1) * sizeH; //Top-right - Sample region
+				*(vptr++) = y * sizeV; *(vptr++) = (y + 1) * sizeV;
 				*(vptr++) = centerH + sizeH; //Bottom-right
 				*(vptr++) = centerV - sizeV;
 				*(vptr++) = 1.0f;
 				*(vptr++) = 0.0f;
+				*(vptr++) = x * sizeH; *(vptr++) = (x + 1) * sizeH;
+				*(vptr++) = y * sizeV; *(vptr++) = (y + 1) * sizeV;
 				*(vptr++) = centerH - sizeH; //Bottom-left
 				*(vptr++) = centerV - sizeV;
 				*(vptr++) = 0.0f;
 				*(vptr++) = 0.0f;
+				*(vptr++) = x * sizeH; *(vptr++) = (x + 1) * sizeH;
+				*(vptr++) = y * sizeV; *(vptr++) = (y + 1) * sizeV;
 				*(vptr++) = centerH - sizeH; //Top-left
 				*(vptr++) = centerV + sizeV;
 				*(vptr++) = 0.0f;
 				*(vptr++) = 1.0f;
+				*(vptr++) = x * sizeH; *(vptr++) = (x + 1) * sizeH;
+				*(vptr++) = y * sizeV; *(vptr++) = (y + 1) * sizeV;
 
 				unsigned int base = (y * count.width + x) * 4;
 				*(iptr++) = base + 0;
@@ -91,7 +99,6 @@ Speedometer speedometer_init(const char* bitmapfile, size2d_t size, size2d_t cou
 	}
 
 	this->bitmap = malloc(size.width * size.height * sizeof(uint32_t));
-	fprintf(stderr, "Allocate %zu * %zu pixels to addr %p\n", size.width, size.height, this->bitmap);
 	if (!this->bitmap) {
 		#ifdef VERBOSE
 			fputs("Fail to create buffer for speedometer bitmap\n", stderr);
