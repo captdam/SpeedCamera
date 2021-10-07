@@ -30,7 +30,7 @@ void main() {
 	vec4 result = vec4(0.0, 0.0, 0.0, 0.0);;
 
 	if (texelFetch(ta, texelIndex, 0).r >= et) { //Edge is new in current frame
-		for (int left = 1; left < searchRegion.x && left < texelIndex.x; left++) { //Do not continue search if out of region. The OpenGL takes care of index fault, but dry-run costs performance
+/*		for (int left = 1; left < searchRegion.x && left < texelIndex.x; left++) { //Do not continue search if out of region. The OpenGL takes care of index fault, but dry-run costs performance
 			ivec2 targetIndex = texelIndex + ivec2(-left, 0);
 			if (texelFetch(tb, targetIndex, 0).r >= et) {
 				vec2 targetPos = texelFetch(roadmap, targetIndex, 0).xy;
@@ -45,7 +45,7 @@ void main() {
 				dis = min(dis, distance(currentPos, targetPos));
 				break;
 			}
-		}
+		}*/
 		for (int up = 1; up < searchRegion.y && up < texelIndex.y; up++) {
 			ivec2 targetIndex = texelIndex + ivec2(0, -up);
 			if (texelFetch(tb, targetIndex, 0).r >= et) {
@@ -66,6 +66,7 @@ void main() {
 		if (dis != maxDistance) { //Nearest edge found in previous frame, hence the dis has been modified
 			dis = dis / maxDistance; //Normalize to [0,1]
 			result = vec4(dis, dis, dis, dis);
+//			result = vec4(1.0, 1.0, 1.0, 1.0);
 		}
 	}
 
