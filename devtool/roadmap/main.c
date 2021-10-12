@@ -118,7 +118,7 @@ int main(int argc, char* argv[]) {
 			buffer[y][x][2] = fmax(left, right);
 			buffer[y][x][3] = fmax(up, down);
 
-			fprintf(stdout, "Point (%u,%u) - position %f %f, search region %f %f.\n", x, y, buffer[y][x][0], buffer[y][x][1], buffer[y][x][2], buffer[y][x][3]);
+	//		fprintf(stdout, "Point (%u,%u) - position %f %f, search region %f %f.\n", x, y, buffer[y][x][0], buffer[y][x][1], buffer[y][x][2], buffer[y][x][3]);
 		}
 	}
 
@@ -128,7 +128,7 @@ int main(int argc, char* argv[]) {
 
 	fputs("\n\n== Metadata: ===================================================================\n", fp);
 	fprintf(fp, "Camera height: %lf m, pitch: %lf deg\n", installHeight, installPitch);
-	fprintf(fp, "Camera resolution: %u x %u p, FOV: %lf x%lf deg\n", width, height, fovHorizontal, fovVertical);
+	fprintf(fp, "Camera resolution: %u x %u p, FOV: %lf x %lf deg\n", width, height, fovHorizontal, fovVertical);
 	fprintf(fp, "Road picth: %lf deg\n", roadPitch);
 	fprintf(fp, "Threshold: %lf m/frame\n", threshold);
 	fprintf(fp, "Genarating roadmap to file '%s'\n", fn);

@@ -11,6 +11,7 @@
 
 #define OUTPUT_FILE "./textmap.data"
 
+#define COLOR_IGNORE 2
 #define COLOR_LOW 50
 #define COLOR_HIGH 120
 
@@ -59,32 +60,44 @@ int main() {
 
 	/* Gen output */
 	for (int i = 0; i < 256; i++) {
-		uint8_t r, g, b = 30, a = 255;
-		if (i <= COLOR_LOW) {
+		uint8_t r, g, b, a;
+		if (i < COLOR_IGNORE) {
+			r = 0; //Same as cn
+			g = 0;
+			b = 0;
+			a = 0x80;
+		}
+		else if (i <= COLOR_LOW) {
 			r = 0;
 			g = 255;
+			b = 0;
+			a = 255;
 		}
 		else if (i >= COLOR_HIGH) {
 			r = 255;
 			g = 0;
+			b = 0;
+			a = 255;
 		}
 		else {
 			float range = COLOR_HIGH - COLOR_LOW;
 			float offset = i - COLOR_LOW;
 			r = 255.0f * offset / range;
 			g = 255 - r;
+			b = 0;
+			a = 255;
 		}
 		uint32_t cy = (r << 0) | (g << 8) | (b << 16) | (a << 24); //Little endian: address 0 = alpha, address 3 = red
-		uint32_t cn = 0xFF200000;
+		uint32_t cn = 0x80000000;
 
-		int  c0 = 10, c1 = i / 100, c2 = (i / 10) % 10, c3 = i % 10;
+		int  c0 = 10, c1 = i / 100, c2 = (i / 10) % 10, c3 = i % 10; //Characters: char 0 = deli(10), char 1-3 = value
 
 		for (int y = 0; y < TEXT_HEIGHT; y++) {
 			for (int x = 0; x < TEXT_WIDTH; x++) {
-				buffer[y][3 * TEXT_WIDTH + x] = src[c3][y][x] & 0x00FFFFFF ? cy : cn; //mask used to remove alpha channel from the source bitmap
-				buffer[y][2 * TEXT_WIDTH + x] = src[c2][y][x] & 0x00FFFFFF ? cy : cn;
-				buffer[y][1 * TEXT_WIDTH + x] = src[c1][y][x] & 0x00FFFFFF ? cy : cn;
-				buffer[y][0 * TEXT_WIDTH + x] = src[c0][y][x] & 0x00FFFFFF ? cy : cn;
+				buffer[y][3 * TEXT_WIDTH + x] = src[c3][y][x]? cy : cn;
+				buffer[y][2 * TEXT_WIDTH + x] = src[c2][y][x]? cy : cn;
+				buffer[y][1 * TEXT_WIDTH + x] = src[c1][y][x]? cy : cn;
+				buffer[y][0 * TEXT_WIDTH + x] = src[c0][y][x]? cy : cn;
 			}
 		}
 		
