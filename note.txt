@@ -1,0 +1,3 @@
+cd process
+gcc *.c -D_FILE_OFFSET_BITS=64 -DVERBOSE -O3 -lX11 -lGLEW -lGL -lglfw3 -lpthread -lm -ldl && time ./a.out 1920 1080 20 3 ../map.txt ../v1080map.data
+pv ../v1080.data > tmpframefifo.data
