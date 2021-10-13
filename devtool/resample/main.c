@@ -13,12 +13,19 @@ int main(int argc, char* argv[]) {
 	uint8_t (* src)[1920][3] = malloc(1920 * 1080 * 3);
 	uint8_t (* dest)[1280][3] = malloc(1280 * 720 * 3);
 	
-	FILE* fo = fopen("../../v1080.data", "rb");
-	FILE* fn = fopen("../../v720.data", "wb");
+	FILE* fo = fopen("../../v1080-30.data", "rb");
+	FILE* fn = fopen("../../v720-30.data", "wb");
 
 	size_t progress = 0;
 
 	while (fread(src, 3, 1920 * 1080, fo)) {
+		fprintf(stdout, "\rProgress: %zu", progress++);
+		if (progress % 1 != 0) {
+			fputs(" - Leave ", stdout);
+			continue;
+		}
+		fputs(" - Sample", stdout);
+
 		for (size_t y = 0; y < 360; y++) {
 			for (size_t x = 0; x < 640; x++) {
 				int o[3][3][3]; //3*3 RGB pixels from src, use int to pervent overflow
@@ -41,14 +48,13 @@ int main(int argc, char* argv[]) {
 				for (size_t iy = 0; iy < 2; iy++) {
 					for (size_t ix = 0; ix < 2; ix++) {
 						dest[y * 2 + iy][x * 2 + ix][0] = clamp8(n[iy][ix][2]);
-						dest[y * 2 + iy][x * 2 + ix][1] = clamp8(n[iy][ix][1]);
-						dest[y * 2 + iy][x * 2 + ix][2] = clamp8(n[iy][ix][0]);
+						dest[y * 2 + iy][x * 2 + ix][1] = clamp8(n[iy][ix][0]);
+						dest[y * 2 + iy][x * 2 + ix][2] = clamp8(n[iy][ix][1]);
 					}
 				}
 			}
 		}
 		fwrite(dest, 3, 1280 * 720, fn);
-		fprintf(stdout, "\rProgress: %zu", progress++);
 		fflush(stdout);
 	}
 
@@ -56,6 +62,7 @@ int main(int argc, char* argv[]) {
 	fclose(fn);
 	free(dest);
 	free(src);
+	fputs("\nDone!\n", stdout);
 
 	return 0;
 }
