@@ -19,16 +19,23 @@
 
 #define WINDOW_RATIO 1
 #define MIXLEVEL 0.58f //0.88f
-#define FRAME_DELAY 0
+#define FRAME_DELAY 300000
 #define FIVE_SECONDS_IN_NS 5000000000LLU //For gl sync timeout
 
 #define FIFONAME "tmpframefifo.data"
 
 #define RAW_COLORFORMAT gl_texformat_RGBA8
 
+#define GL_SYNCH_TIMEOUT FIVE_SECONDS_IN_NS
+
 #define SPEEDOMETER_FILE "./textmap.data"
 #define SPEEDOMETER_SIZE (size2d_t){.x = 48 * 16, .y = 24 * 16}
 #define SPEEDOMETER_COUNT (size2d_t){.x = 40, .y = 45}
+
+#define DEBUG_THREADSPEED
+#ifdef DEBUG_THREADSPEED
+volatile char debug_threadSpeed = ' '; //Which thread takes longer
+#endif
 
 //#define USE_PBO_UPLOAD
 
@@ -39,15 +46,37 @@ sem_t sem_readerJobStart; //Fired by main thread: when pointer to pbo is ready, 
 sem_t sem_readerJobDone; //Fired by reader thread: when uploading is done, main thread can use
 int sem_validFlag = 0; //For destroyer
 enum sem_validFlag_Id {sem_validFlag_placeholder = 0, sem_validFlag_readerJobStart, sem_validFlag_readerJobDone};
-
 struct th_reader_arg {
 	size_t size; //Length of frame data in pixel
-	int colorScheme; //Color scheme of the input raw data (1, 3 or 4)
+	const char* colorScheme; //Color scheme of the input raw data (1, 3 or 4)
 };
 void* th_reader(void* arg) {
 	struct th_reader_arg* this = arg;
 	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+
+	size_t frameSize = this->size;
+	uint8_t colorRaw[4] = {0x00, 0x00, 0x00, 0xFF};
+	int colorChCount = this->colorScheme[0] - '0';
+	fprintf(stdout, "[Reader] Frame size: %zu pixels. Number of color channel: %d\n", frameSize, colorChCount);
+
+	int colorChR = 0, colorChG = 1, colorChB = 2, colorChA = 3;
+	if (this->colorScheme[1] != '\0')
+		colorChR = this->colorScheme[1] - '0';
+	if (this->colorScheme[2] != '\0')
+		colorChG = this->colorScheme[2] - '0';
+	if (this->colorScheme[3] != '\0')
+		colorChB = this->colorScheme[3] - '0';
+	if (this->colorScheme[4] != '\0')
+		colorChA = this->colorScheme[4] - '0';
+	
+	if (colorChCount == 1)
+		fprintf(stdout, "[Reader] Color scheme: RGB = idx0, A = 0xFF\n");
+	else if (colorChCount == 3)
+		fprintf(stdout, "[Reader] Color scheme: R = idx%d, G = idx%d, B = idx%d, A = 0xFF\n", colorChR, colorChG, colorChB);
+	else
+		fprintf(stdout, "[Reader] Color scheme: R = idx%d, G = idx%d, B = idx%d, A = idx%d\n", colorChR, colorChG, colorChB, colorChA);
+	
 
 	unlink(FIFONAME); //Delete if exist
 	if (mkfifo(FIFONAME, 0777) == -1) {
@@ -72,10 +101,10 @@ void* th_reader(void* arg) {
 
 		const size_t bucketSize = 16; //Height and width are multiple of 4, so total size is multiple of 16. Read 16 pixels at once to increase performance
 
-		size_t iter = this->size / bucketSize;
+		size_t iter = frameSize / bucketSize;
 		uint8_t* dest = (void*)rawDataPtr;
 
-		if (this->colorScheme == 1) {
+		if (colorChCount == 1) {
 			uint8_t luma[bucketSize];
 			while (iter--) {
 				uint8_t* p = &(luma[0]);
@@ -91,8 +120,7 @@ void* th_reader(void* arg) {
 					p++;
 				}
 			}
-		}
-		else if (this->colorScheme == 3) {
+		} else if (colorChCount == 3) {
 			uint8_t rgb[bucketSize * 3];
 			while (iter--) {
 				uint8_t* p = &(rgb[0]);
@@ -101,38 +129,41 @@ void* th_reader(void* arg) {
 					break;
 				}
 				while (p < &( rgb[bucketSize * 3] )) {
-					*(dest++) = p[2]; //R
-					*(dest++) = p[0]; //G
-					*(dest++) = p[1]; //B
+					*(dest++) = p[colorChR]; //R
+					*(dest++) = p[colorChG]; //G
+					*(dest++) = p[colorChB]; //B
 					*(dest++) = 0xFF; //A
 					p += 3;
 				}
 			}
-		}
-		else if (this->colorScheme == 4) {
-			uint8_t rgba[bucketSize * 4];
-			while (iter--) {
-				uint8_t* p = &(rgba[0]);
-				if (!fread(rgba, 4, bucketSize, fp)) {
+		} else {
+			if (colorChR == 0 && colorChG == 1 && colorChB == 2 && colorChA == 3) { //Video data scheme matched with GPU data scheme
+				if (!fread(dest, 4, frameSize, fp)) {
 					fileValid = 0;
 					break;
 				}
-				while (p < &( rgba[bucketSize * 4] )) {
-					*(dest++) = p[2]; //R
-					*(dest++) = p[0]; //G
-					*(dest++) = p[1]; //B
-					*(dest++) = p[3]; //A
-					p += 4;
+			} else {
+				uint8_t rgba[bucketSize * 4];
+				while (iter--) {
+					uint8_t* p = &(rgba[0]);
+					if (!fread(rgba, 4, bucketSize, fp)) {
+						fileValid = 0;
+						break;
+					}
+					while (p < &( rgba[bucketSize * 4] )) {
+						*(dest++) = p[colorChR]; //R
+						*(dest++) = p[colorChG]; //G
+						*(dest++) = p[colorChB]; //B
+						*(dest++) = p[colorChA]; //A
+						p += 4;
+					}
 				}
 			}
 		}
-		else {
-			if (!fread(dest, 4, this->size, fp)) {
-				fileValid = 0;
-			}
-		}
 
-		fputc('R', stdout); fflush(stdout);
+		#ifdef DEBUG_THREADSPEED
+			debug_threadSpeed = 'R';
+		#endif
 		sem_post(&sem_readerJobDone); //Uploading done, allow main thread to use it
 	}
 
@@ -142,7 +173,7 @@ void* th_reader(void* arg) {
 
 	while (1) { //Send dummy data to keep the main thread running
 		sem_wait(&sem_readerJobStart); //Wait until main thread issue new GPU memory address for next frame
-		memset((void*)rawDataPtr, 0, this->size * 4);
+		memset((void*)rawDataPtr, 0, frameSize * 4);
 		sem_post(&sem_readerJobDone); //Uploading done, allow main thread to use it
 	}
 
@@ -159,19 +190,20 @@ int main(int argc, char* argv[]) {
 	if (argc != 7) {
 		fputs(
 			"Bad arg: Use 'this width height fps color focusRegionFile distanceMapFile'\n"
-			"\twhere color = 1(luma), 3(RGB) or 4(RGBA)\n"
+			"\twhere color = nccc (n is number of channel input, ccc is the order of RGB[A])\n"
 			"\t      focusRegionFile = Directory to a human-readable file contains focus region\n"
 			"\t      distanceMapFile = Directory to a binary coded file contains road-domain geographic data\n"
 		, stderr);
 		return status;
 	}
-	unsigned int width = atoi(argv[1]), height = atoi(argv[2]), fps = atoi(argv[3]), color = atoi(argv[4]);
+	unsigned int width = atoi(argv[1]), height = atoi(argv[2]), fps = atoi(argv[3]);
+	const char* color = argv[4];
 	const char* focusRegionFile = argv[5];
 	const char* distanceMapFile = argv[6];
 	size2d_t size2d = {.width = width, .height = height}; //Number of pixels in width and height
 	float fsize[2] = {width, height}; //Number of pixels in width[0] and height[1], cast to float for shader use
 	size_t size1d = width * height; //Total number of in pixels = width * height
-	fprintf(stdout, "Video info = Width: %upx, Height: %upx, Total: %zu, FPS: %u, Color: %u\n", width, height, size1d, fps, color);
+	fprintf(stdout, "Video info = Width: %upx, Height: %upx, Total: %zu, FPS: %u, Color: %s\n", width, height, size1d, fps, color);
 	fprintf(stdout, "\tFocus region: %s\n", focusRegionFile);
 	fprintf(stdout, "\tDistance map: %s\n", distanceMapFile);
 
@@ -183,9 +215,19 @@ int main(int argc, char* argv[]) {
 		fputs("Bad height: Height must be multiple of 4, 240 <= height <= 3040\n", stderr);
 		return status;
 	}
-	if (color != 1 && color != 3 && color != 4) {
-		fputs("Bad color: Color must be 1, 2 or 4\n", stderr);
+	if (color[0] != '1' && color[0] != '3' && color[0] != '4') {
+		fputs("Bad color: Color channel must be 1, 3 or 4\n", stderr);
 		return status;
+	}
+	if (strnlen(color, 10) != color[0] - '0' + 1) {
+		fputs("Bad color: Color scheme and channel count mismatched\n", stderr);
+		return status;
+	}
+	for (int i = 1; i < strlen(color); i++) {
+		if (color[i] < '0' || color[i] >= color[0]) {
+			fprintf(stderr, "Bad color: Each color scheme must be in the range of [0, channel-1 (%d)]\n", color[0] - '0' - 1);
+			return status;
+		}
 	}
 
 	/* Program variables declaration */
@@ -355,7 +397,7 @@ int main(int argc, char* argv[]) {
 
 		gl_texture_update(gl_texformat_RGBA16F, &texture_road, size2d, roadmap_getGeographic(roadmap));
 		gl_synch barrier = gl_synchSet();
-		if (gl_synchWait(barrier, FIVE_SECONDS_IN_NS) == gl_synch_timeout) {
+		if (gl_synchWait(barrier, GL_SYNCH_TIMEOUT) == gl_synch_timeout) {
 			fputs("Roadmap GPU uploading fatal stall\n", stderr);
 			gl_synchDelete(barrier);
 			roadmap_destroy(roadmap);
@@ -393,7 +435,7 @@ int main(int argc, char* argv[]) {
 		
 		gl_texture_update(gl_texformat_RGBA8, &texture_speedometer, speedometer_size, speedometer_getBitmap(speedometer));
 		gl_synch barrier = gl_synchSet();
-		if (gl_synchWait(barrier, FIVE_SECONDS_IN_NS) == gl_synch_timeout) {
+		if (gl_synchWait(barrier, GL_SYNCH_TIMEOUT) == gl_synch_timeout) {
 			fputs("Speedometer GPU uploading fatal stall\n", stderr);
 			gl_synchDelete(barrier);
 			speedometer_destroy(speedometer);
@@ -568,7 +610,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	/* Create program: Speedometer */ {
-		const char* pName[] = {"size", "pStage", "glyphSize", "glyphTexture", "bias", "sensitivity"};
+		const char* pName[] = {"size", "pStage", "glyphSize", "glyphTexture", "bias"};
 		unsigned int pCount = sizeof(pName) / sizeof(pName[0]);
 		gl_param pId[pCount];
 
@@ -583,18 +625,17 @@ int main(int argc, char* argv[]) {
 		}
 
 		float bias[4] = {
-			0.0f, //result = bias[2] * input^2 + bias[1] * input + bias[0]
-			distanceThreshold * 3.6f,
-			0.0f,
-			.0f / distanceThreshold //Sensitivity (m/s)
+			//result = bias[1] * input + bias[0]
+			0.0f, //Offset the spped by this much
+			distanceThreshold * fps * 3.6f, //distanceThreshold for de-normalize from last stage, then from m/frame to m/s, then from m/s to km/h
+			2.0f / distanceThreshold, //Only count pixels with speed higher than this value (m/s)
+			1.5f //Only displce when this much pixels has valid data; otherwise use 0 (%)
 		};
-		float sensitivity = 0.015625; //Filter output if less than this much pixel has data
 
 		gl_shader_use(&shader_speedometer);
 		gl_shader_setParam(pId[0], 2, gl_type_float, fsize);
 		gl_shader_setParam(pId[2], 2, gl_type_float, speedometer_sizeFloat);
 		gl_shader_setParam(pId[4], 4, gl_type_float, bias);
-		gl_shader_setParam(pId[5], 1, gl_type_float, &sensitivity);
 
 		shader_speedometer_paramPStage = pId[1];
 		shader_speedometer_paramGlyphTexture = pId[3];
@@ -669,7 +710,7 @@ int main(int argc, char* argv[]) {
 			gl_shader* program = &shader_filter3;
 			gl_fb* nextStage = &framebuffer_stageB;
 			gl_param previousStageParam = shader_filter3_paramPStage;
-			gl_tex* previousStage = &framebuffer_stageA.texture;
+			gl_tex* previousStage = &texture_orginalBuffer; //&framebuffer_stageA.texture;
 			gl_param param1 = shader_filter3_blockMask;
 			unsigned int value1 = bindingPoint_ubo_edgeMask;
 			gl_frameBuffer_bind(nextStage, size2d, 0);
@@ -755,8 +796,9 @@ int main(int argc, char* argv[]) {
 			gl_shader_use(program);
 			gl_texture_bind(previousStage, previousStageParam, 0);
 			gl_mesh_draw(&mesh_region);
-		}*/
+		} */
 
+//		gl_drawWindow(gl, &texture_orginalBuffer, &framebuffer_edge[rri].texture);
 //		gl_drawWindow(gl, &texture_orginalBuffer, &framebuffer_move[rri].texture);
 //		gl_drawWindow(gl, &texture_orginalBuffer, &framebuffer_speed.texture);
 		gl_drawWindow(gl, &texture_orginalBuffer, &framebuffer_stageA.texture);
@@ -766,26 +808,32 @@ int main(int argc, char* argv[]) {
 		sprintf(title, "Viewer - frame %u", frameCount);
 		gl_drawEnd(gl, title);
 
-		if (gl_synchWait(barrier, FIVE_SECONDS_IN_NS) == gl_synch_timeout) { //timeout = 5e9 ns = 5s
+		if (gl_synchWait(barrier, GL_SYNCH_TIMEOUT) == gl_synch_timeout) { //timeout = 5e9 ns = 5s
 			fputs("Render loop fatal stall\n", stderr);
 			goto label_exit;
 		}
+		#ifdef DEBUG_THREADSPEED
+			debug_threadSpeed = 'M'; //Not critical, no need to use mutex
+		#endif
 		gl_synchDelete(barrier);
-		fputc('M', stdout); fflush(stdout);
 		
 		sem_wait(&sem_readerJobDone); //Wait reader thread finish uploading frame data
 		#ifdef USE_PBO_UPLOAD
 			gl_pixelBuffer_updateFinish();
 		#endif
 
+		#ifdef DEBUG_THREADSPEED
+			fputc(debug_threadSpeed, stdout);
+			fputs(" - ", stdout);
+		#endif
 		endTime = nanotime();
-		fprintf(stdout, " - Loop %u takes %lfms/frame.", frameCount, (endTime - startTime) / 1e6);
+		fprintf(stdout, "Loop %u takes %lfms/frame.", frameCount, (endTime - startTime) / 1e6);
 		fflush(stdout);
 	
 		frameCount++;
 
 		#if (FRAME_DELAY != 0)
-			usleep(100e3);
+			if (frameCount > 200) usleep(FRAME_DELAY);
 		#endif
 	}
 
