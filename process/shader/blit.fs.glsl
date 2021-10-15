@@ -1,6 +1,6 @@
 #version 310 es
 
-precision mediump float;
+precision highp float;
 
 uniform sampler2D pStage;
 uniform vec2 size;

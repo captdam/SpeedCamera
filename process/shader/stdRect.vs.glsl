@@ -1,6 +1,6 @@
 #version 310 es
 
-precision mediump float;
+precision highp float;
 
 //Layout: {{vertex_x, vertex_y}, ...}
 layout (location = 0) in vec2 position; //Screen-domain
