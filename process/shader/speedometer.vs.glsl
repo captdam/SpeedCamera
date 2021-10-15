@@ -75,8 +75,8 @@ void main() {
 
 	//Remove noise
 	int sIdx = 0;
-	if (validCount / float(numPixel) >= bias.BIAS_DISPLAY_SENSITIVITY / 100.0)
-		sIdx = int(bias.y * avgExZero(speedPool) + bias.x);
+	if (validCount / float(numPixel) >= bias.BIAS_DISPLAY_SENSITIVITY)
+		sIdx = int(bias.BIAS_FIRST_ORDER * avgExZero(speedPool) + bias.BIAS_CONSTANT);
 	
 	//Get coord in speedometer glyph texture
 	vec2 indSize = vec2(glyphSize.x / 16.0, glyphSize.y / 16.0);

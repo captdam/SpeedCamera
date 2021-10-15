@@ -25,10 +25,11 @@ void main() {
 	);
 
 	float result = 0.0;
+
 	if (dot( texelFetch(pStage, sIdx, 0) , rgb2g ) >= ts) {
 		int flag = 0;
 		for (int i = 0; i < 8; i++) {
-			if (dot( texelFetchOffset(pStage, sIdx, 0, nIdx[i]) , rgb2g ) >= tn)
+			if (dot( texelFetch(pStage, sIdx + nIdx[i], 0) ,rgb2g) >= tn)
 				flag++;
 		}
 		if (flag >= 2)

@@ -16,6 +16,21 @@ uniform float maxDistance;
 
 void main() {
 	const float threshold = 0.5;
+
+	const ivec2 vSearchSelfOffsets[] = ivec2[](
+		ivec2(0, 0),
+		ivec2(1, 0), ivec2(-1, 0),
+		ivec2(2, 0), ivec2(-2, 0),
+		ivec2(3, 0), ivec2(-3, 0),
+		ivec2(4, 0), ivec2(-4, 0)
+	);
+	const ivec2 vSearchTargetOffsets[] = ivec2[](
+		ivec2(0, 0),
+		ivec2(1, 0), ivec2(-1, 0),
+		ivec2(2, 0), ivec2(-2, 0),
+		ivec2(3, 0), ivec2(-3, 0),
+		ivec2(4, 0), ivec2(-4, 0)
+	);
 	
 	ivec2 isize = ivec2(int(size.x), int(size.y));
 	ivec2 texelIndex = ivec2(
@@ -28,8 +43,6 @@ void main() {
 	ivec2 searchRegion = ivec2(currentRoadmap.ROADMAP_SEARCHREGION);
 
 	float dis = maxDistance; //Displacement of edge
-
-	float result = 0.0;
 
 /*	if (texelFetch(ta, texelIndex, 0).r >= threshold) { //Edge is new in current frame
 		for (int left = 1; left < searchRegion.x && left < texelIndex.x; left++) { //Do not continue search if out of region. The OpenGL takes care of index fault, but dry-run costs performance
@@ -48,31 +61,22 @@ void main() {
 				break;
 			}
 		}*/
-
-	if (
-		texelFetch(ta, texelIndex, 0).r >= threshold
-		&& texelFetchOffset(ta, texelIndex, 0, ivec2(-1, 0)).r >= threshold
-		&& texelFetchOffset(ta, texelIndex, 0, ivec2( 1, 0)).r >= threshold
-		&& texelFetchOffset(ta, texelIndex, 0, ivec2(-2, 0)).r >= threshold
-		&& texelFetchOffset(ta, texelIndex, 0, ivec2( 2, 0)).r >= threshold
-		&& texelFetchOffset(ta, texelIndex, 0, ivec2(-3, 0)).r >= threshold
-		&& texelFetchOffset(ta, texelIndex, 0, ivec2( 3, 0)).r >= threshold
-		&& texelFetchOffset(ta, texelIndex, 0, ivec2(-4, 0)).r >= threshold
-		&& texelFetchOffset(ta, texelIndex, 0, ivec2( 4, 0)).r >= threshold
-	) {
+	
+	int vSearchSelfCnt = 0;
+	for (int i = 0; i < vSearchSelfOffsets.length(); i++) {
+		if (texelFetch(ta, texelIndex + vSearchSelfOffsets[i], 0).r >= threshold)
+			vSearchSelfCnt++;
+	}
+	if (vSearchSelfCnt >= vSearchSelfOffsets.length()) {
 		for (int up = 1; up < searchRegion.y && up < texelIndex.y; up++) {
 			ivec2 targetIndex = texelIndex + ivec2(0, -up);
-			if (
-				texelFetch(tb, targetIndex, 0).r >= threshold
-				|| texelFetchOffset(tb, targetIndex, 0, ivec2(-1, 0)).r >= threshold
-				|| texelFetchOffset(tb, targetIndex, 0, ivec2( 1, 0)).r >= threshold
-				|| texelFetchOffset(tb, targetIndex, 0, ivec2(-2, 0)).r >= threshold
-				|| texelFetchOffset(tb, targetIndex, 0, ivec2( 2, 0)).r >= threshold
-				|| texelFetchOffset(tb, targetIndex, 0, ivec2(-3, 0)).r >= threshold
-				|| texelFetchOffset(tb, targetIndex, 0, ivec2( 3, 0)).r >= threshold
-				|| texelFetchOffset(tb, targetIndex, 0, ivec2(-4, 0)).r >= threshold
-				|| texelFetchOffset(tb, targetIndex, 0, ivec2( 4, 0)).r >= threshold
-			) {
+
+			int vSearchTargetCnt = 0;
+			for (int i = 0; i < vSearchTargetOffsets.length(); i++) {
+				if (texelFetch(tb, targetIndex + vSearchTargetOffsets[i], 0).r >= threshold)
+					vSearchTargetCnt++;
+			}
+			if (vSearchTargetCnt > vSearchTargetOffsets.length() / 2) {
 				vec2 targetPos = texelFetch(roadmap, targetIndex, 0).ROADMAP_POSITION;
 				dis = min(dis, distance(currentPos, targetPos));
 				break;
@@ -80,27 +84,24 @@ void main() {
 		}
 		for (int down = 1; down < searchRegion.y && down + texelIndex.y < isize.y; down++) {
 			ivec2 targetIndex = texelIndex + ivec2(0, down);
-			if (
-				texelFetch(tb, targetIndex, 0).r >= threshold
-				|| texelFetchOffset(tb, targetIndex, 0, ivec2(-1, 0)).r >= threshold
-				|| texelFetchOffset(tb, targetIndex, 0, ivec2( 1, 0)).r >= threshold
-				|| texelFetchOffset(tb, targetIndex, 0, ivec2(-2, 0)).r >= threshold
-				|| texelFetchOffset(tb, targetIndex, 0, ivec2( 2, 0)).r >= threshold
-				|| texelFetchOffset(tb, targetIndex, 0, ivec2(-3, 0)).r >= threshold
-				|| texelFetchOffset(tb, targetIndex, 0, ivec2( 3, 0)).r >= threshold
-				|| texelFetchOffset(tb, targetIndex, 0, ivec2(-4, 0)).r >= threshold
-				|| texelFetchOffset(tb, targetIndex, 0, ivec2( 4, 0)).r >= threshold
-			) {
+			
+			int vSearchTargetCnt = 0;
+			for (int i = 0; i < vSearchTargetOffsets.length(); i++) {
+				if (texelFetch(tb, targetIndex + vSearchTargetOffsets[i], 0).r >= threshold)
+					vSearchTargetCnt++;
+			}
+			if (vSearchTargetCnt > vSearchTargetOffsets.length() / 2) {
 				vec2 targetPos = texelFetch(roadmap, targetIndex, 0).ROADMAP_POSITION;
 				dis = min(dis, distance(currentPos, targetPos));
 				break;
 			}
 		}
-		
-		if (dis != maxDistance) { //Nearest edge found, hence the dis has been modified
-			result = dis;
-		}
 	}
+
+
+	float result = 0.0;
+	if (dis != maxDistance) //Nearest edge found, hence the dis has been modified
+		result = dis;
 
 	nStage = vec4(result, result, result, 1.0);
 }
