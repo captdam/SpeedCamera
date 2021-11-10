@@ -50,6 +50,7 @@ typedef enum gl_texformat {
 	gl_texformat_R8, gl_texformat_RG8, gl_texformat_RGB8, gl_texformat_RGBA8,
 	gl_texformat_R8UI, gl_texformat_RG8UI, gl_texformat_RGB8UI, gl_texformat_RGBA8UI,
 	gl_texformat_R16F, gl_texformat_RG16F, gl_texformat_RGB16F, gl_texformat_RGBA16F,
+	gl_texformat_R32F, gl_texformat_RG32F, gl_texformat_RGB32F, gl_texformat_RGBA32F,
 gl_texformat_placeholderEnd} gl_texformat;
 
 /** Frame buffer objects (multi-stage rendering)
@@ -81,8 +82,9 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio, float mix);
 
 /** Call to start a render loop, this process all GLFW window events 
  * @param this This GL class object
+ * @param cursorPos Current cursor position relative to the window, pass-by-reference
  */
-void gl_drawStart(GL this);
+void gl_drawStart(GL this, size2d_t* cursorPos);
 
 /** Call this to draw a texture in viewer window 
  * To draw anything in the viewer window, first draw all the objects on a texture (framebuffer.texture); 
@@ -116,6 +118,7 @@ void gl_destroy(GL this);
 /** Load vertex and fragment shader, get IDs (location) of all parameters (uniform). 
  * @param shaderVertex Vertex shader or path to vertex shader file
  * @param shaderFragment Fragment shader or path to fragment shader file
+ * @param shaderGeometry Optional geometry shader or path to geometry shader file, leave NULL to skip
  * @param isFilePath If 0, shaderVertex and shaderFragment are pointer to the source code. If 1, they are path to the shader file
  * @param paramName An array of string represents shader parameters' names (uniform)
  * @param paramId Pass-by-reference: IDs (location) of the parameters
@@ -126,7 +129,7 @@ void gl_destroy(GL this);
  * @return gl_shader object upon success, GL_INIT_DEFAULT_SHADER if fail
  */
 gl_shader gl_shader_load(
-	const char* shaderVertex, const char* shaderFragment, const int isFilePath,
+	const char* shaderVertex, const char* shaderFragment, const char* shaderGeometry, const int isFilePath,
 	const char* paramName[], gl_param* paramId, const unsigned int paramCount,
 	const char* blockName[], gl_param* blockId, const unsigned int blockCount
 );
