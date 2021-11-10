@@ -42,7 +42,11 @@ const struct GL_TexFormat_LookUp {
 	{gl_texformat_R16F,		GL_R16F,	GL_RED,			GL_FLOAT		},
 	{gl_texformat_RG16F,		GL_RG16F,	GL_RG,			GL_FLOAT		},
 	{gl_texformat_RGB16F,		GL_RGB16F,	GL_RGB,			GL_FLOAT		},
-	{gl_texformat_RGBA16F,		GL_RGBA16F,	GL_RGBA,		GL_FLOAT		}
+	{gl_texformat_RGBA16F,		GL_RGBA16F,	GL_RGBA,		GL_FLOAT		},
+	{gl_texformat_R32F,		GL_R32F,	GL_RED,			GL_FLOAT		},
+	{gl_texformat_RG32F,		GL_RG32F,	GL_RG,			GL_FLOAT		},
+	{gl_texformat_RGB32F,		GL_RGB32F,	GL_RGB,			GL_FLOAT		},
+	{gl_texformat_RGBA32F,		GL_RGBA32F,	GL_RGBA,		GL_FLOAT		}
 };
 //GL_TexFormat_LookUp.eFormat should be in increase order and start from 0
 int gl_texformat_lookup_check() {
@@ -52,6 +56,48 @@ int gl_texformat_lookup_check() {
 	}
 	return 1;
 }
+
+/* Synch commands */
+gl_synch gl_synchSet_internal() { //Actual code
+	gl_synch s = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+	return s;
+}
+gl_synch gl_synchSet_placeholder() { //Placeholder for GPU without this function
+	return NULL;
+}
+gl_synch (*gl_synchSet_ptr)();
+
+gl_synch_statue gl_synchWait_internal(gl_synch s, uint64_t timeout) {
+	gl_synch_statue statue;
+	switch (glClientWaitSync(s, GL_SYNC_FLUSH_COMMANDS_BIT, timeout)) {
+		case GL_ALREADY_SIGNALED:
+			statue = gl_synch_done;
+			break;
+		case GL_CONDITION_SATISFIED:
+			statue = gl_synch_ok;
+			break;
+		case GL_TIMEOUT_EXPIRED:
+			statue = gl_synch_timeout;
+			break;
+		default:
+			statue = gl_synch_error;
+			break;
+	}
+	return statue;
+}
+gl_synch_statue gl_synchWait_placeholder(gl_synch s, uint64_t timeout) {
+	gl_fsync();
+	return gl_synch_ok;
+}
+gl_synch_statue (*gl_synchWait_ptr)(gl_synch s, uint64_t timeout);
+
+void gl_synchDelete_internal(gl_synch s) {
+	glDeleteSync(s);
+}
+void gl_synchDelete_placeholder(gl_synch s) {
+	return;
+}
+void (*gl_synchDelete_ptr)();
 
 /* == Window management and driver init == [Object] ========================================= */
 
@@ -114,7 +160,7 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 //	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 	glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
 	#ifdef VERBOSE
-		glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
+//		glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
 	#endif
 	this->windowSize = (size2d_t){.width = frameSize.width / windowRatio, .height = frameSize.height / windowRatio};
 	this->window = glfwCreateWindow(this->windowSize.width, this->windowSize.height, "Viewer", NULL, NULL);
@@ -160,6 +206,17 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 		return NULL;
 	}
 
+	/* Setup functions and their alternative placeholder */
+	if (glFenceSync) {
+		gl_synchSet_ptr = &gl_synchSet_internal;
+		gl_synchWait_ptr = &gl_synchWait_internal;
+		gl_synchDelete_ptr = &gl_synchDelete_internal;
+	} else {
+		gl_synchSet_ptr = &gl_synchSet_placeholder;
+		gl_synchWait_ptr = &gl_synchWait_placeholder;
+		gl_synchDelete_ptr = &gl_synchDelete_placeholder;
+	}
+
 	/* Event control - callback */
 	glfwSetWindowCloseCallback(this->window, gl_windowCloseCallback);
 	glfwSetErrorCallback(gl_glfwErrorCallback);
@@ -191,6 +248,7 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 		"	gl_Position = vec4(position.x * 2.0 - 1.0, position.y * 2.0 - 1.0, 0.0, 1.0);\n"
 		"	textpos = vec2(position.x, 1.0 - position.y); //Fix y-axis difference screen coord\n"
 		"}\n";
+
 		const char* fs = "#version 310 es\nprecision mediump float;\n"
 		"in vec2 textpos;\n"
 		"uniform sampler2D orginalTexture;\n"
@@ -204,6 +262,9 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 		"	vec3 data = mix(od, pd, mixLevel);\n"
 		"	color = vec4(data, 1.0);\n"
 		"}\n";
+
+		const char* gs = NULL;
+
 		const char* pName[] = {"orginalTexture", "processedTexture", "mixLevel"};
 		unsigned int pCount = sizeof(pName) / sizeof(pName[0]);
 		gl_param pId[pCount];
@@ -212,7 +273,7 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 		unsigned int bCount = sizeof(bName) / sizeof(bName[0]);
 		gl_param bId[bCount];
 
-		this->defaultShader = gl_shader_load(vs, fs, 0, pName, pId, pCount, bName, bId, bCount);
+		this->defaultShader = gl_shader_load(vs, fs, gs, 0, pName, pId, pCount, bName, bId, bCount);
 		if (this->defaultShader == GL_INIT_DEFAULT_SHADER) {
 			#ifdef VERBOSE
 				fputs("\tFail to load default shader\n", stderr);
@@ -233,8 +294,12 @@ GL gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 	return this;
 }
 
-void gl_drawStart(GL this) {
+void gl_drawStart(GL this, size2d_t* cursorPos) {
 	glfwPollEvents();
+
+	double x, y;
+	glfwGetCursorPos(this->window, &x, &y);
+	*cursorPos = (size2d_t){.x = x, .y = y}; //Cast from double to size_t
 }
 
 void gl_drawWindow(GL this, gl_tex* orginalTexture, gl_tex* processedTexture) {
@@ -314,21 +379,21 @@ char* gl_loadFileToMemory(const char* filename, long int* length) {
 }
 
 gl_shader gl_shader_load(
-	const char* shaderVertex, const char* shaderFragment, const int isFilePath,
+	const char* shaderVertex, const char* shaderFragment, const char* shaderGeometry, const int isFilePath,
 	const char* paramName[], gl_param* paramId, const unsigned int paramCount,
 	const char* blockName[], gl_param* blockId, const unsigned int blockCount
 ) {
 	#ifdef VERBOSE
 		if (isFilePath) {
-			fprintf(stdout, "Load shader: V=%s F=%s\n", shaderVertex, shaderFragment);
+			fprintf(stdout, "Load shader: V=%s F=%s G=%s\n", shaderVertex, shaderFragment, shaderGeometry);
 		}
 		else {
-			fputs("Load shader: V=[in_memory] F[in_memory]\n", stdout);
+			fputs("Load shader: V=[in_memory] F=[in_memory] G=[in_memory]\n", stdout);
 		}
 		fflush(stdout);
 	#endif
 
-	GLuint shaderV = 0, shaderF = 0, shader = 0;
+	GLuint shaderV = 0, shaderF = 0, shaderG = 0, shader = 0;
 	const char* shaderSrc = NULL;
 	GLint status;
 
@@ -405,12 +470,52 @@ gl_shader gl_shader_load(
 
 	if (isFilePath)
 		free((void*)shaderSrc);
+	
+	/* Geometry shader */
+	if (shaderGeometry) {
+		if (isFilePath) {
+			long int length;
+			shaderSrc = gl_loadFileToMemory(shaderGeometry, &length);
+			if (!shaderSrc) {
+				#ifdef VERBOSE
+					if (length == 0)
+						fprintf(stderr, "\tFail to open geometry shader file: %s (errno = %d)\n", shaderGeometry, errno);
+					else if (length < 0)
+						fprintf(stderr, "\tFail to get geometry shader length: %s (errno = %d)\n", shaderGeometry, errno);
+					else
+						fputs("\tCannot allocate buffer for geometry shader code\n", stderr);
+				#endif
+
+				goto gl_loadShader_error;
+			}
+		}
+		else
+			shaderSrc = shaderGeometry;
+
+		shaderG = glCreateShader(GL_GEOMETRY_SHADER); //Non-zero
+		glShaderSource(shaderG, 1, (const GLchar * const*)&shaderSrc, NULL);
+		glCompileShader(shaderG);
+		glGetShaderiv(shaderG, GL_COMPILE_STATUS, &status);
+		if (!status) {
+			#ifdef VERBOSE
+				char compileMsg[255];
+				glGetShaderInfoLog(shaderF, 255, NULL, compileMsg);
+				fprintf(stderr, "\tGL geometry shader error: %s\n", compileMsg);
+			#endif
+
+			goto gl_loadShader_error;
+		}
+
+		if (isFilePath)
+			free((void*)shaderSrc);
+	}
 
 	/* Link program */
 
 	shader = glCreateProgram(); //Non-zero
 	glAttachShader(shader, shaderV);
 	glAttachShader(shader, shaderF);
+	if (shaderGeometry) glAttachShader(shader, shaderG);
 	glLinkProgram(shader);
 	glGetProgramiv(shader, GL_LINK_STATUS, &status);
 	if (!status) {
@@ -450,6 +555,7 @@ gl_shader gl_shader_load(
 	gl_loadShader_error:
 	if (shaderV) glDeleteShader(shaderV); //A value of 0 for shader will be silently ignored
 	if (shaderF) glDeleteShader(shaderF);
+	if (shaderG) glDeleteShader(shaderG);
 	if (shader) glDeleteProgram(shader); //A value of 0 for program will be silently ignored
 	return GL_INIT_DEFAULT_SHADER;
 }
@@ -723,26 +829,11 @@ void gl_rsync() {
 }
 
 gl_synch gl_synchSet() {
-	return glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+	return gl_synchSet_ptr();
 }
 gl_synch_statue gl_synchWait(gl_synch s, uint64_t timeout) {
-	gl_synch_statue statue;
-	switch (glClientWaitSync(s, GL_SYNC_FLUSH_COMMANDS_BIT, timeout)) {
-		case GL_ALREADY_SIGNALED:
-			statue = gl_synch_done;
-			break;
-		case GL_CONDITION_SATISFIED:
-			statue = gl_synch_ok;
-			break;
-		case GL_TIMEOUT_EXPIRED:
-			statue = gl_synch_timeout;
-			break;
-		default:
-			statue = gl_synch_error;
-			break;
-	}
-	return statue;
+	return gl_synchWait_ptr(s, timeout);
 }
 void gl_synchDelete(gl_synch s) {
-	glDeleteSync(s);
+	gl_synchDelete_ptr(s);
 }
