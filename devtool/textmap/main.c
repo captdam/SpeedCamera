@@ -6,6 +6,7 @@
 #define TEXT_FILE "./src.data"
 #define TEXT_WIDTH 12
 #define TEXT_HEIGHT 24
+#define TEXT_LENGTH 4
 /*Source text bitmap order: 0 1 2 3 4 5 6 7 8 9 delimiter, format: RGBA8*/
 //Note: GIMP seems cannot export 8-bit gray image, hence we have to switch to the RGBA8 scheme
 
@@ -18,14 +19,14 @@
 int main() {
 	int statue = EXIT_FAILURE;
 	FILE* fp = NULL;
-	uint32_t (* src)[TEXT_HEIGHT][TEXT_WIDTH] = NULL; //From source text bitmap: 11 characters (0-9, deli), height (y-axis), width (x-axis)
-	uint32_t (* buffer)[4*TEXT_WIDTH] = NULL; //Temp buffer: height, width (4 characters, deli + 3 numbers), RGBA
-	uint32_t (* dest)[16 * 4*TEXT_WIDTH]; //Dest: Collection of glphy: 16 * 16 glyphs, each glyph has 4 characters
+	uint32_t (* src)[TEXT_HEIGHT][TEXT_WIDTH] = NULL; //From source text bitmap: <11 characters (0-9, deli)>, height (y-axis), width (x-axis)
+	uint32_t (* buffer)[TEXT_LENGTH*TEXT_WIDTH] = NULL; //Temp buffer: <height>, width (4 characters, deli + 3 numbers)
+	uint32_t (* dest)[16 * TEXT_LENGTH*TEXT_WIDTH] = NULL; //Dest: Collection of glphy: <height = 16 * character height>, width = 16 glyphs, each glyph has 4 characters
 
 	/* Allocate memory */
 	src = malloc(11 * TEXT_HEIGHT * TEXT_WIDTH * sizeof(uint32_t));
-	buffer = malloc(TEXT_HEIGHT * TEXT_WIDTH * 4 * sizeof(uint32_t));
-	dest = malloc(16 * TEXT_HEIGHT * 16 * 4 * TEXT_WIDTH * sizeof(uint32_t));
+	buffer = malloc(TEXT_HEIGHT * TEXT_LENGTH * TEXT_WIDTH * sizeof(uint32_t));
+	dest = malloc(16 * TEXT_HEIGHT * 16 * TEXT_LENGTH * TEXT_WIDTH * sizeof(uint32_t));
 	if (!src || !buffer || !dest) {
 		fprintf(stderr, "Cannot allocate memory (errno = %d)\n", errno);
 		goto label_exit;
@@ -65,7 +66,7 @@ int main() {
 			r = 0; //Same as cn
 			g = 0;
 			b = 0;
-			a = 0x80;
+			a = 0;
 		}
 		else if (i <= COLOR_LOW) {
 			r = 0;
@@ -91,7 +92,6 @@ int main() {
 		uint32_t cn = 0x80000000;
 
 		int  c0 = 10, c1 = i / 100, c2 = (i / 10) % 10, c3 = i % 10; //Characters: char 0 = deli(10), char 1-3 = value
-
 		for (int y = 0; y < TEXT_HEIGHT; y++) {
 			for (int x = 0; x < TEXT_WIDTH; x++) {
 				buffer[y][3 * TEXT_WIDTH + x] = src[c3][y][x]? cy : cn;
@@ -110,7 +110,10 @@ int main() {
 		
 	}
 
-	fwrite(dest, sizeof(uint32_t), 16 * TEXT_HEIGHT * 16 * 4 * TEXT_WIDTH, fp);
+	uint8_t meta[] = {TEXT_WIDTH * TEXT_LENGTH, TEXT_HEIGHT};
+	fwrite(meta, 1, sizeof(meta), fp);
+
+	fwrite(dest, sizeof(uint32_t), 16 * TEXT_HEIGHT * 16 * TEXT_LENGTH * TEXT_WIDTH, fp);
 	fclose(fp);
 	fp = NULL;
 
@@ -118,6 +121,7 @@ int main() {
 	label_exit:
 	if (src) free(src);
 	if (buffer) free(buffer);
+	if (dest) free(dest);
 	if (fp) fclose(fp);
 	return statue;
 }
