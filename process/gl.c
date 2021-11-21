@@ -216,7 +216,7 @@ int gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 	/* OpenGL config */
 //	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 //	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-	glEnable(GL_PROGRAM_POINT_SIZE);
+//	glEnable(GL_PROGRAM_POINT_SIZE);
 
 	/* Draw window - mesh */ {
 		gl_vertex_t vertices[] = {
@@ -354,17 +354,12 @@ void gl_destroy() {
 		fflush(stdout);
 	#endif
 
-	gl_close(1);
-
-	if (gl_shader_check(&this.defaultShader))
-		gl_shader_unload(&this.defaultShader);
-	
-	if (gl_mesh_check(&this.defaultMesh))
-		gl_mesh_delete(&this.defaultMesh);
-
 	if (this.window)
 		glfwTerminate();
-	
+
+	gl_close(1);
+	gl_shader_unload(&this.defaultShader);
+	gl_mesh_delete(&this.defaultMesh);
 	this.windowSize = (size2d_t){0, 0};
 }
 
@@ -570,13 +565,14 @@ gl_shader gl_shader_load(
 
 	glDeleteShader(shaderV); //Flag set, will be automatically delete when program deleted.
 	glDeleteShader(shaderF); //So we don't need to remember the vertex and fragment shaders name.
+	glDeleteShader(shaderG);
 	return shader;
 
 	gl_loadShader_error:
-	if (shaderV) glDeleteShader(shaderV); //A value of 0 for shader will be silently ignored
-	if (shaderF) glDeleteShader(shaderF);
-	if (shaderG) glDeleteShader(shaderG);
-	if (shader) glDeleteProgram(shader); //A value of 0 for program will be silently ignored
+	glDeleteShader(shaderV); //A value of 0 for shader and program will be silently ignored
+	glDeleteShader(shaderF);
+	glDeleteShader(shaderG);
+	glDeleteProgram(shader);
 	return GL_INIT_DEFAULT_SHADER;
 }
 

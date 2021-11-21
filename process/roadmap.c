@@ -126,9 +126,9 @@ Roadmap roadmap_init(const char* focusRegionFile, const char* projectFile, const
 		}
 
 		rewind(fp);
-		this->frVertices = malloc(4 * sizeof(float) * this->pVCnt);
-		this->frIndices = malloc(3 * sizeof(unsigned int) * this->pICnt);
-		if (!this->frVertices || !this->frIndices) {
+		this->pVertices = malloc(4 * sizeof(float) * this->pVCnt);
+		this->pIndices = malloc(3 * sizeof(unsigned int) * this->pICnt);
+		if (!this->pVertices || !this->pIndices) {
 			#ifdef VERBOSE
 				fputs("Fail to create buffer for project map vertices and/or indices\n", stderr);
 			#endif
@@ -137,8 +137,8 @@ Roadmap roadmap_init(const char* focusRegionFile, const char* projectFile, const
 			return NULL;
 		}
 
-		float* v = this->frVertices;
-		unsigned int* i = this->frIndices;
+		float* v = this->pVertices;
+		unsigned int* i = this->pIndices;
 		for(size_t l = 0; l < length; l++) {
 			if (fscanf(fp, "v %f %f %f %f\n", &v[0], &v[1], &v[2], &v[3]) == 4) {
 				v += 4;

@@ -107,8 +107,8 @@ void* gl_getInfo(gl_info name, void* data);
 void gl_drawStart(size2d_t* cursorPos);
 
 /** Call this to draw a texture in viewer window. 
- * To draw anything in the viewer window, first draw all the objects on a texture (framebuffer.texture); 
- * then, pass that texture to this function. 
+ * To draw anything in the viewer window, first draw all the objects on a framebuffer; 
+ * then, pass that framebuffer's texture to this function. 
  * @param orginalTexture Orginal texture from camera
  * @param processedTexture Processed data
  */
