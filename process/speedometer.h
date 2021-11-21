@@ -1,7 +1,6 @@
 /** Class - Speedometer.class. 
- * A class used to display speed on screen. 
- * This class is used to generate human readable output. 
- * The program uses RGBA8 format when reading the file; hence the glyphs can be colored and can have aplha channel. 
+ * A class used to process and display speed on screen. 
+ * This class is used to sample the speed data and generate human readable output. 
  */
 
 #ifndef INCLUDE_SPEEDOMETER_H
@@ -14,38 +13,39 @@
 typedef struct Speedometer_ClassDataStructure* Speedometer;
 
 /** Init a speedometer object, allocate memory, read speedometer glyph from bitmap file, init mesh. 
- * The bitmap must contains 256 glyphs, 16 rows in total, each row contains 16 glyphs. 
- * There is no restruction on the size of the glyph, but all of them should have same size. With one exception: 16 * width and 16 * height should not exceed the GPU's texture size limit. 
- * @param bitmapfile Directory to a bitmap file, must be in plain RGBA8 raw data format
- * @param size Size of the bitmap file (must be RGBA): in unit of pixel
+ * The glyph bitmap file must contains 256 glyphs, 16 rows in total, each row contains 16 glyphs. This bitmap must be in RGBA8 (uint32_t) format. 
+ * There is no restriction on the size of the glyph, but all of them should have same size. 
+ * The whole frame is divided into a number of rectangular speedometer, count.x in horizontal direction, count.y in vertical direction. 
+ * @param glyphs Directory to a glyphs file, must be in plain RGBA8 raw data format
  * @param count Number of speedometer in horizontal and vertical direction
  * @return $this(Opaque) speedometer class object upon success. If fail, free all resource and return NULL
  */
-Speedometer speedometer_init(const char* bitmapfile, size2d_t size, size2d_t count);
+Speedometer speedometer_init(const char* glyphs, size2d_t count);
 
-/** Get a pointer to the bitmap glyph loaded from file, which can be upload to GPU as texture. 
+/** Get a pointer to the glyph loaded from file, which can be upload to GPU as texture. 
  * This 2D bitmap contains a collection of 256 glpphs. 16 glyphs in one row, and there are 16 rows. 
  * The order is from small to large: left to right, then top to bottom. 
  * @param this This speedometer class object
+ * @param size Size of each glyph, pass-by-reference
  * @return Pointer to the bitmap glyph (format = RGBA8, uint32_t)
  */
-void* speedometer_getBitmap(Speedometer this);
+uint32_t* speedometer_getGlyph(Speedometer this, size2d_t* size);
 
 /** Get a pointer to the vertices array of the speedometer. 
- * A vertex contains 8 float value: x-pos and y-pos of an individual speedometer on screen, x-pos and y-pos of an individual speedometer's texture. x-axis and y-axis boundaries of the sampling region. 
- * Which is: {{screen-x, screen-y, text-x, text-y, boundary-x-left, boundary-x-right, boundary-y-top, boundary-y-bottom}, ...}. 
- * 2 triangles are used to connect 4 vertices into 1 rectangular mesh, each triangle requires 3 vertices. 
+ * A vertex contains 4 float value: left-x, top-y, right-x and bottom-y coordinates of each rectangular speedometer. 
+ * Which is: {{left-x, top-y, right-x, bottom-y}, ...}. 
+ * Should use gl_points. 
  * @param this This speedometer class object
- * @param size Pass by reference: Number of vertex (1 vertex = 8 float), should pass (4 * count) back
+ * @param size Pass by reference: Number of vertex (1 vertex = 4 float), should pass (count.x * count.y) back
  * @return Pointer to vertex array
  */
 float* speedometer_getVertices(Speedometer this, size_t* size);
 
 /** Get a pointer to the indices array of the speedometer. 
- * 2 triangles are used to connect 4 vertices into 1 rectangular mesh, each triangle requires 3 vertices. 
- * An index contains 3 unsigned ints, representing the index of 3 vertices in the vertices array which form a triangle. 
+ * Each speedometer only uses 1 vertex; hence the indices is just an array of number in row. 
+ * An index contains 1 unsigned int, representing the index of 1 vertice in the vertices array which form a point. 
  * @param this This speedometer class object
- * @param size Pass by reference: Number of index (1 index = 3 uint), should be pass (2 * count) back
+ * @param size Pass by reference: Number of index (1 index = 1 uint), should pass (count.x * count.y) back
  * @return Pointer to indices array
  */
 unsigned int* speedometer_getIndices(Speedometer this, size_t* size);
