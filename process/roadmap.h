@@ -1,6 +1,7 @@
 /** Class - Roadmap.class. 
- * Road information: road points in screen-domain and road-domain.
- * Road map also indicates focus region. 
+ * Road information: road points in screen-domain and road-domain. 
+ * Road mesh also indicates focus region. 
+ * Project mesh used to transform image between prospective and orthographicview. 
  */
 
 #ifndef INCLUDE_ROADMAP_H
@@ -14,11 +15,12 @@ typedef struct Roadmap_ClassDataStructure* Roadmap;
 
 /** Init a roadmap object, allocate memory for data read from map file. 
  * @param focusRegionFile Directory to a human-readable file contains focus region (use indexed triangle mesh, normalized [0,1])
+ * @param projectFile Directory to a human-readable file contains prespective to/from orthographic transformation vertices (use indexed triangle mesh, normalized [0,1])
  * @param distanceMapFile Directory to a binary coded file contains road-domain geographic data (use 2D float array), size should match with the video frame
  * @param size Number of pixels in the video frame
  * @return $this(Opaque) roadmap class object upon success. If fail, free all resource and return NULL
  */
-Roadmap roadmap_init(const char* focusRegionFile, const char* distanceMapFile, size_t size);
+Roadmap roadmap_init(const char* focusRegionFile, const char* projectFile, const char* distanceMapFile, size_t size);
 
 /** Get a pointer to the vertices array of focus region. 
  * A vertex contains 2 float value: x-pos on screen, y-pos on screen. 
@@ -30,7 +32,7 @@ Roadmap roadmap_init(const char* focusRegionFile, const char* distanceMapFile, s
  * @param size Pass by reference: Number of vertex (1 vertex = 2 float)
  * @return Pointer to vertices array
  */
-float* roadmap_getVertices(Roadmap this, size_t* size);
+float* roadmap_getFocusRegionVertices(Roadmap this, size_t* size);
 
 /** Get a pointer to the indices array of focus region. 
  * A number of triangles are used to connect vertices into mesh, each triangle requires 3 vertices. 
@@ -40,7 +42,27 @@ float* roadmap_getVertices(Roadmap this, size_t* size);
  * @param size Pass by reference: Number of index (1 index = 3 uint)
  * @return Pointer to indices array
  */
-unsigned int* roadmap_getIndices(Roadmap this, size_t* size);
+unsigned int* roadmap_getFocusRegionIndices(Roadmap this, size_t* size);
+
+/** Get a pointer to the vertices array of project. 
+ * A vertex contains 4 float value: x-pos and y-pos of prespective, x-pos and y-pos of orthographic. 
+ * Top-left corner is {0.0f, 0.0f}; Bottom-right corner is {1.0f, 1.0f}. 
+ * The value is designed for GL, using the Interpolation feature when passing value from vertex shader to fragment shader. 
+ * A number of triangles are used to connect vertices into mesh, each triangle requires 3 vertices. 
+ * @param this This roadmap class object
+ * @param size Pass by reference: Number of vertex (1 vertex = 4 float)
+ * @return Pointer to vertices array
+ */
+float* roadmap_getProjectVertices(Roadmap this, size_t* size);
+
+/** Get a pointer to the indices array of project. 
+ * A number of triangles are used to connect vertices into mesh, each triangle requires 3 vertices. 
+ * An index contains 3 unsigned ints, representing the order of vertices in the vertices array. 
+ * @param this This roadmap class object
+ * @param size Pass by reference: Number of index (1 index = 3 uint)
+ * @return Pointer to indices array
+ */
+unsigned int* roadmap_getProjectIndices(Roadmap this, size_t* size);
 
 /** Get the road-domain geographic data, a pointer to a 2-D array of road points, same size as the video frame. 
  * Each road points constains 4 float number data: position-x, position-y, searchRegion-x, searchRegion-y. 
