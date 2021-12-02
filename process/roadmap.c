@@ -9,16 +9,14 @@
 #include "roadmap.h"
 
 struct Roadmap_ClassDataStructure {
-	float* frVertices; //{screen-x, screen-y}[frVCnt]
-	unsigned int* frIndices; //{tri1, tri2, tri3}[frICnt]
-	float* pVertices; //{prospectiveXY, orthographicXY}[pVCnt]
-	unsigned int* pIndices; //{tri1, tri2, tri3}[pICnt]
-	size_t frVCnt, frICnt, pVCnt, pICnt;
-	float* geographic; //{road-x, road-y, srarch-x, search-y}
-	float threshold;
+	float* frVertices; //Focus region vertices {screen-x, screen-y}[frVCnt]
+	size_t frVCnt;
+	roadmap_header header;
+	roadmap_t1* t1;
+	roadmap_t2* t2;
 };
 
-Roadmap roadmap_init(const char* focusRegionFile, const char* projectFile, const char* distanceMapFile, size_t size) {
+Roadmap roadmap_init(const char* focusRegionFile, const char* roadmapFile, size2d_t size) {
 	#ifdef VERBOSE
 		fputs("Init roadmap class object\n", stdout);
 		fflush(stdout);
@@ -32,13 +30,74 @@ Roadmap roadmap_init(const char* focusRegionFile, const char* projectFile, const
 		return NULL;
 	}
 	*this = (struct Roadmap_ClassDataStructure){
-		.frVertices = NULL,	.frIndices = NULL,	.frVCnt = 0,	.frICnt = 0,
-		.pVertices = NULL,	.pIndices = NULL,	.pVCnt = 0,	.pICnt = 0,
-		.geographic = NULL,	.threshold = 0.0f
+		.frVertices = NULL,
+		.t1 = NULL,
+		.t2 = NULL
 	};
 
 	FILE* fp = NULL;
 	char buffer[127];
+
+	/* Map file */ {
+		fp = fopen(roadmapFile, "rb");
+		if (!fp) {
+			#ifdef VERBOSE
+				fprintf(stderr, "Fail to open roadmap file: %s (errno = %d)\n", roadmapFile, errno);
+			#endif
+			roadmap_destroy(this);
+			return NULL;
+		}
+
+		if (!fread(&this->header, sizeof(roadmap_header), 1, fp)) {
+			#ifdef VERBOSE
+				fprintf(stderr, "Error in roadmap file %s: Cannot get header\n", roadmapFile);
+			#endif
+			fclose(fp);
+			roadmap_destroy(this);
+			return NULL;
+		}
+
+		if (this->header.width != size.width || this->header.height != size.height) {
+			#ifdef VERBOSE
+				fprintf(stderr, "Error in roadmap file %s: Size mismatched\n", roadmapFile);
+			#endif
+			fclose(fp);
+			roadmap_destroy(this);
+			return NULL;
+		}
+
+		this->t1 = malloc(size.width * size.height * sizeof(roadmap_t1));
+		this->t2 = malloc(size.width * size.height * sizeof(roadmap_t2));
+		if (!this->t1 || !this->t2) {
+			#ifdef VERBOSE
+				fputs("Fail to create buffer for roadmap tables\n", stderr);
+			#endif
+			fclose(fp);
+			roadmap_destroy(this);
+			return NULL;
+		}
+
+		if (!fread(this->t1, sizeof(roadmap_t1), size.width * size.height, fp)) {
+			#ifdef VERBOSE
+				fprintf(stderr, "Error in roadmap file %s: Cannot get table 1\n", roadmapFile);
+			#endif
+			fclose(fp);
+			roadmap_destroy(this);
+			return NULL;
+		}
+
+		if (!fread(this->t2, sizeof(roadmap_t2), size.width * size.height, fp)) {
+			#ifdef VERBOSE
+				fprintf(stderr, "Error in roadmap file %s: Cannot get table 2\n", roadmapFile);
+			#endif
+			fclose(fp);
+			roadmap_destroy(this);
+			return NULL;
+		}
+
+		fclose(fp);
+		fp = NULL;
+	}
 
 	/* Focus region */ {
 		fp = fopen(focusRegionFile, "r");
@@ -50,28 +109,13 @@ Roadmap roadmap_init(const char* focusRegionFile, const char* projectFile, const
 			return NULL;
 		}
 
-		size_t length;
-		for(length = 0; fgets(buffer, sizeof(buffer), fp); length++) {
-			if (buffer[0] == 'v')
-				this->frVCnt++;
-			else if (buffer[0] == 'i')
-				this->frICnt++;
-			else {
-				#ifdef VERBOSE
-					fprintf(stderr, "Error in focus region map file (phase-1: count) (line %zu)\n", length);
-				#endif
-				fclose(fp);
-				roadmap_destroy(this);
-				return NULL;
-			}
-		}
-
+		for(this->frVCnt = 0; fgets(buffer, sizeof(buffer), fp); this->frVCnt++);
 		rewind(fp);
+
 		this->frVertices = malloc(2 * sizeof(float) * this->frVCnt);
-		this->frIndices = malloc(3 * sizeof(unsigned int) * this->frICnt);
-		if (!this->frVertices || !this->frIndices) {
+		if (!this->frVertices) {
 			#ifdef VERBOSE
-				fputs("Fail to create buffer for focus region map vertices and/or indices\n", stderr);
+				fputs("Fail to create buffer for focus region vertices\n", stderr);
 			#endif
 			fclose(fp);
 			roadmap_destroy(this);
@@ -79,15 +123,12 @@ Roadmap roadmap_init(const char* focusRegionFile, const char* projectFile, const
 		}
 
 		float* v = this->frVertices;
-		unsigned int* i = this->frIndices;
-		for(size_t l = 0; l < length; l++) {
-			if (fscanf(fp, "i %u %u %u\n", &i[0], &i[1], &i[2]) == 3) {
-				i += 3;
-			} else if (fscanf(fp, "v %f %f\n", &v[0], &v[1]) == 2) {
+		for (size_t i = 0; i < this->frVCnt; i++) {
+			if (fscanf(fp, "%f %f\n", &v[0], &v[1])) {
 				v += 2;
 			} else {
 				#ifdef VERBOSE
-					fprintf(stderr, "Error in focus region map file (phase-2: fetch) (line %zu)\n", l);
+					fprintf(stderr, "Error in focus region map file %s (line %zu)\n", focusRegionFile, i);
 				#endif
 				fclose(fp);
 				roadmap_destroy(this);
@@ -98,135 +139,25 @@ Roadmap roadmap_init(const char* focusRegionFile, const char* projectFile, const
 		fclose(fp);
 		fp = NULL;
 	}
-
-	/* Project */ {
-		fp = fopen(projectFile, "r");
-		if (!fp) {
-			#ifdef VERBOSE
-				fprintf(stderr, "Fail to open project map file: %s (errno = %d)\n", projectFile, errno);
-			#endif
-			roadmap_destroy(this);
-			return NULL;
-		}
-
-		size_t length;
-		for(length = 0; fgets(buffer, sizeof(buffer), fp); length++) {
-			if (buffer[0] == 'v')
-				this->pVCnt++;
-			else if (buffer[0] == 'i')
-				this->pICnt++;
-			else {
-				#ifdef VERBOSE
-					fprintf(stderr, "Error in project map file (phase-1: count) (line %zu)\n", length);
-				#endif
-				fclose(fp);
-				roadmap_destroy(this);
-				return NULL;
-			}
-		}
-
-		rewind(fp);
-		this->pVertices = malloc(4 * sizeof(float) * this->pVCnt);
-		this->pIndices = malloc(3 * sizeof(unsigned int) * this->pICnt);
-		if (!this->pVertices || !this->pIndices) {
-			#ifdef VERBOSE
-				fputs("Fail to create buffer for project map vertices and/or indices\n", stderr);
-			#endif
-			fclose(fp);
-			roadmap_destroy(this);
-			return NULL;
-		}
-
-		float* v = this->pVertices;
-		unsigned int* i = this->pIndices;
-		for(size_t l = 0; l < length; l++) {
-			if (fscanf(fp, "v %f %f %f %f\n", &v[0], &v[1], &v[2], &v[3]) == 4) {
-				v += 4;
-			} else if (fscanf(fp, "i %u %u %u\n", &i[0], &i[1], &i[2]) == 3) {
-				i += 3;
-			} else {
-				#ifdef VERBOSE
-					fprintf(stderr, "Error in project map file (phase-2: fetch) (line %zu)\n", l);
-				#endif
-				fclose(fp);
-				roadmap_destroy(this);
-				return NULL;
-			}
-		}
-
-		fclose(fp);
-		fp = NULL;
-	}
-
-	/* Geographic data */
-	fp = fopen(distanceMapFile, "r");
-	if (!fp) {
-		#ifdef VERBOSE
-			fprintf(stderr, "Fail to open focus region map file: %s (errno = %d)\n", distanceMapFile, errno);
-		#endif
-		roadmap_destroy(this);
-		return NULL;
-	}
-
-	this->geographic = malloc(size * sizeof(float) * 4);
-	if (!this->geographic) {
-		#ifdef VERBOSE
-			fputs("Fail to create buffer for geographic map\n", stderr);
-		#endif
-		fclose(fp);
-		roadmap_destroy(this);
-		return NULL;
-	}
-
-	if (!fread(this->geographic, sizeof(float) * 4, size, fp)) {
-		#ifdef VERBOSE
-			fputs("Error in geographic map file: Cannot get geographic data\n", stderr);
-		#endif
-		fclose(fp);
-		roadmap_destroy(this);
-		return NULL;
-	}
-
-	if (!fread(&this->threshold, sizeof(float), 1, fp)) {
-		#ifdef VERBOSE
-			fputs("Error in geographic map file: Cannot get threshold\n", stderr);
-		#endif
-		fclose(fp);
-		roadmap_destroy(this);
-		return NULL;
-	}
-
-	fclose(fp);
 
 	return this;
 }
 
-float* roadmap_getFocusRegionVertices(Roadmap this, size_t* size) {
+float* roadmap_getFocusRegion(Roadmap this, size_t* size) {
 	*size = this->frVCnt;
 	return this->frVertices;
 }
 
-unsigned int* roadmap_getFocusRegionIndices(Roadmap this, size_t* size) {
-	*size = this->frICnt;
-	return this->frIndices;
+roadmap_header roadmap_getHeader(Roadmap this) {
+	return this->header;
 }
 
-float* roadmap_getProjectVertices(Roadmap this, size_t* size) {
-	*size = this->pVCnt;
-	return this->pVertices;
+roadmap_t1* roadmap_getT1(Roadmap this) {
+	return this->t1;
 }
 
-unsigned int* roadmap_getProjectIndices(Roadmap this, size_t* size) {
-	*size = this->pICnt;
-	return this->pIndices;
-}
-
-float* roadmap_getGeographic(Roadmap this) {
-	return this->geographic;
-}
-
-float roadmap_getThreshold(Roadmap this) {
-	return this->threshold;
+roadmap_t2* roadmap_getT2(Roadmap this) {
+	return this->t2;
 }
 
 void roadmap_destroy(Roadmap this) {
@@ -240,14 +171,10 @@ void roadmap_destroy(Roadmap this) {
 
 	if (this->frVertices)
 		free(this->frVertices);
-	if (this->frIndices)
-		free(this->frIndices);
-	if (this->pVertices)
-		free(this->pVertices);
-	if (this->pIndices)
-		free(this->pIndices);
-	if (this->geographic)
-		free(this->geographic);
+	if (this->t1)
+		free(this->t1);
+	if (this->t2)
+		free(this->t2);
 
 	free(this);
 }

@@ -1,8 +1,27 @@
-/** This program is used to generate road map file and project file. 
- * A road map file contains infomation about the road-domain geographic data of each pixel. 
- * For example, if an object is located at a pixel at screen-domain (pixel-x-px, pixel-y-px). 
- * Using this data, we can get that object is on the road-domain (geo-x-meter, geo-y-meter). 
- * Format: array of struct {float geo-x-meter, float geo-y-meter, float-se} [height][width]. 
+/** This program is used to generate road map file, which contains road-domain and screen-domain data in both perpective and orthographic view. 
+ * Perspective data shows the info of the raw video; orthographic data shows the info of projected video. 
+ * Orthographic projection applied on x-axis, so all objects travels in the direction of the look direction but 
+ * with left-right offset will look like traveling vertical in orthographic video, instead of sloped in perspective video. 
+ * This simplifies the process of object tracing. 
+ * 
+ * Format: 
+ * 
+ * | Header: 
+ * - width(i16), height(i16)					//Frame size in pixel, also used to calculate the size of this file. ASCII meta data append can be ignored 
+ * - searchThreshold(f32)					//For search distance 
+ * - orthoPixelWidth(f32)					//Pixel width is same for all pixels in orthographic view 
+ * - searchDistanceX_orthographic(i32)				//Max distance in x-axis in pixel an object can move under the speed threshold, in orthographic view 
+ * - Point{roadX(f32), roadY(f32), screenX(i32), screenY(i32)}[4: farLeft, farRight, closeLeft, closeRight] 
+ * 								//Reference of how to calculate the orthographic, also marks focus region 
+ * 
+ * | Table1(f32*4)[height][width]: 
+ * - Perspective: roadX(f32), roadY(f32)			//Road-domain geographic data in both view mode 
+ * - Orthographic: roadX(f32), roadY(f32) 
+ * 
+ * | Table2(i32*4)[height][width]: 
+ * - SearchDistanceY(i32)					//Max distance in y-axis in pixel an object can move under the speed threshold, same in both view
+ * - SearchDistanceX_perspective(i32)				//Max distance in x-axis in pixel an object can move under the speed threshold, in perspective view
+ * - lookupYP2O(i32), lookupO2P(i32) 				//Projection lookup table. X-crood in orthographic and perspective views are same 
  */
 
 #include <stdio.h>
@@ -10,29 +29,68 @@
 #include <math.h>
 #include <inttypes.h>
 #include <errno.h>
+#include <assert.h>
 
+//Point on road-domain and screen-domain
 typedef struct Point_t {
-	double roadX, roadY;
+	float roadX, roadY;
 	unsigned int screenX, screenY;
 } point_t;
 
-double d2r(double deg) {
-	return deg * M_PI / 180;
-}
+/** Output file fomat:
+ * Section I:	Header
+ * Section II:	Table 1: Road-domain geographic data
+ * Section III:	Table 2: Search distance, P/O projection map
+ * Section IV:	Meta data: ASCII meta data, for reference, ignored by program
+ */
+typedef struct FileHeader {
+	int16_t width, height; //Frame size in pixel, also used to calculate the size of this file. ASCII meta data append can be ignored
+	float searchThreshold; //Max distance an object can travel between two frame, for search distance
+	float orthoPixelWidth; //Pixel width is same for all pixels in orthographic view
+	unsigned int searchDistanceXOrtho; //Max distance in x-axis in pixel an object can move under the speed threshold, in orthographic view, same for all pixels
+	point_t farLeft, farRight, closeLeft, closeRight; //Points in perspective view, reference of how to calculate the orthographic, also can be used to determine focus region
+} header_t;
+typedef struct FileDataTable1 { //Road-domain geographic data in both view
+	float px, py;
+	float ox, oy;
+} data1_t;
+typedef struct FileDataTable2 {
+	unsigned int searchDistanceXPersp; //Max distance in x-axis in pixel an object can move under the speed threshold, in perspective view
+	unsigned int searchDistanceY; //Max distance in y-axis in pixel an object can move under the speed threshold, same in both view
+	unsigned int lookupXp2o, lookupXo2p; //Projection lookup table. Y-crood in orthographic and perspective views are same
+} data2_t;
 
-double r2d(double rad) {
-	return rad * 180 / M_PI;
-}
+//Deg to rad
+#define d2r(deg) ((deg) * M_PI / 180.0)
 
+//Rad to deg
+#define r2d(rad) ((rad) * 180.0 / M_PI)
+
+//Deg sin, cos, tan
+#define dsin(deg) (sin(d2r(deg)))
+#define dcos(deg) (cos(d2r(deg)))
+#define dtan(deg) (tan(d2r(deg)))
+
+//Find distance between two point
 double fd(double x1, double y1, double x2, double y2) {
 	double dx = x1 - x2, dy = y1 - y2;
 	return sqrt(dx * dx + dy * dy);
 }
 
+//Return 0 if X is closer to A, 1 if X is closer to B, -1 if X is smaller than A or greater then B
+int isBetween(double x, double a, double b) {
+	if (a > b)
+		assert(a <= b);
+	if (x < a || x > b)
+		return -1;
+	return ((x - a) <= (b - x)) ? 0 : 1;
+}
+
 int main(int argc, char* argv[]) {
-	if (argc != 11) {
+
+	/* Cmd argu check */ if (argc != 10) {
 		fputs(
-			"Bad arg: Use 'this installHeight roadPitch installPitch fovHorizontal fovVertical sizeHorizontal sizeVeritcal threshold fileRoad fileProj'\n"
+			"Bad arg: Use 'this installHeight roadPitch installPitch fovHorizontal fovVertical sizeHorizontal sizeVeritcal threshold filename'\n"
 			"\twhere installHeight is height of camera in meter\n"
 			"\t      roadPitch is pitch angle of road in degree, incline is positive\n"
 			"\t      installPitch is pitch angle of camera in degree, looking sky is positive\n"
@@ -41,9 +99,8 @@ int main(int argc, char* argv[]) {
 			"\t      sizeHorizontal is width of camera image in unit of pixel\n"
 			"\t      sizeVeritcal is height of camera image in unit of pixel\n"
 			"\t      threshold is the max displacement an object can have between two frame in unit of meter\n"
-			"\t      fileRoad is where to save the road map file\n"
-			"\t      fileProj is where to save the project file\n"
-			"\teg; this 10.0 20.0 0.0 57.5 32.3 1920 1080 3.5 map.data project.txt\n"
+			"\t      filename is where to save the file\n"
+			"\teg; this 10.0 20.0 0.0 57.5 32.3 1920 1080 3.5 roadmap.data\n"
 		, stderr);
 		return EXIT_FAILURE;
 	}
@@ -51,149 +108,217 @@ int main(int argc, char* argv[]) {
 	unsigned int width = atoi(argv[6]), height = atoi(argv[7]);
 	double threshold = atof(argv[8]);
 	const char* roadmap = argv[9];
-	const char* project = argv[10];
+
+	/* Adjust FOV */ {
+		if (fovHorizontal > 0.0 && fovVertical > 0.0) {
+			fputs("No adjustment required on FOV\n", stdout);
+		} else if (fovHorizontal <= 0.0 && fovVertical > 0.0) {
+			fovHorizontal = fovVertical * width / height;
+			fprintf(stdout, "Adjust horizontal FOV to %lf based on vertical FOV and screen size\n", fovHorizontal);
+		} else if (fovVertical <= 0.0 && fovHorizontal > 0.0) {
+			fovVertical = fovHorizontal * height / width;
+			fprintf(stdout, "Adjust vertical FOV to %lf based on horizontal FOV and screen size\n", fovVertical);
+		} else {
+			fputs("Bad FOV\n", stderr);
+			return EXIT_FAILURE;
+		}
+	}
+
 	fprintf(stdout, "Camera height: %lf m, pitch: %lf deg\n", installHeight, installPitch);
-	fprintf(stdout, "Camera resolution: %u x %u p, FOV: %lf x%lf deg\n", width, height, fovHorizontal, fovVertical);
+	fprintf(stdout, "Camera resolution: %u x %u p, FOV: %lf x %lf deg\n", width, height, fovHorizontal, fovVertical);
 	fprintf(stdout, "Road picth: %lf deg\n", roadPitch);
 	fprintf(stdout, "Threshold: %lf m/frame\n", threshold);
 	fflush(stdout);
-
-	FILE* fp;
-	point_t farLeft, farRight, closeLeft, closeRight;
 	
-	fprintf(stdout, "Genarating road map file '%s'\n", roadmap);
+	/* Create file */
+	fprintf(stdout, "Creating road map file '%s'\n", roadmap);
 	fflush(stdout);
-
-	fp = fopen(roadmap, "wb");
+	FILE* fp = fopen(roadmap, "wb");
 	if (!fp) {
 		fprintf(stderr, "Fail to create/open output file '%s' (errno=%d)\n", roadmap, errno);
 		return EXIT_FAILURE;
 	}
-	float (* buffer)[width][4] = malloc(sizeof(float) * height * width * 4);
-	if (!buffer) {
+
+	header_t header = {
+		.width = width, .height = height,
+		.searchThreshold = threshold,
+		.orthoPixelWidth = 0.0, //TBD
+		.searchDistanceXOrtho = 0, //TBD
+		.farLeft = {.roadX = 0.0, .roadY = 0.0, .screenX = 0, .screenY = 0}, //TBD
+		.farRight = {.roadX = 0.0, .roadY = 0.0, .screenX = 0, .screenY = 0}, //TBD
+		.closeLeft = {.roadX = 0.0, .roadY = 0.0, .screenX = 0, .screenY = 0}, //TBD
+		.closeRight = {.roadX = 0.0, .roadY = 0.0, .screenX = 0, .screenY = 0} //TBD
+	};
+
+	/* Allocate memory */
+	fputs("Allocating memory\n", stdout);
+	fflush(stdout);
+	data1_t (*t1)[width] = malloc(sizeof(data1_t) * height * width);
+	data2_t (*t2)[width] = malloc(sizeof(data2_t) * height * width);
+	if (!t1 || !t2) {
 		fprintf(stderr, "Out of memory (errno=%d)\n", errno);
 		fclose(fp);
+		if (t1) free(t1);
+		if (t2) free(t2);
 		return EXIT_FAILURE;
 	}
 
-	for (unsigned int y = 0; y < height; y++) {
-		double lookPicth = installPitch - 0.5 * fovVertical + y / (height - 1.0) * fovVertical;
-		double projY = installHeight / sin(d2r(lookPicth + roadPitch)) * sin(d2r(90 - lookPicth));
-		
-		double d = installHeight / sin(d2r(lookPicth + roadPitch)) * sin(d2r(90 - roadPitch));
-		for (unsigned int x = 0; x < width; x++) {
-			double lookHorizontal = - 0.5 * fovHorizontal + x / (width - 1.0) * fovHorizontal;
-			double projX = tan(d2r(lookHorizontal)) * d;
+	/* Find road data */ {
+		fputs("Finding road geographic data\n", stdout);
+		fflush(stdout);
 
-			buffer[y][x][0] = projX;
-			buffer[y][x][1] = projY;
+		/* Perspective */ {
+			for (unsigned int y = 0; y < height; y++) {
+				double lookPitch = installPitch + 0.5 * fovVertical - y / (height - 1.0) * fovVertical;
+				double dHeight = roadPitch - lookPitch, dY = 90 + lookPitch, dRoad = 90 - roadPitch;
+				double py = (installHeight / dsin(dHeight)) * dsin(dY); //Road y-coord
+				double d = (installHeight / dsin(dHeight)) * dsin(dRoad); //Distance from camera to middle of road (x direction = 0 deg)
+				
+//				if (y % 5 == 0) {
+//					printf("Idx %u: LP %.4lf, d1 %.2lf, d2 %.2f, y %.4lf, d %.4lf\n", y, lookPitch, dHeight, dY, py, d);
+//				}
+				
+				for (unsigned int x = 0; x < width; x++) {
+					double lookHorizontal = - 0.5 * fovHorizontal + x / (width - 1.0) * fovHorizontal;
+					double px = dtan(lookHorizontal) * d;
+					t1[y][x].px = px;
+					t1[y][x].py = py;
+				}
+			}
 		}
-	}
 
-	double lastY = 0.0;
-	for (unsigned int y = 0; y < height; y++) {
-		double cy = buffer[y][0][1]; //Current position; if above horizon, cy will be negative
-		int isFar = lastY < 0 && cy > 0;
-		int isClose = y == height - 1;
-		for (unsigned int x = 0; x < width; x++) {
-			double cx = buffer[y][x][0];
+		/* Find 4 corner points */ {
+			//Close points always at bottom of screen
+			header.closeLeft = (point_t){.screenX = 0, .screenY = height-1, .roadX = t1[height-1][0].px, .roadY = t1[height-1][0].py}; //Left-bottom
+			header.closeRight = (point_t){.screenX = width-1, .screenY = height-1, .roadX = t1[height-1][width-1].px, .roadY = t1[height-1][width-1].py}; //Right-bottom
 
-			if (isFar) {
-				if (x == 0)
-					farLeft = (point_t){.screenX = x, .screenY = y, .roadX = cx, .roadY = cy};
-				else if (x == width - 1)
-					farRight = (point_t){.screenX = x, .screenY = y, .roadX = cx, .roadY = cy};
-			} else if (isClose) {
-				if (x == 0)
-					closeLeft = (point_t){.screenX = x, .screenY = y, .roadX = cx, .roadY = cy};
-				else if (x == width - 1)
-					closeRight = (point_t){.screenX = x, .screenY = y, .roadX = cx, .roadY = cy};;
+			//Find y-coord of far points
+			unsigned int farY;
+			if (t1[0][0].py > 0) { //Camera FOV below horizon: far points at top of screen
+				farY = 0;
+			} else { //Horizon in FOV, find it
+				for (unsigned int y = 0; y < height - 1; y++) {
+					if (t1[y][0].py < 0 && t1[y+1][0].py > 0) {
+						farY = y + 1;
+						break;
+					}
+				}
+			}
+
+			//Find far points
+			for (unsigned int x = 0; x < width - 1; x++) {
+				if (isBetween(header.closeLeft.roadX, t1[farY][x].px, t1[farY][x+1].px) != -1)
+					header.farLeft = (point_t){.screenX = x, .screenY = farY, .roadX = t1[farY][x].px, .roadY = t1[farY][x].py};
+				if (isBetween(header.closeRight.roadX, t1[farY][x].px, t1[farY][x+1].px) != -1)
+					header.farRight = (point_t){.screenX = x+1, .screenY = farY, .roadX = t1[farY][x+1].px, .roadY = t1[farY][x+1].py};
 			}
 			
-			unsigned int left = 0;
-			while (1) {
-				if (left > x) break; //Out of screen
-				unsigned int ix = x - left, iy = y; //Target index
-				if (fd(cx, cy, buffer[iy][ix][0], buffer[iy][ix][1]) > threshold) break; //Distance from current position to target greater than threshold
-				left++;
-			}
-
-			unsigned int right = 0;
-			while (1) {
-				if (right + x >= width) break;
-				unsigned int ix = x + right, iy = y;
-				if (fd(cx, cy, buffer[iy][ix][0], buffer[iy][ix][1]) > threshold) break;
-				right++;
-			}
-
-			unsigned int up = 0;
-			while(1) {
-				if (up > y) break;
-				unsigned int ix = x, iy = y - up;
-				if (fd(cx, cy, buffer[iy][ix][0], buffer[iy][ix][1]) > threshold) break;
-				up++;
-			}
-
-			unsigned int down = 0;
-			while(1) {
-				if (down + y >= height) break;
-				unsigned int ix = x, iy = y + down;
-				if (fd(cx, cy, buffer[iy][ix][0], buffer[iy][ix][1]) > threshold) break;
-				down++;
-			}
-
-			buffer[y][x][2] = fmax(left, right);
-			buffer[y][x][3] = fmax(up, down);
-
-//			fprintf(stdout, "Point (%u,%u) - position %f %f, search region %f %f.\n", x, y, buffer[y][x][0], buffer[y][x][1], buffer[y][x][2], buffer[y][x][3]);
 		}
-		lastY = cy;
+
+		/* Orthographic */ {
+			double baselineLeft = t1[height-1][0].px, baselineRight = t1[height-1][width-1].px;
+			double xStep = (baselineRight - baselineLeft) / (width - 1.0);
+			unsigned int farY = 0;
+			for (unsigned int y = 0; y < height; y++) {
+				for (unsigned int x = 0; x < width; x++) {
+					t1[y][x].ox = baselineLeft + xStep * x;
+					t1[y][x].oy = t1[y][x].py; //Y-axis in orthographic view is same as in perspective view (only project in x-axis)
+				}
+			}
+
+			header.orthoPixelWidth = xStep;
+		}
+
+		fprintf(stdout, "\t- Far left:    screen(%"PRIu32", %"PRIu32"), road(%f, %f)\n", header.farLeft.screenX, header.farLeft.screenY, header.farLeft.roadX, header.farLeft.roadY);
+		fprintf(stdout, "\t- Far right:   screen(%"PRIu32", %"PRIu32"), road(%f, %f)\n", header.farRight.screenX, header.farRight.screenY, header.farRight.roadX, header.farRight.roadY);
+		fprintf(stdout, "\t- Close left:  screen(%"PRIu32", %"PRIu32"), road(%f, %f)\n", header.closeLeft.screenX, header.closeLeft.screenY, header.closeLeft.roadX, header.closeLeft.roadY);
+		fprintf(stdout, "\t- Close right: screen(%"PRIu32", %"PRIu32"), road(%f, %f)\n", header.closeRight.screenX, header.closeRight.screenY, header.closeRight.roadX, header.closeRight.roadY);
 	}
 
-	fwrite(buffer, sizeof(float), height * width * 4, fp);
-	float max = threshold;
-	fwrite(&max, sizeof(float), 1, fp);
+	/* Calculate search distance */ {
+		fputs("Calculating searching distance\n", stdout);
+		fflush(stdout);
+		for (unsigned int y = 0; y < height; y++) {
+			for (unsigned int x = 0; x < width; x++) {
+				point_t persp = {.roadX = t1[y][x].px, .roadY = t1[y][x].py};
+				unsigned int left = 0, right = 0, up = 0, down = 0;
+				while (x - left > 0 && t1[y][x-left].px - persp.roadX <= threshold)
+					left++;
+				while (x + right < width - 1 && t1[y][x+right].px - persp.roadY <= threshold)
+					right++;
+				while (y - up > 0 && t1[y-up][x].py - persp.roadY <= threshold)
+					up++;
+				while (y + down < height - 1 && t1[y+down][x].py - persp.roadY <= threshold)
+					down++;
 
-	fputs("\n\n== Metadata: ===================================================================\n", fp);
-	fprintf(fp, "CMD: %s %s %s %s %s %s %s %s\n", argv[1], argv[2], argv[3], argv[4], argv[5], argv[6], argv[7], argv[8]);
-	fprintf(fp, "Camera height: %lf m, pitch: %lf deg\n", installHeight, installPitch);
-	fprintf(fp, "Camera resolution: %u x %u p, FOV: %lf x %lf deg\n", width, height, fovHorizontal, fovVertical);
-	fprintf(fp, "Road picth: %lf deg\n", roadPitch);
-	fprintf(fp, "Threshold: %lf m/frame\n", threshold);
-	fclose(fp);
+				t2[y][x].searchDistanceXPersp = left > right ? left : right;
+				t2[y][x].searchDistanceY = up > down ? up : down;
+			}
+		}
 
-	fprintf(stdout, "Road map file '%s' generated\n", roadmap);
-	fflush(stdout);
-
-	fprintf(stdout, "Genarating project file '%s'\n", roadmap);
-	fprintf(stdout, "Far left:    screen(%u, %u), road(%lf, %lf)\n", farLeft.screenX, farLeft.screenY, farLeft.roadX, farLeft.roadY);
-	fprintf(stdout, "Far right:   screen(%u, %u), road(%lf, %lf)\n", farRight.screenX, farRight.screenY, farRight.roadX, farRight.roadY);
-	fprintf(stdout, "Close left:  screen(%u, %u), road(%lf, %lf)\n", closeLeft.screenX, closeLeft.screenY, closeLeft.roadX, closeLeft.roadY);
-	fprintf(stdout, "Close right: screen(%u, %u), road(%lf, %lf)\n", closeRight.screenX, closeRight.screenY, closeRight.roadX, closeRight.roadY);
-	fflush(stdout);
-
-	fp = fopen(project, "wb");
-	if (!fp) {
-		fprintf(stderr, "Fail to create/open output file '%s' (errno=%d)\n", project, errno);
-		return EXIT_FAILURE;
+		header.searchDistanceXOrtho = threshold / header.orthoPixelWidth;
 	}
 
-	double closeLeft2FarX = (closeLeft.roadX - farLeft.roadX) / (farRight.roadX - farLeft.roadX);
-	double closeRight2FarX = (closeRight.roadX - farLeft.roadX) / (farRight.roadX - farLeft.roadX);
-	double farY = farLeft.screenY / (double)height;
-	/*                                      Proj-X			Proj-Y	Ortho-X	Orth-Y */
-	fprintf(fp, "v\t%lf\t%lf\t%lf\t%lf\n",	closeLeft2FarX,		farY,	0.0,	farY); //LT
-	fprintf(fp, "v\t%lf\t%lf\t%lf\t%lf\n",	closeRight2FarX,	farY,	1.0,	farY); //RT
-	fprintf(fp, "v\t%lf\t%lf\t%lf\t%lf\n",	0.0,			1.0,	0.0,	1.0);  //LB
-	fprintf(fp, "v\t%lf\t%lf\t%lf\t%lf\n",	1.0,			1.0,	1.0,	1.0);  //RB
-	fputs("i\t0\t1\t2\n", fp);
-	fputs("i\t1\t3\t2\n", fp);
+	/* Find lookup table */ {
+		fputs("Finding lookup table\n", stdout);
+		fflush(stdout);
+		for (unsigned int y = 0; y < height; y++) {
+			for (unsigned int x = 0; x < width; x++) {
+				/* Perspective to Orthographic */ {
+					float road = t1[y][x].ox;
+					if (road <= t1[y][0].px) {
+						t2[y][x].lookupXp2o = 0;
+					} else if (road >= t1[y][width-1].px) {
+						t2[y][x].lookupXp2o = width - 1;
+					} else {
+						for (unsigned int i = 0; i < width - 1; i++) {
+							float left = t1[y][i].px, right = t1[y][i+1].px;
+							int check = isBetween(road, left, right);
+							if (check != -1) {
+								t2[y][x].lookupXp2o = i + check;
+								break;
+							}
+						}
+					}
+				}
+
+				/* Orthographic to Perspective */ {
+					float road = t1[y][x].px;
+					if (road <= t1[y][0].ox) {
+						t2[y][x].lookupXo2p = 0;
+					} else if (road >= t1[y][width-1].ox) {
+						t2[y][x].lookupXo2p = width - 1;
+					} else {
+						for (unsigned int i = 0; i < width - 1; i++) {
+							float left = t1[y][i].ox, right = t1[y][i+1].ox;
+							int check = isBetween(road, left, right);
+							if (check != -1) {
+								t2[y][x].lookupXo2p = i + check;
+								break;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	/* Write to file */ {
+		fputs("Writing to file\n", stdout);
+		fflush(stdout);
+		fwrite(&header, sizeof(header), 1, fp);
+		fwrite(t1, sizeof(t1[0][0]), height * width, fp);
+		fwrite(t2, sizeof(t2[0][0]), height * width, fp);
+		fputs("\n\n== Metadata: ===================================================================\n", fp);
+		fprintf(fp, "CMD: %s %s %s %s %s %s %s %s\n", argv[1], argv[2], argv[3], argv[4], argv[5], argv[6], argv[7], argv[8]);
+		fprintf(fp, "Camera height: %lf m, pitch: %lf deg\n", installHeight, installPitch);
+		fprintf(fp, "Camera resolution: %u x %u p, FOV: %lf x %lf deg\n", width, height, fovHorizontal, fovVertical);
+		fprintf(fp, "Road picth: %lf deg\n", roadPitch);
+		fprintf(fp, "Threshold: %lf m/frame\n", threshold);
+	}
 
 	fclose(fp);
-
-	fprintf(stdout, "Project file '%s' generated\n", project);
+	fprintf(stdout, "Roadmap file '%s' generated\n", roadmap);
 	fflush(stdout);
-
-	fputs("Done!\n", stdout);
 	return EXIT_SUCCESS;
 }
