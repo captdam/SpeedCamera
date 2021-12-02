@@ -6,15 +6,6 @@
 
 #include <inttypes.h>
 
-/** Video file header
- */
-typedef struct VideoHeader_t {
-	uint16_t width;
-	uint16_t height;
-	uint16_t fps;
-	uint16_t colorScheme;
-} vh_t;
-
 /** Size of 2D object (image): width and height in pixel 
  */
 typedef struct Size2D_t {
@@ -45,111 +36,143 @@ typedef struct Size3D_t {
 	};
 } size3d_t;
 
-/** Describe a real-world location 
+/** Float/Int vectors (GPU types)
  */
-typedef struct Location3D_t {
-	float x;
-	float y;
-	float z;
-} loc3d_t;
+typedef struct IntVec1 {
+	union {
+		int width;
+		int x;
+		int r;
+	};
+} ivec1;
+typedef struct IntVec2 {
+	union {
+		int width;
+		int x;
+		int r;
+	};
+	union {
+		int height;
+		int y;
+		int g;
+	};
+} ivec2;
+typedef struct IntVec3 {
+	union {
+		int width;
+		int x;
+		int r;
+	};
+	union {
+		int height;
+		int y;
+		int g;
+	};
+	union {
+		int depth;
+		int z;
+		int b;
+	};
+} ivec3;
+typedef struct IntVec4 {
+	union {
+		int width;
+		int x;
+		int r;
+	};
+	union {
+		int height;
+		int y;
+		int g;
+	};
+	union {
+		int depth;
+		int z;
+		int b;
+	};
+	union {
+		int time;
+		int w;
+		int a;
+	};
+} ivec4;
+typedef struct Vec1 {
+	union {
+		float width;
+		float x;
+		float r;
+	};
+} vec1;
+typedef struct Vec2 {
+	union {
+		float width;
+		float x;
+		float r;
+	};
+	union {
+		float height;
+		float y;
+		float g;
+	};
+} vec2;
+typedef struct Vec3 {
+	union {
+		float width;
+		float x;
+		float r;
+	};
+	union {
+		float height;
+		float y;
+		float g;
+	};
+	union {
+		float depth;
+		float z;
+		float b;
+	};
+} vec3;
+typedef struct Vec4 {
+	union {
+		float width;
+		float x;
+		float r;
+	};
+	union {
+		float height;
+		float y;
+		float g;
+	};
+	union {
+		float depth;
+		float z;
+		float b;
+	};
+	union {
+		float time;
+		float w;
+		float a;
+	};
+} vec4;
 
-/** Neighbor point of a road point
+/** Get length of an array (static allocated)
+ * @param array The array
+ * @return Number of elements
  */
-typedef struct RoadNeighbor {
-	unsigned int distance: 8;
-	unsigned int pos: 24;
-} neighbor_t;
-#define ROADMAP_DIS_MAX 255
-#define ROADMAP_POS_MAX 16777215
-
-/** A road point
- */
-typedef struct RoadPoint {
-	neighbor_t* neighborStart;
-	neighbor_t* neighborEnd;
-} road_t;
+#define arrayLength(array) ( sizeof(array) / sizeof(array[0]) )
 
 /** Get the current machine time in nanosecond
  * @return Current time
  */
 uint64_t nanotime();
 
-/* == Fifo2 == Double buffer ================================================================ */
-
-/** Double buffer FIFO util (Fifo2), used for sending data between threads. 
- * A simple, light weigth, multi-thread 2-stage FIFO, without using system pipe or fifo. 
- * Note: This util uses mailbox instead of mutex, make sure one and only one thread is reading; one and only one thread is writing. 
+/** Check if ptr is inside the box defined by leftTop point and rightBottom point
+ * @param ptr The test point
+ * @param leftTop The left-top point, contains smaller x and y coordinates
+ * @param rightBottom The right-bottom point, contains greater x and y coordinates
+ * @param strict If 0, ptr is inside if on border; if positive, ptr is outside if on border; if negative, ptr is inside if on left-top border but outside if on right-bottom border
+ * @return True-equivalent (in most case 1) if ptr is inside; false-equivalent (0) if ptr is outside
  */
-typedef volatile struct Util_DoubleBufferFIFO* Fifo2;
-
-/** Creating a new Fifo2 class object. 
- * @param size Size of the buffer
- * @return $this(Opaque) Fifo2 class object upon success. If fail, free all resource and return NULL
- */
-Fifo2 fifo2_init(size_t size);
-
-/** Get the Fifo2 object status. 
- * @param this This Fifo2 class object
- * @param size Pass-by-reference: size of a single buffer inside the Fifo2
- * @param space Pass-by-reference: remaining space in the buffer. 0 = full, 2 = empty
- */
-void fifo2_status(Fifo2 this, size_t* size, unsigned int* space);
-
-/** Write data into Fifo2. 
- * If param size is non-zero, size bytes of data will be read from the src and write to internal buffer; 
- * If param size is 0, the length of data transfer is defined by the size of internal buffer. 
- * If param size > internal buffer size, program may crash; 
- * If param size < internal buffer size, remaining space remain unchanged. 
- * @param this This Fifo2 class object
- * @param src Pointer to the source of data
- * @param size Size of data, see description
- * @return 1 if success; 0 is fail (buffer full)
- */
-int fifo2_write(Fifo2 this, void* src, size_t size);
-
-/** Get the write side pointer to manually write to the Fifo2. 
- * This function will block until there is free internal buffer. 
- * Call fifo2_write_finish() to finish the writing so the read side can use it. 
- * @param this This Fifo2 class object
- * @return Write side pointer
- */
-void* fifo2_write_start(Fifo2 this);
-
-/** Finish the manual write to the Fifo2. 
- * Use with fifo2_write_start(). 
- * @param this This Fifo2 class object
- */
-void fifo2_write_finish(Fifo2 this);
-
-/** Read data from Fifo2. 
- * If param size is non-zero, size bytes of data will be read from the internal buffer and write to dest; 
- * If param size is 0, the length of data transfer is defined by the size of internal buffer. 
- * If param size > internal buffer size, program may crash; 
- * If param size < internal buffer size, remaining space will be discarded. 
- * @param this This Fifo2 class object
- * @param dest Pointer to the destination of data
- * @param size Size of data, see description
- * @return 1 if success; 0 is fail (buffer empty)
- */
-int fifo2_read(Fifo2 this, void* dest, size_t size);
-
-/** Get the read side pointer to manually read from the Fifo2. 
- * This function will block until there is valid internal buffer. 
- * Call fifo2_read_finish() to finish the reading so the write side can reuse it. 
- * @param this This Fifo2 class object
- * @return Read side pointer
- */
-void* fifo2_read_start(Fifo2 this);
-
-/** Finish the manual read from the Fifo2. 
- * Use with fifo2_read_start(). 
- * @param this This Fifo2 class object
- */
-void fifo2_read_finish(Fifo2 this);
-
-/** Destroy the Fiso2 class object, free all resource
- * @param this This Fifo2 class object
- */
-void fifo2_destroy(Fifo2 this);
+int inBox(size2d_t ptr, size2d_t leftTop, size2d_t rightBottom, int strict);
 
 #endif /* #ifndef INCLUDE_COMMON_H */
