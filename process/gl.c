@@ -52,6 +52,10 @@ const struct GL_TexFormat_LookUp {
 	{gl_texformat_RG8,		GL_RG8,		GL_RG,			GL_UNSIGNED_BYTE	},
 	{gl_texformat_RGB8,		GL_RGB8,	GL_RGB,			GL_UNSIGNED_BYTE	},
 	{gl_texformat_RGBA8,		GL_RGBA8,	GL_RGBA,		GL_UNSIGNED_BYTE	},
+	{gl_texformat_R8I,		GL_R8I,		GL_RED_INTEGER,		GL_BYTE			},
+	{gl_texformat_RG8I,		GL_RG8I,	GL_RG_INTEGER,		GL_BYTE			},
+	{gl_texformat_RGB8I,		GL_RGB8I,	GL_RGB_INTEGER,		GL_BYTE			},
+	{gl_texformat_RGBA8I,		GL_RGBA8I,	GL_RGBA_INTEGER,	GL_BYTE			},
 	{gl_texformat_R8UI,		GL_R8UI,	GL_RED_INTEGER,		GL_UNSIGNED_BYTE	},
 	{gl_texformat_RG8UI,		GL_RG8UI,	GL_RG_INTEGER,		GL_UNSIGNED_BYTE	},
 	{gl_texformat_RGB8UI,		GL_RGB8UI,	GL_RGB_INTEGER,		GL_UNSIGNED_BYTE	},
@@ -60,10 +64,26 @@ const struct GL_TexFormat_LookUp {
 	{gl_texformat_RG16F,		GL_RG16F,	GL_RG,			GL_FLOAT		},
 	{gl_texformat_RGB16F,		GL_RGB16F,	GL_RGB,			GL_FLOAT		},
 	{gl_texformat_RGBA16F,		GL_RGBA16F,	GL_RGBA,		GL_FLOAT		},
+	{gl_texformat_R16I,		GL_R16I,	GL_RED_INTEGER,		GL_SHORT		},
+	{gl_texformat_RG16I,		GL_RG16I,	GL_RG_INTEGER,		GL_SHORT		},
+	{gl_texformat_RGB16I,		GL_RGB16I,	GL_RGB_INTEGER,		GL_SHORT		},
+	{gl_texformat_RGBA16I,		GL_RGBA16I,	GL_RGBA_INTEGER,	GL_SHORT		},
+	{gl_texformat_R16UI,		GL_R16UI,	GL_RED_INTEGER,		GL_UNSIGNED_SHORT	},
+	{gl_texformat_RG16UI,		GL_RG16UI,	GL_RG_INTEGER,		GL_UNSIGNED_SHORT	},
+	{gl_texformat_RGB16UI,		GL_RGB16UI,	GL_RGB_INTEGER,		GL_UNSIGNED_SHORT	},
+	{gl_texformat_RGBA16UI,		GL_RGBA16UI,	GL_RGBA_INTEGER,	GL_UNSIGNED_SHORT	},
 	{gl_texformat_R32F,		GL_R32F,	GL_RED,			GL_FLOAT		},
 	{gl_texformat_RG32F,		GL_RG32F,	GL_RG,			GL_FLOAT		},
 	{gl_texformat_RGB32F,		GL_RGB32F,	GL_RGB,			GL_FLOAT		},
-	{gl_texformat_RGBA32F,		GL_RGBA32F,	GL_RGBA,		GL_FLOAT		}
+	{gl_texformat_RGBA32F,		GL_RGBA32F,	GL_RGBA,		GL_FLOAT		},
+	{gl_texformat_R32I,		GL_R32I,	GL_RED_INTEGER,		GL_INT			},
+	{gl_texformat_RG32I,		GL_RG32I,	GL_RG_INTEGER,		GL_INT			},
+	{gl_texformat_RGB32I,		GL_RGB32I,	GL_RGB_INTEGER,		GL_INT			},
+	{gl_texformat_RGBA32I,		GL_RGBA32I,	GL_RGBA_INTEGER,	GL_INT			},
+	{gl_texformat_R32UI,		GL_R32UI,	GL_RED_INTEGER,		GL_UNSIGNED_INT		},
+	{gl_texformat_RG32UI,		GL_RG32UI,	GL_RG_INTEGER,		GL_UNSIGNED_INT		},
+	{gl_texformat_RGB32UI,		GL_RGB32UI,	GL_RGB_INTEGER,		GL_UNSIGNED_INT		},
+	{gl_texformat_RGBA32UI,		GL_RGBA32UI,	GL_RGBA_INTEGER,	GL_UNSIGNED_INT		}
 };
 //GL_TexFormat_LookUp.eFormat should be in increase order and start from 0
 int gl_texformat_lookup_check() {
@@ -706,8 +726,13 @@ int gl_mesh_check(gl_mesh* mesh) {
 }
 
 void gl_mesh_draw(gl_mesh* mesh) {
-	glBindVertexArray(mesh ? mesh->vao : this.defaultMesh.vao);
-	glDrawElements(mesh->mode, mesh->drawSize, GL_UNSIGNED_INT, 0);
+	if (mesh) {
+		glBindVertexArray(mesh->vao);
+		glDrawElements(mesh->mode, mesh->drawSize, GL_UNSIGNED_INT, 0);
+	} else {
+		glBindVertexArray(this.defaultMesh.vao);
+		glDrawElements(this.defaultMesh.mode, this.defaultMesh.drawSize, GL_UNSIGNED_INT, 0);
+	}
 	glBindVertexArray(GL_INIT_DEFAULT_MESH.vao);
 }
 
@@ -859,6 +884,20 @@ void gl_frameBuffer_bind(gl_fb* fb, size2d_t size, int clear) {
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
 	}
+}
+
+void gl_frameBuffer_download(gl_fb* fb, size2d_t size, void* dest) {
+	glBindFramebuffer(GL_FRAMEBUFFER, fb->frame);
+	glReadBuffer(GL_COLOR_ATTACHMENT0);
+	glReadPixels(0, 0, size.width, size.height, GL_RGBA, GL_FLOAT, dest);
+}
+
+vec4 gl_frameBuffer_getPixel(gl_fb* fb, size2d_t where) {
+	vec4 d;
+	glBindFramebuffer(GL_FRAMEBUFFER, fb->frame);
+	glReadBuffer(GL_COLOR_ATTACHMENT0);
+	glReadPixels(where.x, where.y, 1, 1, GL_RGBA, GL_FLOAT, &d);
+	return d;
 }
 
 void gl_frameBuffer_delete(gl_fb* fb) {

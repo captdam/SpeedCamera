@@ -58,9 +58,14 @@ typedef unsigned int gl_pbo;
 #define GL_INIT_DEFAULT_PBO (gl_pbo)0
 typedef enum gl_texformat {
 	gl_texformat_R8, gl_texformat_RG8, gl_texformat_RGB8, gl_texformat_RGBA8,
+	gl_texformat_R8I, gl_texformat_RG8I, gl_texformat_RGB8I, gl_texformat_RGBA8I,
 	gl_texformat_R8UI, gl_texformat_RG8UI, gl_texformat_RGB8UI, gl_texformat_RGBA8UI,
 	gl_texformat_R16F, gl_texformat_RG16F, gl_texformat_RGB16F, gl_texformat_RGBA16F,
+	gl_texformat_R16I, gl_texformat_RG16I, gl_texformat_RGB16I, gl_texformat_RGBA16I,
+	gl_texformat_R16UI, gl_texformat_RG16UI, gl_texformat_RGB16UI, gl_texformat_RGBA16UI,
 	gl_texformat_R32F, gl_texformat_RG32F, gl_texformat_RGB32F, gl_texformat_RGBA32F,
+	gl_texformat_R32I, gl_texformat_RG32I, gl_texformat_RGB32I, gl_texformat_RGBA32I,
+	gl_texformat_R32UI, gl_texformat_RG32UI, gl_texformat_RGB32UI, gl_texformat_RGBA32UI,
 gl_texformat_placeholderEnd} gl_texformat;
 
 /** Frame buffer objects (multi-stage rendering)
@@ -348,6 +353,20 @@ int gl_frameBuffer_check(gl_fb* fb);
  * @param clear Set to true (non-zero value) to clear the buffer, use 0 to skip
  */
 void gl_frameBuffer_bind(gl_fb* fb, size2d_t size, int clear);
+
+/** Download texture of frambuffer from GPU, formet is always RGBA-vec4 (using float32, 16 bytes/pixel). 
+ * @param fb A frame buffer previously created by gl_frameBuffer_create()
+ * @param size The size of the texture, must be the same as when it created
+ * @param dest Where to save the texture, must be atleast size.width * size.height * 4 * sizeof(float)
+ */
+void gl_frameBuffer_download(gl_fb* fb, size2d_t size, void* dest);
+
+/** Get the pixel of the framebuffer's texture at location where
+ * @param fb A frame buffer previously created by gl_frameBuffer_create()
+ * @param where X- and y- coord of the pixel
+ * @return The pixel value
+ */
+vec4 gl_frameBuffer_getPixel(gl_fb* fb, size2d_t where);
 
 /** Delete a frame buffer. The framebuffer ID will be set to GL_INIT_DEFAULT_FB. 
  * @param fb A frame buffer previously created by gl_frameBuffer_create()
