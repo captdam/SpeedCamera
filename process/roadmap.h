@@ -13,13 +13,6 @@
  */
 typedef struct Roadmap_ClassDataStructure* Roadmap;
 
-/** Header road point
-*/
-typedef struct Point_t {
-	float roadX, roadY; //Road-domain coord
-	unsigned int screenX, screenY; //Screen-domain coord
-} point_t;
-
 /** Header from roadmap file
  */
 typedef struct Roadmap_Header {
@@ -27,7 +20,6 @@ typedef struct Roadmap_Header {
 	float searchThreshold; //Max distance an object can travel between two frame, for search distance
 	float orthoPixelWidth; //Pixel width is same for all pixels in orthographic view
 	unsigned int searchDistanceXOrtho; //Max distance in x-axis in pixel an object can move under the speed threshold, in orthographic view, same for all pixels
-	point_t farLeft, farRight, closeLeft, closeRight; //Points in perspective view, reference of how to calculate the orthographic, also can be used to determine focus region
 } roadmap_header;
 
 /** Data format from roadmap (table1): Road-domain geographic data in perspective view and orthographic view
@@ -45,13 +37,19 @@ typedef struct Roadmap_Table2 {
 	unsigned int lookupXp2o, lookupXo2p; //Projection lookup table. Y-crood in orthographic and perspective views are same
 } roadmap_t2;
 
+/** Data format from roadmap (road points list)
+*/
+typedef struct Roadmap_Point_t {
+	float roadX, roadY; //Road-domain coord
+	unsigned int screenX, screenY; //Screen-domain coord
+} roadmap_point_t;
+
 /** Init a roadmap object, allocate memory for data read from map file. 
- * @param focusRegionFile Directory to a human-readable file contains focus region (use indexed triangle mesh, normalized [0,1])
  * @param roadmapFile Directory to a binary coded file contains road-domain data
  * @param size Number of pixels in the video frame, used to check the program cmd againest the roadmap file
  * @return $this(Opaque) roadmap class object upon success. If fail, free all resource and return NULL
  */
-Roadmap roadmap_init(const char* focusRegionFile, const char* roadmapFile, size2d_t size);
+Roadmap roadmap_init(const char* roadmapFile, size2d_t size);
 
 /** Get a pointer to the vertices array of focus region. 
  * A vertex contains 2 float value: x-pos on screen, y-pos on screen. Top-left corner is {0.0f, 0.0f}; Bottom-right corner is {1.0f, 1.0f}. 
