@@ -235,6 +235,7 @@ int gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 
 	/* OpenGL config */
 //	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+//	glLineWidth(10);
 //	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 //	glEnable(GL_PROGRAM_POINT_SIZE);
 
@@ -251,53 +252,47 @@ int gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 	}
 
 	/* Draw window - shader */ {
-		const char* vs = "#version 310 es\nprecision mediump float;\n"
-		"layout (location = 0) in vec2 position;\n"
-		"out vec2 textpos;\n"
-		"void main() {\n"
-		"	gl_Position = vec4(position.x * 2.0 - 1.0, position.y * 2.0 - 1.0, 0.0, 1.0);\n"
-		"	textpos = vec2(position.x, 1.0 - position.y); //Fix y-axis difference screen coord\n"
-		"}\n";
-
-		const char* fs = "#version 310 es\nprecision mediump float;\n"
-		"in vec2 textpos;\n"
-		"uniform sampler2D orginalTexture;\n"
-		"uniform sampler2D processedTexture;\n"
-		"uniform float mixLevel;\n"
-		"out vec4 color;\n"
-		"void main() {\n"
-		"	vec3 od = texture(orginalTexture, textpos).rgb;\n"
-		"	vec3 pd = texture(processedTexture, textpos).rgb;\n"
-//		"	vec3 pd = texture(processedTexture, textpos).rrr;\n"
-		"	vec3 data = mix(od, pd, mixLevel);\n"
-		"	color = vec4(data, 1.0);\n"
-		"}\n";
-
-		const char* gs = NULL;
-
-		const char* pName[] = {"orginalTexture", "processedTexture", "mixLevel"};
-		unsigned int pCount = sizeof(pName) / sizeof(pName[0]);
-		gl_param pId[pCount];
-
-		const char* bName[] = {};
-		unsigned int bCount = sizeof(bName) / sizeof(bName[0]);
-		gl_param bId[bCount];
-
-		this.defaultShader = gl_shader_load(vs, fs, gs, 0, pName, pId, pCount, bName, bId, bCount);
-		if (!gl_shader_check(&this.defaultShader)) {
-			#ifdef VERBOSE
-				fputs("\tFail to load default shader\n", stderr);
-			#endif
-
-			gl_destroy(this);
-			return 0;
-		}
+		gl_shaderSrc vs[] = {
+			{.isFile = 0, .src = "#version 310 es\n"},
+			{.isFile = 0, .src = "precision mediump float;\n"},
+			{.isFile = 0, .src = \
+				"layout (location = 0) in vec2 position;\n"
+				"out vec2 textpos;\n"
+				"void main() {\n"
+				"	gl_Position = vec4(position.x * 2.0 - 1.0, position.y * 2.0 - 1.0, 0.0, 1.0);\n"
+				"	textpos = vec2(position.x, 1.0 - position.y); //Fix y-axis difference screen coord\n"
+				"}\n"
+			}
+		};
+		gl_shaderSrc fs[] = {
+			{.isFile = 0, .src = "#version 310 es\n"},
+			{.isFile = 0, .src = "precision mediump float;\n"},
+			{.isFile = 0, .src = \
+				"in vec2 textpos;\n"
+				"uniform sampler2D orginalTexture;\n"
+				"uniform sampler2D processedTexture;\n"
+				"uniform float mixLevel;\n"
+				"out vec4 color;\n"
+				"void main() {\n"
+				"	vec3 od = texture(orginalTexture, textpos).rgb;\n"
+				"	vec3 pd = texture(processedTexture, textpos).rgb;\n"
+//				"	vec3 pd = texture(processedTexture, textpos).rrr;\n"
+				"	vec3 data = mix(od, pd, mixLevel);\n"
+				"	color = vec4(data, 1.0);\n"
+				"}\n"
+			}
+		};
+		gl_shaderArg args[] = {
+			{.isUBO = 0, .name = "orginalTexture"},
+			{.isUBO = 0, .name = "processedTexture"},
+			{.isUBO = 0, .name = "mixLevel"}
+		};
+		this.defaultShader = gl_shader_create((ivec4){arrayLength(vs), arrayLength(fs), 0, arrayLength(args)}, vs, fs, NULL, args);
+		this.defaultShader_paramOrginal = args[0].id;
+		this.defaultShader_paramProcessed = args[1].id;
 
 		gl_shader_use(&this.defaultShader);
-		gl_shader_setParam(pId[2], 1, gl_type_float, &mix);
-
-		this.defaultShader_paramOrginal = pId[0];
-		this.defaultShader_paramProcessed = pId[1];
+		gl_shader_setParam(args[2].id, 1, gl_type_float, &mix);
 	}
 
 	/* Init OK */
@@ -378,7 +373,7 @@ void gl_destroy() {
 		glfwTerminate();
 
 	gl_close(1);
-	gl_shader_unload(&this.defaultShader);
+	gl_shader_destroy(&this.defaultShader);
 	gl_mesh_delete(&this.defaultMesh);
 	this.windowSize = (size2d_t){0, 0};
 }
@@ -413,187 +408,242 @@ char* gl_loadFileToMemory(const char* filename, long int* length) {
 	return content;
 }
 
-gl_shader gl_shader_load(
-	const char* shaderVertex, const char* shaderFragment, const char* shaderGeometry, const int isFilePath,
-	const char* paramName[], gl_param* paramId, const unsigned int paramCount,
-	const char* blockName[], gl_param* blockId, const unsigned int blockCount
-) {
-	#ifdef VERBOSE
-		if (isFilePath) {
-			fprintf(stdout, "Load shader: V=%s F=%s G=%s\n", shaderVertex, shaderFragment, shaderGeometry);
-		}
-		else {
-			fputs("Load shader: V=[in_memory] F=[in_memory] G=[in_memory]\n", stdout);
-		}
-		fflush(stdout);
-	#endif
-
-	GLuint shaderV = 0, shaderF = 0, shaderG = 0, shader = 0;
-	const char* shaderSrc = NULL;
+gl_shader gl_shader_create(ivec4 count, const gl_shaderSrc* vs, const gl_shaderSrc* fs, const gl_shaderSrc* gs, gl_shaderArg* args) {
+	unsigned int countV = count.x, countF = count.y, countG = count.z, countArg = count.w;
 	GLint status;
 
-	/* Vertex shader */
-	if (isFilePath) {
-		long int length;
-		shaderSrc = gl_loadFileToMemory(shaderVertex, &length);
-		if (!shaderSrc) {
-			#ifdef VERBOSE
-				if (length == 0)
-					fprintf(stderr, "\tFail to open vertex shader file: %s (errno = %d)\n", shaderVertex, errno);
-				else if (length < 0)
-					fprintf(stderr, "\tFail to get vertex shader length: %s (errno = %d)\n", shaderVertex, errno);
-				else
-					fputs("\tCannot allocate buffer for vertex shader code\n", stderr);
-			#endif
-
-			goto gl_loadShader_error;
-		}
+	GLuint shader = 0, shaderV = 0, shaderF = 0, shaderG = 0;
+	shader = glCreateProgram(); //Non-zero
+	shaderV = glCreateShader(GL_VERTEX_SHADER);
+	shaderF = glCreateShader(GL_FRAGMENT_SHADER);
+	if (countG)
+		shaderG = glCreateShader(GL_GEOMETRY_SHADER);
+	if (!shader || !shaderV || !shaderF || (countG && !shaderG)) {
+		fputs("\tFail to create shader\n", stderr);
 	}
-	else
-		shaderSrc = shaderVertex;
+	#ifdef VERBOSE
+		fprintf(stdout, "Create shader, program id = %u, vs = %u, fs = %u, gs = %u\n", shader, shaderV, shaderF, shaderG);
+	#endif
 
-	shaderV = glCreateShader(GL_VERTEX_SHADER); //Non-zero
-	glShaderSource(shaderV, 1, (const GLchar * const*)&shaderSrc, NULL);
-	glCompileShader(shaderV);
-	glGetShaderiv(shaderV, GL_COMPILE_STATUS, &status);
-	if (!status) {
+	/* Vertex shader */ {
 		#ifdef VERBOSE
-			char compileMsg[255];
-			glGetShaderInfoLog(shaderV, 255, NULL, compileMsg);
-			fprintf(stderr, "\tGL vertex shader error: %s\n", compileMsg);
+			fprintf(stdout, "\tCompile vertex shader, size = %u\n", countV);
 		#endif
-
-		goto gl_loadShader_error;
-	}
-
-	if (isFilePath)
-		free((void*)shaderSrc);
-
-	/* Fragment shader */
-	if (isFilePath) {
-		long int length;
-		shaderSrc = gl_loadFileToMemory(shaderFragment, &length);
-		if (!shaderSrc) {
-			#ifdef VERBOSE
-				if (length == 0)
-					fprintf(stderr, "\tFail to open fragment shader file: %s (errno = %d)\n", shaderFragment, errno);
-				else if (length < 0)
-					fprintf(stderr, "\tFail to get fragment shader length: %s (errno = %d)\n", shaderFragment, errno);
-				else
-					fputs("\tCannot allocate buffer for fragment shader code\n", stderr);
-			#endif
-
-			goto gl_loadShader_error;
-		}
-	}
-	else
-		shaderSrc = shaderFragment;
-
-	shaderF = glCreateShader(GL_FRAGMENT_SHADER); //Non-zero
-	glShaderSource(shaderF, 1, (const GLchar * const*)&shaderSrc, NULL);
-	glCompileShader(shaderF);
-	glGetShaderiv(shaderF, GL_COMPILE_STATUS, &status);
-	if (!status) {
-		#ifdef VERBOSE
-			char compileMsg[255];
-			glGetShaderInfoLog(shaderF, 255, NULL, compileMsg);
-			fprintf(stderr, "\tGL fragment shader error: %s\n", compileMsg);
-		#endif
-
-		goto gl_loadShader_error;
-	}
-
-	if (isFilePath)
-		free((void*)shaderSrc);
-	
-	/* Geometry shader */
-	if (shaderGeometry) {
-		if (isFilePath) {
-			long int length;
-			shaderSrc = gl_loadFileToMemory(shaderGeometry, &length);
-			if (!shaderSrc) {
+		const char* buffer[countV];
+		for (unsigned int i = 0; i < countV; i++) {
+			if (vs[i].isFile) {
+				long int length;
+				buffer[i] = gl_loadFileToMemory(vs[i].src, &length);
 				#ifdef VERBOSE
-					if (length == 0)
-						fprintf(stderr, "\tFail to open geometry shader file: %s (errno = %d)\n", shaderGeometry, errno);
-					else if (length < 0)
-						fprintf(stderr, "\tFail to get geometry shader length: %s (errno = %d)\n", shaderGeometry, errno);
-					else
-						fputs("\tCannot allocate buffer for geometry shader code\n", stderr);
+					fprintf(stdout, "\t%u - From file: %s (%ld)\n", i, vs[i].src, length);
 				#endif
-
-				goto gl_loadShader_error;
+				if (!buffer[i]) {
+					if (length == 0)
+						fprintf(stderr, "\tFail to open vertex shader file: %s (errno = %d)\n", vs[i].src, errno);
+					else if (length < 0)
+						fprintf(stderr, "\tFail to get vertex shader length: %s (errno = %d)\n", vs[i].src, errno);
+					else
+						fputs("\tCannot allocate buffer for vertex shader code\n", stderr);
+					for (int j = 0; j < i; j++) {
+						if (vs[j].isFile)
+							free((void*)buffer[j]);
+					}
+				}
+			} else {
+				buffer[i] = vs[i].src;
+				#ifdef VERBOSE
+					fprintf(stdout, "\t%u - From Memory: @%p\n", i, vs[i].src);
+				#endif
 			}
 		}
-		else
-			shaderSrc = shaderGeometry;
 
-		shaderG = glCreateShader(GL_GEOMETRY_SHADER); //Non-zero
-		glShaderSource(shaderG, 1, (const GLchar * const*)&shaderSrc, NULL);
-		glCompileShader(shaderG);
-		glGetShaderiv(shaderG, GL_COMPILE_STATUS, &status);
-		if (!status) {
-			#ifdef VERBOSE
-				char compileMsg[255];
-				glGetShaderInfoLog(shaderF, 255, NULL, compileMsg);
-				fprintf(stderr, "\tGL geometry shader error: %s\n", compileMsg);
-			#endif
+		glShaderSource(shaderV, countV, (const GLchar * const*)buffer, NULL);
+		glCompileShader(shaderV);
 
-			goto gl_loadShader_error;
+		for (unsigned int i = 0; i < countV; i++) {
+			if (vs[i].isFile)
+				free((void*)buffer[i]);
 		}
 
-		if (isFilePath)
-			free((void*)shaderSrc);
+		glGetShaderiv(shaderV, GL_COMPILE_STATUS, &status);
+		if (!status) {
+			GLuint msgLength;
+			glGetShaderiv(shaderV, GL_INFO_LOG_LENGTH, &msgLength);
+			char compileMsg[msgLength];
+			glGetShaderInfoLog(shaderV, msgLength, NULL, compileMsg);
+			fprintf(stderr, "\tGL vertex shader error:\n%s\n", compileMsg);
+			glDeleteShader(shaderV); //A value of 0 for shader and program will be silently ignored
+			glDeleteShader(shaderF);
+			glDeleteShader(shaderG);
+			glDeleteProgram(shader);
+			return GL_INIT_DEFAULT_SHADER;
+		}
 	}
 
-	/* Link program */
-
-	shader = glCreateProgram(); //Non-zero
-	glAttachShader(shader, shaderV);
-	glAttachShader(shader, shaderF);
-	if (shaderGeometry) glAttachShader(shader, shaderG);
-	glLinkProgram(shader);
-	glGetProgramiv(shader, GL_LINK_STATUS, &status);
-	if (!status) {
+	/* Fragment shader */ {
 		#ifdef VERBOSE
-			char compileMsg[255];
-			glGetProgramInfoLog(shader, 255, NULL, compileMsg);
-			fprintf(stderr, "\tGL shader link error: %s\n", compileMsg);
+			fprintf(stdout, "\tCompile fragment shader, size = %u\n", countF);
 		#endif
+		const char* buffer[countF];
+		for (unsigned int i = 0; i < countF; i++) {
+			if (fs[i].isFile) {
+				long int length;
+				buffer[i] = gl_loadFileToMemory(fs[i].src, &length);
+				#ifdef VERBOSE
+					fprintf(stdout, "\t%u - From file: %s (%ld)\n", i, fs[i].src, length);
+				#endif
+				if (!buffer[i]) {
+					if (length == 0)
+						fprintf(stderr, "\tFail to open fragment shader file: %s (errno = %d)\n", fs[i].src, errno);
+					else if (length < 0)
+						fprintf(stderr, "\tFail to get fragment shader length: %s (errno = %d)\n", fs[i].src, errno);
+					else
+						fputs("\tCannot allocate buffer for fragment shader code\n", stderr);
+					for (int j = 0; j < i; j++) {
+						if (fs[j].isFile)
+							free((void*)buffer[j]);
+					}
+				}
+			} else {
+				buffer[i] = fs[i].src;
+				#ifdef VERBOSE
+					fprintf(stdout, "\t%u - From Memory: @%p\n", i, fs[i].src);
+				#endif
+			}
+		}
+
+		glShaderSource(shaderF, countF, (const GLchar * const*)buffer, NULL);
+		glCompileShader(shaderF);
+
+		for (unsigned int i = 0; i < countF; i++) {
+			if (fs[i].isFile)
+				free((void*)buffer[i]);
+		}
+
+		glGetShaderiv(shaderF, GL_COMPILE_STATUS, &status);
+		if (!status) {
+			GLuint msgLength;
+			glGetShaderiv(shaderF, GL_INFO_LOG_LENGTH, &msgLength);
+			char compileMsg[msgLength];
+			glGetShaderInfoLog(shaderF, msgLength, NULL, compileMsg);
+			fprintf(stderr, "\tGL fragment shader error:\n%s\n", compileMsg);
+			glDeleteShader(shaderV);
+			glDeleteShader(shaderF);
+			glDeleteShader(shaderG);
+			glDeleteProgram(shader);
+			return GL_INIT_DEFAULT_SHADER;
+		}
+	}
+
+	/* Geometry shader */ if (countG) {
+		#ifdef VERBOSE
+			fprintf(stdout, "\tCompile geometry shader, size = %u\n", countG);
+		#endif
+		const char* buffer[countG];
+		for (unsigned int i = 0; i < countG; i++) {
+			if (gs[i].isFile) {
+				long int length;
+				buffer[i] = gl_loadFileToMemory(gs[i].src, &length);
+				#ifdef VERBOSE
+					fprintf(stdout, "\t%u - From file: %s (%ld)\n", i, gs[i].src, length);
+				#endif
+				if (!buffer[i]) {
+					if (length == 0)
+						fprintf(stderr, "\tFail to open fragment shader file: %s (errno = %d)\n", gs[i].src, errno);
+					else if (length < 0)
+						fprintf(stderr, "\tFail to get fragment shader length: %s (errno = %d)\n", gs[i].src, errno);
+					else
+						fputs("\tCannot allocate buffer for fragment shader code\n", stderr);
+					for (int j = 0; j < i; j++) {
+						if (gs[j].isFile)
+							free((void*)buffer[j]);
+					}
+				}
+			} else {
+				buffer[i] = gs[i].src;
+				#ifdef VERBOSE
+					fprintf(stdout, "\t%u - From Memory: @%p\n", i, gs[i].src);
+				#endif
+			}
+		}
+
+		glShaderSource(shaderG, countG, (const GLchar * const*)buffer, NULL);
+		glCompileShader(shaderG);
+
+		for (unsigned int i = 0; i < countG; i++) {
+			if (gs[i].isFile)
+				free((void*)buffer[i]);
+		}
+
+		glGetShaderiv(shaderG, GL_COMPILE_STATUS, &status);
+		if (!status) {
+			GLuint msgLength;
+			glGetShaderiv(shaderG, GL_INFO_LOG_LENGTH, &msgLength);
+			char compileMsg[msgLength];
+			glGetShaderInfoLog(shaderG, msgLength, NULL, compileMsg);
+			fprintf(stderr, "\tGL geometry shader error:\n%s\n", compileMsg);
+			glDeleteShader(shaderV);
+			glDeleteShader(shaderF);
+			glDeleteShader(shaderG);
+			glDeleteProgram(shader);
+			return GL_INIT_DEFAULT_SHADER;
+		}
+	}
+
+	/* Link */ {
+		#ifdef VERBOSE
+			fputs("\tLink program\n", stdout);
+		#endif
+		glAttachShader(shader, shaderV);
+		glAttachShader(shader, shaderF);
+		if (countG)
+			glAttachShader(shader, shaderG);
 		
-		goto gl_loadShader_error;
+		glLinkProgram(shader);
+		glGetProgramiv(shader, GL_LINK_STATUS, &status);
+		if (!status) {
+			GLuint msgLength;
+			glGetProgramiv(shader, GL_INFO_LOG_LENGTH, &msgLength);
+			char compileMsg[msgLength];
+			glGetProgramInfoLog(shader, msgLength, NULL, compileMsg);
+			fprintf(stderr, "\tGL shader link error:\n%s\n", compileMsg);
+			glDeleteShader(shaderV);
+			glDeleteShader(shaderF);
+			glDeleteShader(shaderG);
+			glDeleteProgram(shader);
+			return GL_INIT_DEFAULT_SHADER;
+		}
+
+		#ifdef VERBOSE
+			GLuint binSize;
+			glGetProgramiv(shader, GL_PROGRAM_BINARY_LENGTH, &binSize);
+			fprintf(stdout, "\t- Size: %u\n", binSize);
+		#endif
 	}
 
-	for (size_t i = paramCount; i; i--) {
-		*paramId = glGetUniformLocation(shader, *paramName);
-		#ifdef VERBOSE_SHADERPARAM
-			fprintf(stdout, "\tParam '%s' location: %d\n", *paramName, *paramId);
-			fflush(stdout);
+	/* Bind arguments */ {
+		#ifdef VERBOSE
+			fputs("\tBind arguments\n", stdout);
 		#endif
-		paramId++;
-		paramName++;
-	}
-
-	for (size_t i = blockCount; i; i--) {
-		*blockId = glGetUniformBlockIndex(shader, *blockName);
-		#ifdef VERBOSE_SHADERPARAM
-			fprintf(stdout, "\tBlock '%s' location: %d\n", *blockName, *paramId);
-			fflush(stdout);
-		#endif
-		blockId++;
-		blockName++;
+		for (unsigned int i = 0; i < countArg; i++) {
+			if (args[i].isUBO) {
+				args[i].id = glGetUniformBlockIndex(shader, args[i].name);
+				#ifdef VERBOSE
+					fprintf(stdout, "\t%u - Param '%s' (UBO) - ID = %u\n", i, args[i].name, args[i].id);
+				#endif
+			} else {
+				args[i].id = glGetUniformLocation(shader, args[i].name);
+				#ifdef VERBOSE
+					fprintf(stdout, "\t%u - Param '%s' (uniform) - ID = %u\n", i, args[i].name, args[i].id);
+				#endif
+			}
+		}
 	}
 
 	glDeleteShader(shaderV); //Flag set, will be automatically delete when program deleted.
 	glDeleteShader(shaderF); //So we don't need to remember the vertex and fragment shaders name.
 	glDeleteShader(shaderG);
 	return shader;
-
-	gl_loadShader_error:
-	glDeleteShader(shaderV); //A value of 0 for shader and program will be silently ignored
-	glDeleteShader(shaderF);
-	glDeleteShader(shaderG);
-	glDeleteProgram(shader);
-	return GL_INIT_DEFAULT_SHADER;
 }
 
 int gl_shader_check(gl_shader* shader) {
@@ -643,7 +693,7 @@ void gl_shader_setParam_internal(gl_param paramId, uint8_t length, gl_datatype t
 	}
 }
 
-void gl_shader_unload(gl_shader* shader) {
+void gl_shader_destroy(gl_shader* shader) {
 	if (*shader != GL_INIT_DEFAULT_SHADER)
 		glDeleteProgram(*shader);
 	*shader = GL_INIT_DEFAULT_SHADER;
@@ -684,18 +734,23 @@ void gl_unifromBuffer_delete(gl_ubo* ubo) {
 }
 
 gl_mesh gl_mesh_create(size2d_t vertexSize, size_t indexCount, gl_index_t* elementsSize, gl_vertex_t* vertices, gl_index_t* indices, gl_meshmode mode) {
+	int indexDraw = indexCount && indices;
+
 	gl_mesh mesh = GL_INIT_DEFAULT_MESH;
-	mesh.drawSize = indexCount;
+	mesh.drawSize = indexDraw ? indexCount : vertexSize.height;
 
 	glGenVertexArrays(1, &mesh.vao);
 	glGenBuffers(1, &mesh.vbo);
-	glGenBuffers(1, &mesh.ebo);
+	if (indexDraw)
+		glGenBuffers(1, &mesh.ebo);
+	
 	glBindVertexArray(mesh.vao);
-
 	glBindBuffer(GL_ARRAY_BUFFER, mesh.vbo);
 	glBufferData(GL_ARRAY_BUFFER, vertexSize.height * vertexSize.width * sizeof(gl_vertex_t), vertices, GL_STATIC_DRAW);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh.ebo);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexCount * sizeof(gl_index_t), indices, GL_STATIC_DRAW);
+	if (indexDraw) {
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh.ebo);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexCount * sizeof(gl_index_t), indices, GL_STATIC_DRAW);
+	}
 	
 	GLuint elementIndex = 0, attrIndex = 0;
 	while (elementIndex < vertexSize.width) {
@@ -709,6 +764,8 @@ gl_mesh gl_mesh_create(size2d_t vertexSize, size_t indexCount, gl_index_t* eleme
 		mesh.mode = GL_TRIANGLES;
 	else if (mode == gl_meshmode_points)
 		mesh.mode = GL_POINTS;
+	else if (mode == gl_meshmode_triangleFan)
+		mesh.mode = GL_TRIANGLE_FAN;
 	
 	glBindBuffer(GL_ARRAY_BUFFER, GL_INIT_DEFAULT_MESH.vbo);
 	glBindVertexArray(GL_INIT_DEFAULT_MESH.vao);
@@ -720,18 +777,22 @@ int gl_mesh_check(gl_mesh* mesh) {
 		return 0;
 	if (mesh->vbo == GL_INIT_DEFAULT_MESH.vbo)
 		return 0;
-	if (mesh->ebo == GL_INIT_DEFAULT_MESH.ebo)
-		return 0;
 	return 1;
 }
 
 void gl_mesh_draw(gl_mesh* mesh) {
 	if (mesh) {
 		glBindVertexArray(mesh->vao);
-		glDrawElements(mesh->mode, mesh->drawSize, GL_UNSIGNED_INT, 0);
+		if (mesh->ebo)
+			glDrawElements(mesh->mode, mesh->drawSize, GL_UNSIGNED_INT, 0);
+		else
+			glDrawArrays(mesh->mode, 0, mesh->drawSize);
 	} else {
 		glBindVertexArray(this.defaultMesh.vao);
-		glDrawElements(this.defaultMesh.mode, this.defaultMesh.drawSize, GL_UNSIGNED_INT, 0);
+		if (this.defaultMesh.ebo)
+			glDrawElements(this.defaultMesh.mode, this.defaultMesh.drawSize, GL_UNSIGNED_INT, 0);
+		else
+			glDrawArrays(this.defaultMesh.mode, 0, this.defaultMesh.drawSize);
 	}
 	glBindVertexArray(GL_INIT_DEFAULT_MESH.vao);
 }

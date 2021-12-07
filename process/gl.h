@@ -14,7 +14,7 @@
  */
 typedef struct GL_ClassDataStructure* GL;
 
-typedef enum gl_info {
+typedef enum GL_Info {
 	gl_info_i1_maxTextureSize, gl_info_i1_maxArrayTextureLayers, gl_info_i1_max3dTextureSize,
 	gl_info_i1_maxTextureImageUnits, gl_info_i1_maxVertexTextureImageUnits,
 	gl_info_s_vendor, gl_info_s_renderer, gl_info_s_version, gl_info_s_shadingLanguageVersion
@@ -24,11 +24,21 @@ typedef enum gl_info {
  */
 typedef unsigned int gl_shader;
 #define GL_INIT_DEFAULT_SHADER (gl_shader)0
-typedef int gl_param;
-typedef enum gl_datatype {gl_type_float, gl_type_int, gl_type_uint} gl_datatype;
 
+typedef int gl_param;
+typedef enum GL_DataType {gl_type_float, gl_type_int, gl_type_uint} gl_datatype;
 typedef unsigned int gl_ubo;
 #define GL_INIT_DEFAULT_UBO (gl_ubo)0
+
+typedef struct GL_ShaderSource {
+	const char* src; //Array of string
+	int isFile; //Whether each string in scr array is actual source code or file directory to the shader code
+} gl_shaderSrc;
+typedef struct GL_ShaderArg {
+	gl_param id;
+	int isUBO;
+	const char* name;
+} gl_shaderArg;
 
 /** Geometry objects (mesh)
  */
@@ -46,8 +56,8 @@ typedef struct GL_Mesh {
 #define GL_INIT_DEFAULT_MESH (gl_mesh){GL_INIT_DEFAULT_VAO, GL_INIT_DEFAULT_VBO, GL_INIT_DEFAULT_EBO, 0, 0}
 typedef float gl_vertex_t;
 typedef unsigned int gl_index_t;
-typedef enum gl_meshmode {
-	gl_meshmode_points, gl_meshmode_triangles
+typedef enum GL_MeshMode {
+	gl_meshmode_points, gl_meshmode_triangles, gl_meshmode_triangleFan
 } gl_meshmode;
 
 /** Texture and Pixel buffer for texture transfer
@@ -56,7 +66,7 @@ typedef unsigned int gl_tex;
 #define GL_INIT_DEFAULT_TEX (gl_tex)0
 typedef unsigned int gl_pbo;
 #define GL_INIT_DEFAULT_PBO (gl_pbo)0
-typedef enum gl_texformat {
+typedef enum GL_TexFormat {
 	gl_texformat_R8, gl_texformat_RG8, gl_texformat_RGB8, gl_texformat_RGBA8,
 	gl_texformat_R8I, gl_texformat_RG8I, gl_texformat_RGB8I, gl_texformat_RGBA8I,
 	gl_texformat_R8UI, gl_texformat_RG8UI, gl_texformat_RGB8UI, gl_texformat_RGBA8UI,
@@ -81,7 +91,7 @@ typedef struct GL_FrameBuffer {
 /** Synch
  */
 typedef void* gl_synch;
-typedef enum gl_synch_statue {gl_synch_error = -1, gl_synch_timeout, gl_synch_done, gl_synch_ok} gl_synch_statue;
+typedef enum GL_Synch_Statue {gl_synch_error = -1, gl_synch_timeout, gl_synch_done, gl_synch_ok} gl_synch_statue;
 
 /* == Window management and driver init ===================================================== */
 
@@ -93,7 +103,7 @@ typedef enum gl_synch_statue {gl_synch_error = -1, gl_synch_timeout, gl_synch_do
  * @param mix Intensity of orginal and processed data
  * @return 1 if success, 0 if fail
  */
-int gl_init(size2d_t frameSize, unsigned int windowRatio, float mix);
+int gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) __attribute__((cold));
 
 /** Get driver and hardware info. 
  * The type of data can be int array, float array or string, see param enum 'name' for the type and array length. 
@@ -104,7 +114,7 @@ int gl_init(size2d_t frameSize, unsigned int windowRatio, float mix);
  * @param data The returned info, pass-by-reference
  * @return Pointer to the returned data
  */
-void* gl_getInfo(gl_info name, void* data);
+void* gl_getInfo(gl_info name, void* data) __attribute__((cold));
 
 /** Call to start a render loop, this process all GLFW window events. 
  * @param cursorPos Current cursor position relative to the window, pass-by-reference
@@ -137,24 +147,14 @@ void gl_destroy();
 
 /* == OpenGL routines ======================================================================= */
 
-/** Load vertex and fragment shader, get IDs (location) of all parameters (uniform). 
- * @param shaderVertex Vertex shader or path to vertex shader file
- * @param shaderFragment Fragment shader or path to fragment shader file
- * @param shaderGeometry Optional geometry shader or path to geometry shader file, leave NULL to skip
- * @param isFilePath If 0, shaderVertex and shaderFragment are pointer to the source code. If 1, they are path to the shader file
- * @param paramName An array of string represents shader parameters' names (uniform)
- * @param paramId Pass-by-reference: IDs (location) of the parameters
- * @param paramCount Number of parameters, same as the length (number of elements) of the paramName and paramId
- * @param blockName An array of string represents shader blocks' names (uniform interface)
- * @param blockId Pass-by-reference: IDs (index) of the blocks
- * @param blockCount Number of blocks, same as the length (number of elements) of the blockName and blockId
- * @return gl_shader object upon success, GL_INIT_DEFAULT_SHADER if fail
+/** Create a shader. 
+ * @param count Number of code pieces to create vertex, fragment and geometry shader; number of arguments (unifrom + UBO). To skip geometry shader, pass 0 to its length (3rd element)
+ * @param vs An array of vertex shader object, number of elements must match with count
+ * @param fs An array of fragment shader object, number of elements must match with count
+ * @param gs Optional, an array of geometer shader object, number of elements must match with count
+ * @param args An array of argument object, id (location) of each arguments are returned-by-reference
  */
-gl_shader gl_shader_load(
-	const char* shaderVertex, const char* shaderFragment, const char* shaderGeometry, const int isFilePath,
-	const char* paramName[], gl_param* paramId, const unsigned int paramCount,
-	const char* blockName[], gl_param* blockId, const unsigned int blockCount
-);
+gl_shader gl_shader_create(ivec4 count, const gl_shaderSrc* vs, const gl_shaderSrc* fs, const gl_shaderSrc* gs, gl_shaderArg* args);
 
 /** Check a shader
  * @param shader Shader to check, previously returned by gl_shader_load()
@@ -180,7 +180,7 @@ void gl_shader_setParam_internal(gl_param paramId, uint8_t length, gl_datatype t
 /** Unload a shader, the shader will be reset to GL_INIT_DEFAULT_SHADER. 
  * @param shader Shader name returned by gl_shader_load()
  */
-void gl_shader_unload(gl_shader* shader);
+void gl_shader_destroy(gl_shader* shader);
 
 /** Create a uniform buffer and bind it to a binding point. 
  * @param bindingPoint Binding point to bind
@@ -218,10 +218,10 @@ void gl_unifromBuffer_delete(gl_ubo* ubo);
 
 /** Create and bind gl_mesh object (geometry). 
  * @param vertexSize Size of vertices array. Height = number of vertex; width = data per vertex
- * @param indexCount Number of index in the indices array
+ * @param indexCount For indexed draw: number of index in the indices array; for direct draw: use 0 
  * @param elementsSize Array, size of each elements (attribute) in a vertex
  * @param vertices The vertice array
- * @param indices The indices array
+ * @param indices For indexed draw: the indices array; for direct draw, use NULL
  * @param mode The mode of the mesh, can be gl_meshmode_*, this affects how the GPU draw the mesh
  * @return gl_mesh object
  */

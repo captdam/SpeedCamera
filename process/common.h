@@ -9,150 +9,55 @@
 /** Size of 2D object (image): width and height in pixel 
  */
 typedef struct Size2D_t {
-	union {
-		size_t width;
-		size_t x;
-	};
-	union {
-		size_t height;
-		size_t y;
-	};
+	union { size_t width; size_t x; };
+	union { size_t height; size_t y; };
 } size2d_t;
 
 /** Size of 3D object (image): width, height and depth
  */
 typedef struct Size3D_t {
-	union {
-		size_t width;
-		size_t x;
-	};
-	union {
-		size_t height;
-		size_t y;
-	};
-	union {
-		size_t depth;
-		size_t z;
-	};
+	union { size_t width; size_t x; };
+	union { size_t height; size_t y; };
+	union { size_t depth; size_t z; };
 } size3d_t;
 
 /** Float/Int vectors (GPU types)
  */
 typedef struct IntVec1 {
-	union {
-		int width;
-		int x;
-		int r;
-	};
+	union { int width; int x; int r; };
 } ivec1;
 typedef struct IntVec2 {
-	union {
-		int width;
-		int x;
-		int r;
-	};
-	union {
-		int height;
-		int y;
-		int g;
-	};
+	union { int width; int x; int r; };
+	union { int height; int y; int g; };
 } ivec2;
 typedef struct IntVec3 {
-	union {
-		int width;
-		int x;
-		int r;
-	};
-	union {
-		int height;
-		int y;
-		int g;
-	};
-	union {
-		int depth;
-		int z;
-		int b;
-	};
+	union { int width; int x; int r; };
+	union { int height; int y; int g; };
+	union { int depth; int z; int b; };
 } ivec3;
 typedef struct IntVec4 {
-	union {
-		int width;
-		int x;
-		int r;
-	};
-	union {
-		int height;
-		int y;
-		int g;
-	};
-	union {
-		int depth;
-		int z;
-		int b;
-	};
-	union {
-		int time;
-		int w;
-		int a;
-	};
+	union { int width; int x; int r; };
+	union { int height; int y; int g; };
+	union { int depth; int z; int b; };
+	union { int time; int w; int a; };
 } ivec4;
 typedef struct Vec1 {
-	union {
-		float width;
-		float x;
-		float r;
-	};
+	union { float width; float x; float r; };
 } vec1;
 typedef struct Vec2 {
-	union {
-		float width;
-		float x;
-		float r;
-	};
-	union {
-		float height;
-		float y;
-		float g;
-	};
+	union { float width; float x; float r; };
+	union { float height; float y; float g; };
 } vec2;
 typedef struct Vec3 {
-	union {
-		float width;
-		float x;
-		float r;
-	};
-	union {
-		float height;
-		float y;
-		float g;
-	};
-	union {
-		float depth;
-		float z;
-		float b;
-	};
+	union { float width; float x; float r; };
+	union { float height; float y; float g; };
+	union { float depth; float z; float b; };
 } vec3;
 typedef struct Vec4 {
-	union {
-		float width;
-		float x;
-		float r;
-	};
-	union {
-		float height;
-		float y;
-		float g;
-	};
-	union {
-		float depth;
-		float z;
-		float b;
-	};
-	union {
-		float time;
-		float w;
-		float a;
-	};
+	union { float width; float x; float r; };
+	union { float height; float y; float g; };
+	union { float depth; float z; float b; };
+	union { float time; float w; float a; };
 } vec4;
 
 /** Get length of an array (static allocated)
