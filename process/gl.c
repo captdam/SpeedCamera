@@ -235,9 +235,10 @@ int gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 
 	/* OpenGL config */
 //	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-//	glLineWidth(10);
 //	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-//	glEnable(GL_PROGRAM_POINT_SIZE);
+//	glLineWidth(10);
+	glEnable(GL_PROGRAM_POINT_SIZE);
+	glPointSize(10.0);
 
 	/* Draw window - mesh */ {
 		gl_vertex_t vertices[] = {
