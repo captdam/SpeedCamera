@@ -9,8 +9,8 @@
 #include "roadmap.h"
 
 struct Roadmap_ClassDataStructure {
-	float* frVertices; //Focus region vertices {screen-x, screen-y}[frVCnt]
-	size_t frVCnt;
+	float* roadPoints; //Focus region vertices {screen-x, screen-y}[frVCnt]
+	size_t roadPointsCnt;
 	roadmap_header header;
 	roadmap_t1* t1;
 	roadmap_t2* t2;
@@ -30,7 +30,7 @@ Roadmap roadmap_init(const char* roadmapFile, size2d_t size) {
 		return NULL;
 	}
 	*this = (struct Roadmap_ClassDataStructure){
-		.frVertices = NULL,
+		.roadPoints = NULL,
 		.t1 = NULL,
 		.t2 = NULL
 	};
@@ -100,10 +100,10 @@ Roadmap roadmap_init(const char* roadmapFile, size2d_t size) {
 		roadmap_destroy(this);
 		return NULL;
 	}
-	this->frVCnt = pCount * 2;
+	this->roadPointsCnt = pCount * 2;
 
-	this->frVertices = malloc(2 * sizeof(float) * this->frVCnt);
-	if (!this->frVertices) {
+	this->roadPoints = malloc(2 * sizeof(float) * this->roadPointsCnt);
+	if (!this->roadPoints) {
 		#ifdef VERBOSE
 			fputs("Fail to create buffer for focus region vertices\n", stderr);
 		#endif
@@ -127,20 +127,15 @@ Roadmap roadmap_init(const char* roadmapFile, size2d_t size) {
 		float leftY = pointPair[0].screenY / (float)size.height;
 		float rightX = pointPair[1].screenX / (float)size.width;
 		float rightY = pointPair[1].screenY / (float)size.height;
-		this->frVertices[i * 2 + 0] = leftX;
-		this->frVertices[i * 2 + 1] = leftY;
-		this->frVertices[pCount * 4 - i * 2 - 2] = rightX;
-		this->frVertices[pCount * 4 - i * 2 - 1] = rightY;
+		this->roadPoints[i * 2 + 0] = leftX;
+		this->roadPoints[i * 2 + 1] = leftY;
+		this->roadPoints[pCount * 4 - i * 2 - 2] = rightX;
+		this->roadPoints[pCount * 4 - i * 2 - 1] = rightY;
 	}
 
 	fclose(fp);
 
 	return this;
-}
-
-float* roadmap_getFocusRegion(Roadmap this, size_t* size) {
-	*size = this->frVCnt;
-	return this->frVertices;
 }
 
 roadmap_header roadmap_getHeader(Roadmap this) {
@@ -155,6 +150,11 @@ roadmap_t2* roadmap_getT2(Roadmap this) {
 	return this->t2;
 }
 
+float* roadmap_getRoadPoints(Roadmap this, size_t* size) {
+	*size = this->roadPointsCnt;
+	return this->roadPoints;
+}
+
 void roadmap_destroy(Roadmap this) {
 	if (!this)
 		return;
@@ -164,8 +164,8 @@ void roadmap_destroy(Roadmap this) {
 		fflush(stdout);
 	#endif
 
-	if (this->frVertices)
-		free(this->frVertices);
+	if (this->roadPoints)
+		free(this->roadPoints);
 	if (this->t1)
 		free(this->t1);
 	if (this->t2)

@@ -51,16 +51,6 @@ typedef struct Roadmap_Point_t {
  */
 Roadmap roadmap_init(const char* roadmapFile, size2d_t size);
 
-/** Get a pointer to the vertices array of focus region. 
- * A vertex contains 2 float value: x-pos on screen, y-pos on screen. Top-left corner is {0.0f, 0.0f}; Bottom-right corner is {1.0f, 1.0f}. 
- * A number of triangles are used to connect vertices into mesh, each triangle requires 3 vertices. The order of the vertices is triangle fan. 
- * The program should only process objects on the road, which is in the mesh (focus region). 
- * @param this This roadmap class object
- * @param size Pass by reference: Number of vertex (1 vertex = 2 float)
- * @return Pointer to vertices array
- */
-float* roadmap_getFocusRegion(Roadmap this, size_t* size);
-
 /** Get the header of the roadmap file. 
  * @param this This roadmap class object
  * @return Roadmap file header
@@ -80,6 +70,16 @@ roadmap_t1* roadmap_getT1(Roadmap this);
  * @return Pointer to the data
  */
 roadmap_t2* roadmap_getT2(Roadmap this);
+
+/** Get a pointer to the road points array. 
+ * Road points defines the boundary of the road. For the purpose of this program, only data inside the road points (which means objects on the road) should be processed. 
+ * Anything outside of the boundary should be ignored. 
+ * The road points are ordered from left to right, top to bottom. Number of road points is always a multiply of 2. Each road points contains 2 float (x and y coord on the screen, normalized to [0,1])
+ * @param this This roadmap class object
+ * @param size Pass by reference: Number of road points (1 vertex = 2 float)
+ * @return Pointer to road points array
+ */
+float* roadmap_getRoadPoints(Roadmap this, size_t* size);
 
 /** Destroy this roadmap class object, frees resources. 
  * @param this This roadmap class object
