@@ -1,7 +1,3 @@
-#version 310 es
-
-precision highp float;
-
 in vec2 currentPos;
 out vec4 result;
 

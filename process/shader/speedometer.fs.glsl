@@ -1,12 +1,11 @@
-#version 310 es
+in vec2 currentPos;
+in flat int speed;
 
-precision highp float;
+out vec4 dest;
 
-uniform sampler2D glyphTexture;
-
-in vec2 textCord;
-out vec4 nStage;
+uniform mediump sampler2DArray glyphmap;
 
 void main() {
-	nStage = texelFetch(glyphTexture, ivec2(textCord), 0);
+	dest = texelFetch(glyphmap, ivec3(vec2(textureSize(glyphmap, 0)) * currentPos.xy, speed), 0);
+//	dest = vec4(currentPos.xy, 0.5, 1.0);
 }
