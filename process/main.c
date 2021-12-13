@@ -18,10 +18,10 @@
 #include "speedometer.h"
 
 #define WINDOW_RATIO 1
-#define MIXLEVEL 0.85f //0.88f
+#define MIXLEVEL 0.65f //0.88f
 
-#define FRAME_DELAY (100 * 1000)
-#define FRAME_DEBUGSKIPSECOND 20
+#define FRAME_DELAY (0 * 1000)
+#define FRAME_DEBUGSKIPSECOND 0
 
 #define FIFONAME "tmpframefifo.data"
 
@@ -66,14 +66,17 @@ void* th_reader(void* arg) {
 	fprintf(stdout, "[Reader] Frame size: %zu pixels. Number of color channel: %d\n", frameSize, colorChCnt);
 
 	int colorChR = 0, colorChG = 1, colorChB = 2, colorChA = 3;
-	if (this->colorScheme[1] != '\0')
+	if (this->colorScheme[1] != '\0') {
 		colorChR = this->colorScheme[1] - '0';
-	if (this->colorScheme[2] != '\0')
-		colorChG = this->colorScheme[2] - '0';
-	if (this->colorScheme[3] != '\0')
-		colorChB = this->colorScheme[3] - '0';
-	if (this->colorScheme[4] != '\0')
-		colorChA = this->colorScheme[4] - '0';
+		if (this->colorScheme[2] != '\0') {
+			colorChG = this->colorScheme[2] - '0';
+			if (this->colorScheme[3] != '\0') {
+				colorChB = this->colorScheme[3] - '0';
+				if (this->colorScheme[4] != '\0')
+					colorChA = this->colorScheme[4] - '0';
+			}
+		}
+	}
 	
 	if (colorChCnt == 1)
 		fprintf(stdout, "[Reader] Color scheme: RGB = idx0, A = 0xFF\n");
@@ -89,7 +92,6 @@ void* th_reader(void* arg) {
 		return NULL;
 	}
 	fputs("[Reader] Ready. FIFO '"FIFONAME"' can accept frame data now\n", stdout);
-	fflush(stdout);
 
 	FILE* fp = fopen(FIFONAME, "rb");
 	if (!fp) {
@@ -100,20 +102,20 @@ void* th_reader(void* arg) {
 	fputs("[Reader] FIFO '"FIFONAME"' data received\n", stdout);
 	fflush(stdout);
 
+	#define BLOCKSIZE 16 //Height and width are multiple of 4, so frame size is multiple of 16. Read a block (16px) at once can increase performance
+	size_t blkCnt = frameSize / BLOCKSIZE;
 	int fileValid = 1;
 	while (fileValid) {
 		sem_wait(&sem_readerJobStart); //Wait until main thread issue new GPU memory address for next frame
 
-		const size_t bucketSize = 16; //Height and width are multiple of 4, so total size is multiple of 16. Read 16 pixels at once to increase performance
-
-		size_t iter = frameSize / bucketSize;
+		size_t iter = blkCnt;
 		uint8_t* dest = (void*)rawDataPtr;
 
 		if (colorChCnt == 1) {
-			uint8_t luma[bucketSize];
+			uint8_t luma[BLOCKSIZE];
 			while (iter--) {
 				uint8_t* p = &(luma[0]);
-				if (!fread(p, 1, bucketSize, fp)) { //Fail to read from fifo
+				if (!fread(p, 1, BLOCKSIZE, fp)) { //Fail to read from fifo
 					fileValid = 0;
 					break;
 				}
@@ -126,14 +128,14 @@ void* th_reader(void* arg) {
 				}
 			}
 		} else if (colorChCnt == 3) {
-			uint8_t rgb[bucketSize * 3];
+			uint8_t rgb[BLOCKSIZE * 3];
 			while (iter--) {
 				uint8_t* p = &(rgb[0]);
-				if (!fread(p, 3, bucketSize, fp)) {
+				if (!fread(p, 3, BLOCKSIZE, fp)) {
 					fileValid = 0;
 					break;
 				}
-				while (p < &( rgb[bucketSize * 3] )) {
+				while (p < &( rgb[BLOCKSIZE * 3] )) {
 					*(dest++) = p[colorChR]; //R
 					*(dest++) = p[colorChG]; //G
 					*(dest++) = p[colorChB]; //B
@@ -143,19 +145,17 @@ void* th_reader(void* arg) {
 			}
 		} else {
 			if (colorChR == 0 && colorChG == 1 && colorChB == 2 && colorChA == 3) { //Video data scheme matched with GPU data scheme
-				if (!fread(dest, 4, frameSize, fp)) {
+				if (!fread(dest, 4, frameSize, fp))
 					fileValid = 0;
-					break;
-				}
 			} else {
-				uint8_t rgba[bucketSize * 4];
+				uint8_t rgba[BLOCKSIZE * 4];
 				while (iter--) {
 					uint8_t* p = &(rgba[0]);
-					if (!fread(rgba, 4, bucketSize, fp)) {
+					if (!fread(rgba, 4, BLOCKSIZE, fp)) {
 						fileValid = 0;
 						break;
 					}
-					while (p < &( rgba[bucketSize * 4] )) {
+					while (p < &( rgba[BLOCKSIZE * 4] )) {
 						*(dest++) = p[colorChR]; //R
 						*(dest++) = p[colorChG]; //G
 						*(dest++) = p[colorChB]; //B
@@ -171,6 +171,7 @@ void* th_reader(void* arg) {
 		#endif
 		sem_post(&sem_readerJobDone); //Uploading done, allow main thread to use it
 	}
+	#undef BLOCKSIZE
 
 	fclose(fp);
 	unlink(FIFONAME);
@@ -210,7 +211,7 @@ int main(int argc, char* argv[]) {
 		color = argv[4];
 		roadmapFile = argv[5];
 		vSize = (size2d_t){.width = width, .height = height};
-		fputs("Start...", stdout);
+		fputs("Start...\n", stdout);
 		fprintf(stdout, "\tWidth: %upx, Height: %upx, Total: %zusqpx\n", width, height, vSize.width * vSize.height);
 		fprintf(stdout, "\tFPS: %u, Color: %s\n", fps, color);
 		fprintf(stdout, "\tRoadmap: %s\n", roadmapFile);
@@ -327,37 +328,15 @@ int main(int argc, char* argv[]) {
 	gl_param shader_speedometer_paramGlyphmap;
 
 	/* Init OpenGL and viewer window */ {
+		fputs("Init openGL...\n", stdout);
 		if (!gl_init(vSize, WINDOW_RATIO, MIXLEVEL)) {
 			fputs("Cannot init OpenGL\n", stderr);
 			goto label_exit;
 		}
-
-		#ifdef VERBOSE
-			fputs("OpenGL driver and hardware info:\n", stdout);
-			int i[1];
-			float f[0];
-			
-			fprintf(stdout, "\t- Vendor:                   %s\n", (const char*)gl_getInfo(gl_info_s_vendor, NULL));
-			fprintf(stdout, "\t- Renderer:                 %s\n", (const char*)gl_getInfo(gl_info_s_renderer, NULL));
-			fprintf(stdout, "\t- Version:                  %s\n", (const char*)gl_getInfo(gl_info_s_version, NULL));
-			fprintf(stdout, "\t- Shader language version:  %s\n", (const char*)gl_getInfo(gl_info_s_shadingLanguageVersion, NULL));
-
-			gl_getInfo(gl_info_i1_maxTextureSize, i);
-			fprintf(stdout, "\t- Max texture size:         %d\n", i[0]);
-			gl_getInfo(gl_info_i1_max3dTextureSize, i);
-			fprintf(stdout, "\t- Max 3D texture size:      %d\n", i[0]);
-			gl_getInfo(gl_info_i1_maxArrayTextureLayers, i);
-			fprintf(stdout, "\t- Max texture layers:       %d\n", i[0]);
-			gl_getInfo(gl_info_i1_maxTextureImageUnits, i);
-			fprintf(stdout, "\t- Max texture Units:        %d\n", i[0]);
-			gl_getInfo(gl_info_i1_maxVertexTextureImageUnits, i);
-			fprintf(stdout, "\t- Max Vertex texture units: %d\n", i[0]);
-
-			fflush(stdout);
-		#endif
 	}
 
 	/* Use a texture to store raw frame data & Start reader thread */ {
+		fputs("Init reader thread...\n", stdout);
 		#ifdef USE_PBO_UPLOAD
 			pbo[0] = gl_pixelBuffer_create(vSize.width * vSize.height * 4); //Always use RGBA8 (good performance)
 			pbo[1] = gl_pixelBuffer_create(vSize.width * vSize.height * 4);
@@ -404,6 +383,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	/* Roadmap: mesh for focus region, road info, textures for road data */ {
+		fputs("Load resource - roadmap...\n", stdout);
 		Roadmap roadmap = roadmap_init(roadmapFile, vSize);
 		if (!roadmap) {
 			fputs("Cannot load roadmap\n", stderr);
@@ -416,33 +396,32 @@ int main(int argc, char* argv[]) {
 		/* Focus region */ {
 			gl_index_t attributes[] = {2};
 			size_t vCnt;
-			gl_vertex_t* vertices = roadmap_getRoadPoints(roadmap, &vCnt);
+			float* vertices = roadmap_getRoadPoints(roadmap, &vCnt);
 
 			float inLeft = 0.0f, inRight = 1.0f, inTop = 0.0f, inBottom = 1.0f;
-			for (unsigned int i = 0; i < vCnt; i++) {
-				inLeft = fmaxf(inLeft, vertices[i*2+0]);
-				inRight = fminf(inRight, vertices[i*2+0]);
-				inTop = fmaxf(inTop, vertices[i*2+1]);
-				inBottom = fminf(inBottom, vertices[i*2+1]);
-			}
-			gl_vertex_t vPersp[vCnt+2][2];
-			for (unsigned int i = 0; i < vCnt; i++) {
-				vPersp[i+1][0] = vertices[i*2+0];
-				vPersp[i+1][1] = vertices[i*2+1];
-			}
-			vPersp[0][0] = (inLeft + inRight) * 0.5f;
-			vPersp[0][1] = (inTop + inBottom) * 0.5f;
-			vPersp[vCnt+1][0] = vertices[0];
-			vPersp[vCnt+1][1] = vertices[1];
-
 			float outLeft = 0.0f, outRight = 1.0f, outTop = 0.0f, outBottom = 1.0f;
 			for (unsigned int i = 0; i < vCnt; i++) {
+				inLeft = fmaxf(inLeft, vertices[i*2+0]);
 				outLeft = fminf(outLeft, vertices[i*2+0]);
+				inRight = fminf(inRight, vertices[i*2+0]);
 				outRight = fmaxf(outRight, vertices[i*2+0]);
+				inTop = fmaxf(inTop, vertices[i*2+1]);
 				outTop = fminf(outTop, vertices[i*2+1]);
+				inBottom = fminf(inBottom, vertices[i*2+1]);
 				outBottom = fmaxf(outBottom, vertices[i*2+1]);
 			}
-			gl_vertex_t vOthor[4][2] = { {outLeft, outTop}, {outRight, outTop}, {outRight, outBottom}, {outLeft, outBottom} };
+			vec2 vPersp[vCnt+2];
+			for (unsigned int i = 0; i < vCnt; i++) {
+				vPersp[i+1] = (vec2){.x = vertices[i*2+0], .y = vertices[i*2+1]};
+			}
+			vPersp[0] = (vec2){.x = (inLeft + inRight) * 0.5f, .y = (inTop + inBottom) * 0.5f};
+			vPersp[vCnt+1] = (vec2){.x = vertices[0], .y = vertices[1]};
+			vec2 vOthor[4] = {
+				{.x = outLeft, .y = outTop},
+				{.x = outRight, .y = outTop},
+				{.x = outRight, .y = outBottom},
+				{.x = outLeft, .y = outBottom}
+			};
 
 			mesh_persp = gl_mesh_create((size2d_t){.height=vCnt+2, .width=2}, 0, attributes, (gl_vertex_t*)vPersp, NULL, gl_meshmode_triangleFan);
 			mesh_ortho = gl_mesh_create((size2d_t){.height=4, .width=2}, 0, attributes, (gl_vertex_t*)vOthor, NULL, gl_meshmode_triangleFan);
@@ -479,6 +458,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	/* Speedometer: speedometer sample region, display location and glphy texture */ {
+		fputs("Load resource - speedometer...\n", stdout);
 		Speedometer speedometer = speedometer_init(speedometer_filename);
 		if (!speedometer) {
 			fputs("Cannot load speedometer\n", stderr);
@@ -503,13 +483,15 @@ int main(int argc, char* argv[]) {
 
 		float xStep = 1.0f / speedometer_cnt.width, yStep = 1.0f / speedometer_cnt.height;
 		gl_index_t attribute[] = {4};
-		gl_vertex_t vSample[speedometer_cnt.height][speedometer_cnt.width][4];
+		vec4 vSample[speedometer_cnt.height][speedometer_cnt.width];
 		for (int y = 0; y < speedometer_cnt.height; y++) {
 			for (int x = 0; x < speedometer_cnt.width; x++) {
-				vSample[y][x][0] = xStep * x;
-				vSample[y][x][1] = yStep * y;
-				vSample[y][x][2] = xStep * x + xStep;
-				vSample[y][x][3] = yStep * y + yStep;
+				vSample[y][x] = (vec4){
+					.x = xStep * x,
+					.y = yStep * y,
+					.z = xStep * x + xStep,
+					.w = yStep * y + yStep
+				};
 			}
 		}
 		mesh_speedsample = gl_mesh_create((size2d_t){.height = speedometer_cnt.height * speedometer_cnt.width, .width = 4}, 0, attribute, (gl_vertex_t*)vSample, NULL, gl_meshmode_points);
@@ -519,12 +501,6 @@ int main(int argc, char* argv[]) {
 			goto label_exit;
 		}
 
-/*		vec4 (* vMeter)[speedometer_cnt.width][6] = malloc(speedometer_cnt.height * speedometer_cnt.width * 6 * sizeof(vec4));
-		if (!vMeter) {
-			speedometer_destroy(speedometer);
-			fputs("Fail to allocate memory for speedometer vertices\n", stderr);
-			goto label_exit;
-		}*/
 		vec4 vMeter[speedometer_cnt.height][speedometer_cnt.width][6];
 		for (int y = 0; y <= speedometer_cnt.height; y++) {
 			for (int x = 0; x <= speedometer_cnt.width; x++) {
@@ -559,6 +535,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	/* Create work buffer */ {
+		fputs("Create GPU buffers...\n", stdout);
 		framebuffer_raw[0] = gl_frameBuffer_create(INTERNAL_COLORFORMAT, vSize);
 		framebuffer_raw[1] = gl_frameBuffer_create(INTERNAL_COLORFORMAT, vSize);
 		if (!gl_frameBuffer_check(&framebuffer_raw[0]) || !gl_frameBuffer_check(&framebuffer_raw[1])) {
@@ -593,276 +570,242 @@ int main(int argc, char* argv[]) {
 		}
 	}
 
-	#define shader_setParam(id, type, data) gl_shader_setParam(id, arrayLength(data), type, data)
-	const char* glversionStr = "#version 310 es\n";
-	const char* glPrecisionStr = "precision mediump float;\n";
+	/* Load GPU shaders */ {
+		fputs("Load shaders...\n", stdout);
+		const char* glShaderHeader = "#version 310 es\nprecision mediump float;\n";
 
-	/* Create program: Roadmap check */ {
-		gl_shaderSrc vs[] = {
-			{.isFile = 0, .src = glversionStr},
-			{.isFile = 0, .src = glPrecisionStr},
-			{.isFile = 1, .src = "shader/focusRegion.vs.glsl"}
-		};
-		gl_shaderSrc fs[] = {
-			{.isFile = 0, .src = glversionStr},
-			{.isFile = 0, .src = glPrecisionStr},
-			{.isFile = 1, .src = "shader/roadmapCheck.fs.glsl"}
-		};
-		gl_shaderArg args[] = {
-			{.isUBO = 0, .name = "roadmapT1"},
-			{.isUBO = 0, .name = "roadmapT2"},
-			{.isUBO = 0, .name = "cfgI1"},
-			{.isUBO = 0, .name = "cfgF1"}
-		};
-		shader_roadmapCheck = gl_shader_create((ivec4){arrayLength(vs), arrayLength(fs), 0, arrayLength(args)}, vs, fs, NULL, args);
-		if (!shader_roadmapCheck) {
-			fputs("Cannot load shader: Roadmap check\n", stderr);
-			goto label_exit;
+		/* Create program: Roadmap check */ {
+			gl_shaderSrc vs[] = {
+				{.isFile = 0, .src = glShaderHeader},
+				{.isFile = 1, .src = "shader/focusRegion.vs.glsl"}
+			};
+			gl_shaderSrc fs[] = {
+				{.isFile = 0, .src = glShaderHeader},
+				{.isFile = 1, .src = "shader/roadmapCheck.fs.glsl"}
+			};
+			gl_shaderArg args[] = {
+				{.isUBO = 0, .name = "roadmapT1"},
+				{.isUBO = 0, .name = "roadmapT2"},
+				{.isUBO = 0, .name = "cfgI1"},
+				{.isUBO = 0, .name = "cfgF1"}
+			};
+			shader_roadmapCheck = gl_shader_create((ivec4){arrayLength(vs), arrayLength(fs), 0, arrayLength(args)}, vs, fs, NULL, args);
+			if (!shader_roadmapCheck) {
+				fputs("Cannot load shader: Roadmap check\n", stderr);
+				goto label_exit;
+			}
+			shader_roadmapCheck_paramRoadmapT1 = args[0].id;
+			shader_roadmapCheck_paramRoadmapT2 = args[1].id;
+			shader_roadmapCheck_paramCfgI1 = args[2].id;
+			shader_roadmapCheck_paramCfgF1 = args[3].id;
 		}
-		shader_roadmapCheck_paramRoadmapT1 = args[0].id;
-		shader_roadmapCheck_paramRoadmapT2 = args[1].id;
-		shader_roadmapCheck_paramCfgI1 = args[2].id;
-		shader_roadmapCheck_paramCfgF1 = args[3].id;
 
-		gl_shader_use(&shader_roadmapCheck);
-		ivec4 cfgI1 = {5, 0, 0, 0};
-		gl_shader_setParam(shader_roadmapCheck_paramCfgI1, 4, gl_type_int, &cfgI1);
-		vec4 cfgF1 = {1.0, 1.0, 1.0, 1.0};
-		gl_shader_setParam(shader_roadmapCheck_paramCfgF1, 4, gl_type_float, &cfgF1);
-	}
-
-	/* Create program: Blur */ {
-		gl_shaderSrc vs[] = {
-			{.isFile = 0, .src = glversionStr},
-			{.isFile = 0, .src = glPrecisionStr},
-			{.isFile = 1, .src = "shader/focusRegion.vs.glsl"}
-		};
-		gl_shaderSrc fs[] = {
-			{.isFile = 0, .src = glversionStr},
-			{.isFile = 0, .src = glPrecisionStr},
-			{.isFile = 1, .src = "shader/blur.fs.glsl"}
-		};
-		gl_shaderArg args[] = {
-			{.isUBO = 0, .name = "src"}
-		};
-		shader_blur = gl_shader_create((ivec4){arrayLength(vs), arrayLength(fs), 0, arrayLength(args)}, vs, fs, NULL, args);
-		if (!shader_blur) {
-			fputs("Cannot load shader: Blur\n", stderr);
-			goto label_exit;
+		/* Create program: Blur */ {
+			gl_shaderSrc vs[] = {
+				{.isFile = 0, .src = glShaderHeader},
+				{.isFile = 1, .src = "shader/focusRegion.vs.glsl"}
+			};
+			gl_shaderSrc fs[] = {
+				{.isFile = 0, .src = glShaderHeader},
+				{.isFile = 1, .src = "shader/blur.fs.glsl"}
+			};
+			gl_shaderArg args[] = {
+				{.isUBO = 0, .name = "src"}
+			};
+			shader_blur = gl_shader_create((ivec4){arrayLength(vs), arrayLength(fs), 0, arrayLength(args)}, vs, fs, NULL, args);
+			if (!shader_blur) {
+				fputs("Cannot load shader: Blur\n", stderr);
+				goto label_exit;
+			}
+			shader_blur_paramSrc = args[0].id;
 		}
-		shader_blur_paramSrc = args[0].id;
-	}
 
-	/* Create program: Changing sensor */ {
-		gl_shaderSrc vs[] = {
-			{.isFile = 0, .src = glversionStr},
-			{.isFile = 0, .src = glPrecisionStr},
-			{.isFile = 1, .src = "shader/focusRegion.vs.glsl"}
-		};
-		gl_shaderSrc fs[] = {
-			{.isFile = 0, .src = glversionStr},
-			{.isFile = 0, .src = glPrecisionStr},
-			{.isFile = 1, .src = "shader/changingSensor.fs.glsl"}
-		};
-		gl_shaderArg args[] = {
-			{.isUBO = 0, .name = "current"},
-			{.isUBO = 0, .name = "previous"}
-		};
-		shader_changingSensor = gl_shader_create((ivec4){arrayLength(vs), arrayLength(fs), 0, arrayLength(args)}, vs, fs, NULL, args);
-		if (!shader_changingSensor) {
-			fputs("Cannot load shader: Changing sensor\n", stderr);
-			goto label_exit;
+		/* Create program: Changing sensor */ {
+			gl_shaderSrc vs[] = {
+				{.isFile = 0, .src = glShaderHeader},
+				{.isFile = 1, .src = "shader/focusRegion.vs.glsl"}
+			};
+			gl_shaderSrc fs[] = {
+				{.isFile = 0, .src = glShaderHeader},
+				{.isFile = 1, .src = "shader/changingSensor.fs.glsl"}
+			};
+			gl_shaderArg args[] = {
+				{.isUBO = 0, .name = "current"},
+				{.isUBO = 0, .name = "previous"}
+			};
+			shader_changingSensor = gl_shader_create((ivec4){arrayLength(vs), arrayLength(fs), 0, arrayLength(args)}, vs, fs, NULL, args);
+			if (!shader_changingSensor) {
+				fputs("Cannot load shader: Changing sensor\n", stderr);
+				goto label_exit;
+			}
+			shader_changingSensor_paramCurrent = args[0].id;
+			shader_changingSensor_paramPrevious = args[1].id;
 		}
-		shader_changingSensor_paramCurrent = args[0].id;
-		shader_changingSensor_paramPrevious = args[1].id;
-	}
 
-	/* Create program: Edge filter */ {
-		gl_shaderSrc vs[] = {
-			{.isFile = 0, .src = glversionStr},
-			{.isFile = 0, .src = glPrecisionStr},
-			{.isFile = 1, .src = "shader/focusRegion.vs.glsl"}
-		};
-		gl_shaderSrc fs[] = {
-			{.isFile = 0, .src = glversionStr},
-			{.isFile = 0, .src = glPrecisionStr},
-			{.isFile = 1, .src = "shader/edgeFilter.fs.glsl"}
-		};
-		gl_shaderArg args[] = {
-			{.isUBO = 0, .name = "src"}
-		};
-		shader_edgeFilter = gl_shader_create((ivec4){arrayLength(vs), arrayLength(fs), 0, arrayLength(args)}, vs, fs, NULL, args);
-		if (!shader_edgeFilter) {
-			fputs("Cannot load shader: Edge filter\n", stderr);
-			goto label_exit;
+		/* Create program: Edge filter */ {
+			gl_shaderSrc vs[] = {
+				{.isFile = 0, .src = glShaderHeader},
+				{.isFile = 1, .src = "shader/focusRegion.vs.glsl"}
+			};
+			gl_shaderSrc fs[] = {
+				{.isFile = 0, .src = glShaderHeader},
+				{.isFile = 1, .src = "shader/edgeFilter.fs.glsl"}
+			};
+			gl_shaderArg args[] = {
+				{.isUBO = 0, .name = "src"}
+			};
+			shader_edgeFilter = gl_shader_create((ivec4){arrayLength(vs), arrayLength(fs), 0, arrayLength(args)}, vs, fs, NULL, args);
+			if (!shader_edgeFilter) {
+				fputs("Cannot load shader: Edge filter\n", stderr);
+				goto label_exit;
+			}
+			shader_edgeFilter_paramSrc = args[0].id;
 		}
-		shader_edgeFilter_paramSrc = args[0].id;
-	}
 
-	/* Create program: Edge refine */ {
-		gl_shaderSrc vs[] = {
-			{.isFile = 0, .src = glversionStr},
-			{.isFile = 0, .src = glPrecisionStr},
-			{.isFile = 1, .src = "shader/focusRegion.vs.glsl"}
-		};
-		gl_shaderSrc fs[] = {
-			{.isFile = 0, .src = glversionStr},
-			{.isFile = 0, .src = glPrecisionStr},
-			{.isFile = 1, .src = "shader/edgeRefine.fs.glsl"}
-		};
-		gl_shaderArg args[] = {
-			{.isUBO = 0, .name = "src"}
-		};
-		shader_edgeRefine = gl_shader_create((ivec4){arrayLength(vs), arrayLength(fs), 0, arrayLength(args)}, vs, fs, NULL, args);
-		if (!shader_edgeRefine) {
-			fputs("Cannot load shader: Edge refine\n", stderr);
-			goto label_exit;
+		/* Create program: Edge refine */ {
+			gl_shaderSrc vs[] = {
+				{.isFile = 0, .src = glShaderHeader},
+				{.isFile = 1, .src = "shader/focusRegion.vs.glsl"}
+			};
+			gl_shaderSrc fs[] = {
+				{.isFile = 0, .src = glShaderHeader},
+				{.isFile = 1, .src = "shader/edgeRefine.fs.glsl"}
+			};
+			gl_shaderArg args[] = {
+				{.isUBO = 0, .name = "src"}
+			};
+			shader_edgeRefine = gl_shader_create((ivec4){arrayLength(vs), arrayLength(fs), 0, arrayLength(args)}, vs, fs, NULL, args);
+			if (!shader_edgeRefine) {
+				fputs("Cannot load shader: Edge refine\n", stderr);
+				goto label_exit;
+			}
+			shader_edgeRefine_paramSrc = args[0].id;
 		}
-		shader_edgeRefine_paramSrc = args[0].id;
-	}
 
-	/* Create program: Project P/O*/ {
-		gl_shaderSrc vs[] = {
-			{.isFile = 0, .src = glversionStr},
-			{.isFile = 0, .src = glPrecisionStr},
-			{.isFile = 1, .src = "shader/focusRegion.vs.glsl"}
-		};
-		gl_shaderSrc fs[] = {
-			{.isFile = 0, .src = glversionStr},
-			{.isFile = 0, .src = glPrecisionStr},
-			{.isFile = 1, .src = "shader/projectPO.fs.glsl"}
-		};
-		gl_shaderArg args[] = {
-			{.isUBO = 0, .name = "src"},
-			{.isUBO = 0, .name = "roadmapT2"},
-			{.isUBO = 0, .name = "mode"}
-		};
-		shader_projectPO = gl_shader_create((ivec4){arrayLength(vs), arrayLength(fs), 0, arrayLength(args)}, vs, fs, NULL, args);
-		if (!shader_projectPO) {
-			fputs("Cannot load shader: Project P/O\n", stderr);
-			goto label_exit;
+		/* Create program: Project P/O*/ {
+			gl_shaderSrc vs[] = {
+				{.isFile = 0, .src = glShaderHeader},
+				{.isFile = 1, .src = "shader/focusRegion.vs.glsl"}
+			};
+			gl_shaderSrc fs[] = {
+				{.isFile = 0, .src = glShaderHeader},
+				{.isFile = 1, .src = "shader/projectPO.fs.glsl"}
+			};
+			gl_shaderArg args[] = {
+				{.isUBO = 0, .name = "src"},
+				{.isUBO = 0, .name = "roadmapT2"},
+				{.isUBO = 0, .name = "mode"}
+			};
+			shader_projectPO = gl_shader_create((ivec4){arrayLength(vs), arrayLength(fs), 0, arrayLength(args)}, vs, fs, NULL, args);
+			if (!shader_projectPO) {
+				fputs("Cannot load shader: Project P/O\n", stderr);
+				goto label_exit;
+			}
+			shader_projectPO_paramSrc = args[0].id;
+			shader_projectPO_paramRoadmapT2 = args[1].id;
+			shader_projectPO_paramMode = args[2].id;
 		}
-		shader_projectPO_paramSrc = args[0].id;
-		shader_projectPO_paramRoadmapT2 = args[1].id;
-		shader_projectPO_paramMode = args[2].id;
-	}
 
-	/* Create program: Edge determine */ {
-		gl_shaderSrc vs[] = {
-			{.isFile = 0, .src = glversionStr},
-			{.isFile = 0, .src = glPrecisionStr},
-			{.isFile = 1, .src = "shader/focusRegion.vs.glsl"}
-		};
-		gl_shaderSrc fs[] = {
-			{.isFile = 0, .src = glversionStr},
-			{.isFile = 0, .src = glPrecisionStr},
-			{.isFile = 1, .src = "shader/edgeDetermine.fs.glsl"}
-		};
-		gl_shaderArg args[] = {
-			{.isUBO = 0, .name = "current"},
-			{.isUBO = 0, .name = "previous"},
-			{.isUBO = 0, .name = "threshold"}
-		};
-		shader_edgeDetermine = gl_shader_create((ivec4){arrayLength(vs), arrayLength(fs), 0, arrayLength(args)}, vs, fs, NULL, args);
-		if (!shader_edgeDetermine) {
-			fputs("Cannot load shader: Edge determine\n", stderr);
-			goto label_exit;
-		}
-		shader_edgeDetermine_paramCurrent = args[0].id;
-		shader_edgeDetermine_paramPrevious = args[1].id;
+		/* Create program: Edge determine */ {
+			char cfgThreshold[100];
+			int cfgThresholdCurrent = EDGE_THRESHOLD_CURRENT / roadinfo.orthoPixelWidth;
+			int cfgThresholdPrevious = EDGE_THRESHOLD_PREVIOUS / roadinfo.orthoPixelWidth;
+			sprintf(cfgThreshold, "const ivec4 threshold = ivec4(%d, %d, %d, %d);\n", cfgThresholdCurrent, cfgThresholdPrevious, 0, 0);
 
-		gl_shader_use(&shader_edgeDetermine);
-		ivec4 threshold = {
-			EDGE_THRESHOLD_CURRENT / roadinfo.orthoPixelWidth,
-			EDGE_THRESHOLD_PREVIOUS / roadinfo.orthoPixelWidth,
-			0,
-			0
-		};
-		gl_shader_setParam(args[2].id, 4, gl_type_int, &threshold);
-	}
-	
-	/* Create program: Distance measure */ {
-		gl_shaderSrc vs[] = {
-			{.isFile = 0, .src = glversionStr},
-			{.isFile = 0, .src = glPrecisionStr},
-			{.isFile = 1, .src = "shader/focusRegion.vs.glsl"}
-		};
-		gl_shaderSrc fs[] = {
-			{.isFile = 0, .src = glversionStr},
-			{.isFile = 0, .src = glPrecisionStr},
-			{.isFile = 1, .src = "shader/distanceMeasure.fs.glsl"}
-		};
-		gl_shaderArg args[] = {
-			{.isUBO = 0, .name = "edgemap"},
-			{.isUBO = 0, .name = "roadmapT1"},
-			{.isUBO = 0, .name = "roadmapT2"},
-			{.isUBO = 0, .name = "bias"}
-		};
-		shader_distanceMeasure = gl_shader_create((ivec4){arrayLength(vs), arrayLength(fs), 0, arrayLength(args)}, vs, fs, NULL, args);
-		if (!shader_distanceMeasure) {
-			fputs("Cannot load shader: Distance measure\n", stderr);
-			goto label_exit;
+			gl_shaderSrc vs[] = {
+				{.isFile = 0, .src = glShaderHeader},
+				{.isFile = 1, .src = "shader/focusRegion.vs.glsl"}
+			};
+			gl_shaderSrc fs[] = {
+				{.isFile = 0, .src = glShaderHeader},
+				{.isFile = 0, .src = cfgThreshold},
+				{.isFile = 1, .src = "shader/edgeDetermine.fs.glsl"}
+			};
+			gl_shaderArg args[] = {
+				{.isUBO = 0, .name = "current"},
+				{.isUBO = 0, .name = "previous"}
+			};
+			shader_edgeDetermine = gl_shader_create((ivec4){arrayLength(vs), arrayLength(fs), 0, arrayLength(args)}, vs, fs, NULL, args);
+			if (!shader_edgeDetermine) {
+				fputs("Cannot load shader: Edge determine\n", stderr);
+				goto label_exit;
+			}
+			shader_edgeDetermine_paramCurrent = args[0].id;
+			shader_edgeDetermine_paramPrevious = args[1].id;
 		}
-		shader_distanceMeasure_paramEdgemap = args[0].id;
-		shader_distanceMeasure_paramRoadmapT1 = args[1].id;
-		shader_distanceMeasure_paramRoadmapT2 = args[2].id;
 		
-		gl_shader_use(&shader_distanceMeasure);
-		vec4 bias = {
-			0.0,		//x = bias - offset
-			fps * 3.6,	//y = bias - first orade: m/frame --> m/s --> km/h
-			0.0,		//Currently not used
-			0.0		//Currently not used
-		};
+		/* Create program: Distance measure */ {
+			char cfgBias[100];
+			float cfgBiasOffset = 0.0f;
+			float cfgBiasFirstOrder = fps * 3.6f;
+			sprintf(cfgBias, "const vec4 bias = vec4(%.3f, %.3f, %.3f, %.3f);\n", cfgBiasOffset, cfgBiasFirstOrder, 0.0f, 0.0f);
 
-		gl_shader_setParam(args[3].id, 4, gl_type_float, &bias);
-	}
-
-	/* Create program: Speed sample */ { //This program can be combined with speedometer if geometry shader is supported
-		gl_shaderSrc vs[] = {
-			{.isFile = 0, .src = glversionStr},
-			{.isFile = 0, .src = glPrecisionStr},
-			{.isFile = 0, .src = "const int speedPoolSize = 8;\nconst float speedSensitive = 10.0;\nconst int speedDisplayCutoff = 4;"},
-			{.isFile = 1, .src = "shader/speedSample.vs.glsl"}
-		};
-		gl_shaderSrc fs[] = {
-			{.isFile = 0, .src = glversionStr},
-			{.isFile = 0, .src = glPrecisionStr},
-			{.isFile = 1, .src = "shader/speedSample.fs.glsl"}
-		};
-		gl_shaderArg args[] = {
-			{.isUBO = 0, .name = "speedmap"}
-		};
-		shader_speedSample = gl_shader_create((ivec4){arrayLength(vs), arrayLength(fs), 0, arrayLength(args)}, vs, fs, NULL, args);
-		if (!shader_speedSample) {
-			fputs("Cannot load shader: Speed sample\n", stderr);
-			goto label_exit;
+			gl_shaderSrc vs[] = {
+				{.isFile = 0, .src = glShaderHeader},
+				{.isFile = 1, .src = "shader/focusRegion.vs.glsl"}
+			};
+			gl_shaderSrc fs[] = {
+				{.isFile = 0, .src = glShaderHeader},
+				{.isFile = 0, .src = cfgBias},
+				{.isFile = 1, .src = "shader/distanceMeasure.fs.glsl"}
+			};
+			gl_shaderArg args[] = {
+				{.isUBO = 0, .name = "edgemap"},
+				{.isUBO = 0, .name = "roadmapT1"},
+				{.isUBO = 0, .name = "roadmapT2"}
+			};
+			shader_distanceMeasure = gl_shader_create((ivec4){arrayLength(vs), arrayLength(fs), 0, arrayLength(args)}, vs, fs, NULL, args);
+			if (!shader_distanceMeasure) {
+				fputs("Cannot load shader: Distance measure\n", stderr);
+				goto label_exit;
+			}
+			shader_distanceMeasure_paramEdgemap = args[0].id;
+			shader_distanceMeasure_paramRoadmapT1 = args[1].id;
+			shader_distanceMeasure_paramRoadmapT2 = args[2].id;
 		}
-		shader_speedSample_paramSpeedmap = args[0].id;
-	}
 
-	/* Create program: Speedometer */ {
-		gl_shaderSrc vs[] = {
-			{.isFile = 0, .src = glversionStr},
-			{.isFile = 0, .src = glPrecisionStr},
-			{.isFile = 1, .src = "shader/speedometer.vs.glsl"}
-		};
-		gl_shaderSrc fs[] = {
-			{.isFile = 0, .src = glversionStr},
-			{.isFile = 0, .src = glPrecisionStr},
-			{.isFile = 1, .src = "shader/speedometer.fs.glsl"}
-		};
-		gl_shaderArg args[] = {
-			{.isUBO = 0, .name = "speedmap"},
-			{.isUBO = 0, .name = "glyphmap"}
-		};
-		shader_speedometer = gl_shader_create((ivec4){arrayLength(vs), arrayLength(fs), 0, arrayLength(args)}, vs, fs, NULL, args);
-		if (!shader_speedometer) {
-			fputs("Cannot load shader: Speedometer\n", stderr);
-			goto label_exit;
+		/* Create program: Speed sample */ { //This program can be combined with speedometer if geometry shader is supported
+			gl_shaderSrc vs[] = {
+				{.isFile = 0, .src = glShaderHeader},
+				{.isFile = 0, .src = "const int speedPoolSize = 8;\nconst float speedSensitive = 10.0;\nconst int speedDisplayCutoff = 4;\n"},
+				{.isFile = 1, .src = "shader/speedSample.vs.glsl"}
+			};
+			gl_shaderSrc fs[] = {
+				{.isFile = 0, .src = glShaderHeader},
+				{.isFile = 1, .src = "shader/speedSample.fs.glsl"}
+			};
+			gl_shaderArg args[] = {
+				{.isUBO = 0, .name = "speedmap"}
+			};
+			shader_speedSample = gl_shader_create((ivec4){arrayLength(vs), arrayLength(fs), 0, arrayLength(args)}, vs, fs, NULL, args);
+			if (!shader_speedSample) {
+				fputs("Cannot load shader: Speed sample\n", stderr);
+				goto label_exit;
+			}
+			shader_speedSample_paramSpeedmap = args[0].id;
 		}
-		shader_speedometer_paramSpeedmap = args[0].id;
-		shader_speedometer_paramGlyphmap = args[1].id;
+
+		/* Create program: Speedometer */ {
+			gl_shaderSrc vs[] = {
+				{.isFile = 0, .src = glShaderHeader},
+				{.isFile = 1, .src = "shader/speedometer.vs.glsl"}
+			};
+			gl_shaderSrc fs[] = {
+				{.isFile = 0, .src = glShaderHeader},
+				{.isFile = 1, .src = "shader/speedometer.fs.glsl"}
+			};
+			gl_shaderArg args[] = {
+				{.isUBO = 0, .name = "speedmap"},
+				{.isUBO = 0, .name = "glyphmap"}
+			};
+			shader_speedometer = gl_shader_create((ivec4){arrayLength(vs), arrayLength(fs), 0, arrayLength(args)}, vs, fs, NULL, args);
+			if (!shader_speedometer) {
+				fputs("Cannot load shader: Speedometer\n", stderr);
+				goto label_exit;
+			}
+			shader_speedometer_paramSpeedmap = args[0].id;
+			shader_speedometer_paramGlyphmap = args[1].id;
+		}
 	}
 
 	void ISR_SIGINT() {
@@ -870,182 +813,200 @@ int main(int argc, char* argv[]) {
 	}
 	signal(SIGINT, ISR_SIGINT);
 
-	/* Main process loop here */
-	uint64_t startTime, endTime;
-	while(!gl_close(-1)) {
-		fputc('\r', stdout); //Clear output
+	/* Main process loop here */ {
+		uint64_t timestamp = 0;
+		fputs("Program ready!\n", stdout);
+		while(!gl_close(-1)) {
+			unsigned int rri = (unsigned int)(frameCnt+0) & (unsigned int)1; //round-robin index - current
+			unsigned int rrj = (unsigned int)(frameCnt+1) & (unsigned int)1; //round-robin index - previous
+			fputc('\r', stdout); //Clear output
 
-		startTime = nanotime(); //Benchmark
+			size2d_t cursorPos;
+			gl_drawStart(&cursorPos);
+			
+			#define shader_setParam(id, type, data) gl_shader_setParam(id, arrayLength(data), type, data)
+			
+			/* Give next frame PBO to reader while using current PBO for rendering */ {
+				#ifdef USE_PBO_UPLOAD
+					gl_pixelBuffer_updateToTexture(gl_texformat_RGBA8, &pbo[ (frameCnt+0)&1 ], &texture_orginalBuffer, vSize); //Current frame PBO (index = +0) <-- Data already in GPU, this operation is fast
+					rawDataPtr = gl_pixelBuffer_updateStart(&pbo[ (frameCnt+1)&1 ], vSize.width * vSize.height * 4); //Next frame PBO (index = +1)
+				#else
+					gl_texture_update(gl_texformat_RGBA8, &texture_orginalBuffer, vSize, rawData[ (frameCnt+0)&1 ]);
+					rawDataPtr = rawData[ (frameCnt+1)&1 ];
+				#endif
+				sem_post(&sem_readerJobStart); //New GPU address ready, start to reader thread
+			}
 
-		unsigned int rri = (unsigned int)(frameCnt+0) & (unsigned int)1; //round-robin index - current
-		unsigned int rrj = (unsigned int)(frameCnt+1) & (unsigned int)1; //round-robin index - previous
+			uint64_t timestampRenderStart = nanotime();
+
+			/* Debug use ONLY: Check roadmap */ /*{
+				// Config options (cfgI1.x)
+				// PRINTT1XY 1 (Perspective road geo data)
+				// PRINTT1ZW 2 (Orthographic road geo data)
+				// PRINTT2XY 3
+				// PRINTT2ZW 4
+				// PERSPGRID 5
+				// OTHORGRID 6
+				ivec4 cfgI1 = {5, 0, 0, 0};
+				vec4 cfgF1 = {1.0, 10.0, 1.0, 1.0};
+				gl_shader_use(&shader_roadmapCheck);
+				gl_texture_bind(&texture_roadmap1, shader_roadmapCheck_paramRoadmapT1, 0);
+				gl_texture_bind(&texture_roadmap2, shader_roadmapCheck_paramRoadmapT2, 1);
+				gl_shader_setParam(shader_roadmapCheck_paramCfgI1, 4, gl_type_int, &cfgI1);
+				gl_shader_setParam(shader_roadmapCheck_paramCfgF1, 4, gl_type_float, &cfgF1);
+				gl_frameBuffer_bind(&framebuffer_stageA, vSize, 1);
+				gl_mesh_draw(NULL);
+			}*/
+
+			/* Debug use ONLY: Check orthographic transform */ /*{
+				ivec4 mode = {1, 0, 0, 0};
+				gl_shader_use(&shader_projectPO);
+				gl_texture_bind(&texture_orginalBuffer, shader_projectPO_paramSrc, 0);
+				gl_texture_bind(&texture_roadmap2, shader_projectPO_paramRoadmapT2, 1);
+				gl_shader_setParam(shader_projectPO_paramMode, 4, gl_type_int, &mode);
+				gl_frameBuffer_bind(&framebuffer_stageB, vSize, 1);
+				gl_mesh_draw(NULL);
+			}*/
+
+			/* Blur the raw to remove noise */ {
+				gl_shader_use(&shader_blur);
+				gl_texture_bind(&texture_orginalBuffer, shader_blur_paramSrc, 0);
+				gl_frameBuffer_bind(&framebuffer_raw[rri], vSize, 0);
+				gl_mesh_draw(&mesh_persp);
+			}
+
+			/* Find changing pixel between two frame (pixel change means movement) */ {
+				gl_shader_use(&shader_changingSensor);
+				gl_texture_bind(&framebuffer_raw[rri].texture, shader_changingSensor_paramCurrent, 0);
+				gl_texture_bind(&framebuffer_raw[rrj].texture, shader_changingSensor_paramPrevious, 1);
+				gl_frameBuffer_bind(&framebuffer_stageA, vSize, 1);
+				gl_mesh_draw(&mesh_persp);
+			}
+
+			/* Apply edge filter */ {
+				gl_shader_use(&shader_edgeFilter);
+				gl_texture_bind(&framebuffer_stageA.texture, shader_edgeFilter_paramSrc, 0);
+				gl_frameBuffer_bind(&framebuffer_stageB, vSize, 1);
+				gl_mesh_draw(&mesh_persp);
+			}
+
+			/* Refine edge, thinning the thick edge, only keep the lowest one */ {
+				gl_shader_use(&shader_edgeRefine);
+				gl_texture_bind(&framebuffer_stageB.texture, shader_edgeRefine_paramSrc, 0);
+				gl_frameBuffer_bind(&framebuffer_stageA, vSize, 1);
+				gl_mesh_draw(&mesh_persp);
+			}
+
+			/* Project from perspective to orthographic */ {
+				ivec4 mode = {1, 0, 0, 0};
+				gl_shader_use(&shader_projectPO);
+				gl_texture_bind(&framebuffer_stageA.texture, shader_projectPO_paramSrc, 0);
+				gl_texture_bind(&texture_roadmap2, shader_projectPO_paramRoadmapT2, 1);
+				gl_shader_setParam(shader_projectPO_paramMode, 4, gl_type_int, &mode);
+				gl_frameBuffer_bind(&framebuffer_edge[rri], vSize, 0);
+				gl_mesh_draw(&mesh_ortho);
+			}
+
+			/* Determine edge */ {
+				gl_shader_use(&shader_edgeDetermine);
+				gl_texture_bind(&framebuffer_edge[rri].texture, shader_edgeDetermine_paramCurrent, 0);
+				gl_texture_bind(&framebuffer_edge[rrj].texture, shader_edgeDetermine_paramPrevious, 1);
+				gl_frameBuffer_bind(&framebuffer_stageA, vSize, 1);
+				gl_mesh_draw(&mesh_ortho);
+			}
+
+			/* Measure the distance of edge moving between current frame and previous frame */ {
+				gl_shader_use(&shader_distanceMeasure);
+				gl_texture_bind(&framebuffer_stageA.texture, shader_distanceMeasure_paramEdgemap, 0);
+				gl_texture_bind(&texture_roadmap1, shader_distanceMeasure_paramRoadmapT1, 1);
+				gl_texture_bind(&texture_roadmap2, shader_distanceMeasure_paramRoadmapT2, 2);
+				gl_frameBuffer_bind(&framebuffer_stageB, vSize, 1);
+				gl_mesh_draw(&mesh_persp);
+			}
+
+			/* Project from orthographic back to perspective */ {
+				ivec4 mode = {2, 0, 0, 0};
+				gl_shader_use(&shader_projectPO);
+				gl_texture_bind(&framebuffer_stageB.texture, shader_projectPO_paramSrc, 0);
+				gl_texture_bind(&texture_roadmap2, shader_projectPO_paramRoadmapT2, 1);
+				gl_shader_setParam(shader_projectPO_paramMode, 4, gl_type_int, &mode);
+				gl_frameBuffer_bind(&framebuffer_speed, vSize, 0);
+				gl_mesh_draw(&mesh_persp);
+			}
+
+			/* Sample the speed, denoise and avg */ {
+				gl_shader_use(&shader_speedSample);
+				gl_texture_bind(&framebuffer_speed.texture, shader_speedSample_paramSpeedmap, 0);
+				gl_frameBuffer_bind(&framebuffer_stageA, vSize, 1);
+				gl_mesh_draw(&mesh_speedsample);
+			}
+
+			/* Display the speed in human-readable text */ {
+				gl_shader_use(&shader_speedometer);
+				gl_texture_bind(&framebuffer_stageA.texture, shader_speedometer_paramSpeedmap, 0);
+				gl_textureArray_bind(&texture_speedometer, shader_speedometer_paramGlyphmap, 1);
+				gl_frameBuffer_bind(&framebuffer_display, vSize, 0);
+				gl_mesh_draw(&mesh_speedometer);
+			}
+
+	#if 1 == 2
+
+	#endif
+
+//			gl_fb* result = &framebuffer_stageA;
+//			gl_fb* result = &framebuffer_stageB;
+//			gl_fb* result = &framebuffer_raw[rri];
+//			gl_fb* result = &framebuffer_edge[rri];
+//			gl_fb* result = &framebuffer_speed;
+			gl_fb* result = &framebuffer_display;
+			gl_drawWindow(&texture_orginalBuffer, &result->texture);
 		
-		size2d_t cursorPos;
-		gl_drawStart(&cursorPos);
-		
-		/* Give next frame PBO to reader while using current PBO for rendering */ {
-			#ifdef USE_PBO_UPLOAD
-				gl_pixelBuffer_updateToTexture(gl_texformat_RGBA8, &pbo[ (frameCnt+0)&1 ], &texture_orginalBuffer, vSize); //Current frame PBO (index = +0) <-- Data already in GPU, this operation is fast
-				rawDataPtr = gl_pixelBuffer_updateStart(&pbo[ (frameCnt+1)&1 ], vSize.width * vSize.height * 4); //Next frame PBO (index = +1)
-			#else
-				gl_texture_update(gl_texformat_RGBA8, &texture_orginalBuffer, vSize, rawData[ (frameCnt+0)&1 ]);
-				rawDataPtr = rawData[ (frameCnt+1)&1 ];
+			gl_synch barrier = gl_synchSet();
+			if (gl_synchWait(barrier, GL_SYNCH_TIMEOUT) == gl_synch_timeout) { //timeout = 5e9 ns = 5s
+				fputs("Render loop fatal stall\n", stderr);
+				goto label_exit;
+			}
+			#ifdef DEBUG_THREADSPEED
+				debug_threadSpeed = 'M'; //Not critical, no need to use mutex
 			#endif
-			sem_post(&sem_readerJobStart); //New GPU address ready, start to reader thread
+			gl_synchDelete(barrier);
+
+			#ifdef VERBOSE
+				char title[200];
+				if (inBox(cursorPos, (size2d_t){0,0}, vSize, -1)) {
+					vec4 color = gl_frameBuffer_getPixel(result, cursorPos);
+					sprintf(title, "Viewer - frame %u, Cursor=(%zu,%zu), result=(%.3f,%.3f,%.3f,%.3f)", frameCnt, cursorPos.x, cursorPos.y, color.r, color.g, color.b, color.a);
+				} else
+					sprintf(title, "Viewer - frame %u, Cursor=(out) result=(none)", frameCnt);
+				gl_drawEnd(title);
+			#else
+				char title[100];
+				sprintf(title, "Viewer - frame %u", frameCnt);
+				gl_drawEnd(title);
+			#endif
+
+			uint64_t timestampRenderEnd = nanotime();
+			
+			sem_wait(&sem_readerJobDone); //Wait reader thread finish uploading frame data
+			#ifdef USE_PBO_UPLOAD
+				gl_pixelBuffer_updateFinish();
+			#endif
+
+			#ifdef DEBUG_THREADSPEED
+				fputc(debug_threadSpeed, stdout);
+				fputs(" - ", stdout);
+			#endif
+			fprintf(stdout, "Frame %u takes %.3lfms/%.3lfms (in-frame/inter-frame)", frameCnt, (timestampRenderEnd - timestampRenderStart) / 1e6, (timestampRenderEnd - timestamp) / 1e6);
+			timestamp = timestampRenderEnd;
+			fflush(stdout);
+
+			#if FRAME_DELAY
+				if (frameCnt > FRAME_DEBUGSKIPSECOND * fps) usleep(FRAME_DELAY);
+			#endif
+
+			frameCnt++;
 		}
-
-		/* Debug use ONLY: Check roadmap */ /*{
-			gl_shader_use(&shader_roadmapCheck);
-			gl_texture_bind(&texture_roadmap1, shader_roadmapCheck_paramRoadmapT1, 0);
-			gl_texture_bind(&texture_roadmap2, shader_roadmapCheck_paramRoadmapT2, 1);
-			gl_frameBuffer_bind(&framebuffer_stageA, vSize, 1);
-			gl_mesh_draw(NULL);
-		}*/
-
-		/* Debug use ONLY: Check orthographic transform */ /*{
-			ivec4 mode = {1, 0, 0, 0};
-			gl_shader_use(&shader_projectPO);
-			gl_texture_bind(&texture_orginalBuffer, shader_projectPO_paramSrc, 0);
-			gl_texture_bind(&texture_roadmap2, shader_projectPO_paramRoadmapT2, 1);
-			gl_shader_setParam(shader_projectPO_paramMode, 4, gl_type_int, &mode);
-			gl_frameBuffer_bind(&framebuffer_stageA, vSize, 1);
-			gl_mesh_draw(NULL);
-		}*/
-
-		/* Blur the raw to remove noise */ {
-			gl_shader_use(&shader_blur);
-			gl_texture_bind(&texture_orginalBuffer, shader_blur_paramSrc, 0);
-			gl_frameBuffer_bind(&framebuffer_raw[rri], vSize, 0);
-			gl_mesh_draw(&mesh_persp);
-		}
-
-		/* Find changing pixel between two frame (pixel change means movement) */ {
-			gl_shader_use(&shader_changingSensor);
-			gl_texture_bind(&framebuffer_raw[rri].texture, shader_changingSensor_paramCurrent, 0);
-			gl_texture_bind(&framebuffer_raw[rrj].texture, shader_changingSensor_paramPrevious, 1);
-			gl_frameBuffer_bind(&framebuffer_stageA, vSize, 1);
-			gl_mesh_draw(&mesh_persp);
-		}
-
-		/* Apply edge filter */ {
-			gl_shader_use(&shader_edgeFilter);
-			gl_texture_bind(&framebuffer_stageA.texture, shader_edgeFilter_paramSrc, 0);
-			gl_frameBuffer_bind(&framebuffer_stageB, vSize, 1);
-			gl_mesh_draw(&mesh_persp);
-		}
-
-		/* Refine edge, thinning the thick edge, only keep the lowest one */ {
-			gl_shader_use(&shader_edgeRefine);
-			gl_texture_bind(&framebuffer_stageB.texture, shader_edgeRefine_paramSrc, 0);
-			gl_frameBuffer_bind(&framebuffer_stageA, vSize, 1);
-			gl_mesh_draw(&mesh_persp);
-		}
-
-		/* Project from perspective to orthographic */ {
-			ivec4 mode = {1, 0, 0, 0};
-			gl_shader_use(&shader_projectPO);
-			gl_texture_bind(&framebuffer_stageA.texture, shader_projectPO_paramSrc, 0);
-			gl_texture_bind(&texture_roadmap2, shader_projectPO_paramRoadmapT2, 1);
-			gl_shader_setParam(shader_projectPO_paramMode, 4, gl_type_int, &mode);
-			gl_frameBuffer_bind(&framebuffer_edge[rri], vSize, 0);
-			gl_mesh_draw(&mesh_ortho);
-		}
-
-		/* Determine edge */ {
-			gl_shader_use(&shader_edgeDetermine);
-			gl_texture_bind(&framebuffer_edge[rri].texture, shader_edgeDetermine_paramCurrent, 0);
-			gl_texture_bind(&framebuffer_edge[rrj].texture, shader_edgeDetermine_paramPrevious, 1);
-			gl_frameBuffer_bind(&framebuffer_stageA, vSize, 1);
-			gl_mesh_draw(&mesh_ortho);
-		}
-
-		/* Measure the distance of edge moving between current frame and previous frame */ {
-			gl_shader_use(&shader_distanceMeasure);
-			gl_texture_bind(&framebuffer_stageA.texture, shader_distanceMeasure_paramEdgemap, 0);
-			gl_texture_bind(&texture_roadmap1, shader_distanceMeasure_paramRoadmapT1, 1);
-			gl_texture_bind(&texture_roadmap2, shader_distanceMeasure_paramRoadmapT2, 2);
-			gl_frameBuffer_bind(&framebuffer_stageB, vSize, 1);
-			gl_mesh_draw(&mesh_persp);
-		}
-
-		/* Project from orthographic back to perspective */ {
-			ivec4 mode = {2, 0, 0, 0};
-			gl_shader_use(&shader_projectPO);
-			gl_texture_bind(&framebuffer_stageB.texture, shader_projectPO_paramSrc, 0);
-			gl_texture_bind(&texture_roadmap2, shader_projectPO_paramRoadmapT2, 1);
-			gl_shader_setParam(shader_projectPO_paramMode, 4, gl_type_int, &mode);
-			gl_frameBuffer_bind(&framebuffer_speed, vSize, 0);
-			gl_mesh_draw(&mesh_persp);
-		}
-
-		/* Sample the speed, denoise and avg */ {
-			gl_shader_use(&shader_speedSample);
-			gl_texture_bind(&framebuffer_speed.texture, shader_speedSample_paramSpeedmap, 0);
-			gl_frameBuffer_bind(&framebuffer_stageA, vSize, 1);
-			gl_mesh_draw(&mesh_speedsample);
-		}
-
-		/* Display the speed in human-readable text */ {
-			gl_shader_use(&shader_speedometer);
-			gl_texture_bind(&framebuffer_stageA.texture, shader_speedometer_paramSpeedmap, 0);
-			gl_textureArray_bind(&texture_speedometer, shader_speedometer_paramGlyphmap, 1);
-			gl_frameBuffer_bind(&framebuffer_display, vSize, 0);
-			gl_mesh_draw(&mesh_speedometer);
-		}
-
-//		gl_fb* result = &framebuffer_stageA;
-//		gl_fb* result = &framebuffer_stageB;
-//		gl_fb* result = &framebuffer_raw[rri];
-//		gl_fb* result = &framebuffer_edge[rri];
-//		gl_fb* result = &framebuffer_speed;
-		gl_fb* result = &framebuffer_display;
-		gl_drawWindow(&texture_orginalBuffer, &result->texture);
-	
-		gl_synch barrier = gl_synchSet();
-		if (gl_synchWait(barrier, GL_SYNCH_TIMEOUT) == gl_synch_timeout) { //timeout = 5e9 ns = 5s
-			fputs("Render loop fatal stall\n", stderr);
-			goto label_exit;
-		}
-		#ifdef DEBUG_THREADSPEED
-			debug_threadSpeed = 'M'; //Not critical, no need to use mutex
-		#endif
-		gl_synchDelete(barrier);
-
-		#ifdef VERBOSE
-			char title[200];
-			if (inBox(cursorPos, (size2d_t){0,0}, vSize, -1)) {
-				vec4 color = gl_frameBuffer_getPixel(result, cursorPos);
-				sprintf(title, "Viewer - frame %u, Cursor=(%zu,%zu), result=(%.3f,%.3f,%.3f,%.3f)", frameCnt, cursorPos.x, cursorPos.y, color.r, color.g, color.b, color.a);
-			} else
-				sprintf(title, "Viewer - frame %u, Cursor=(out) result=(none)", frameCnt);
-			gl_drawEnd(title);
-		#else
-			char title[100];
-			sprintf(title, "Viewer - frame %u", frameCnt);
-			gl_drawEnd(title);
-		#endif
-		
-		sem_wait(&sem_readerJobDone); //Wait reader thread finish uploading frame data
-		#ifdef USE_PBO_UPLOAD
-			gl_pixelBuffer_updateFinish();
-		#endif
-
-		#ifdef DEBUG_THREADSPEED
-			fputc(debug_threadSpeed, stdout);
-			fputs(" - ", stdout);
-		#endif
-		endTime = nanotime();
-		fprintf(stdout, "Loop %u takes %lfms/frame.", frameCnt, (endTime - startTime) / 1e6);
-		fflush(stdout);
-	
-		frameCnt++;
-
-		#if (FRAME_DELAY != 0)
-			if (frameCnt > FRAME_DEBUGSKIPSECOND * fps) usleep(FRAME_DELAY);
-		#endif
 	}
-
-
 
 	/* Free all resources, house keeping */
 	status = EXIT_SUCCESS;
