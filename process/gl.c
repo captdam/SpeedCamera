@@ -155,17 +155,14 @@ void GLAPIENTRY gl_glErrorCallback(GLenum src, GLenum type, GLuint id, GLenum se
 }
 
 int gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
-	#ifdef VERBOSE
-		fputs("Init OpenGL\n", stdout);
-		fflush(stdout);
-	#endif
 
-	/* Program check */
-	if (!gl_texformat_lookup_check()) {
-		#ifdef VERBOSE
-			fputs("\tProgram error: gl_texformat_lookup - Program-time error\n", stderr);
-		#endif
-		return 0;
+	/* Program check */ {
+		if (!gl_texformat_lookup_check()) {
+			#ifdef VERBOSE
+				fputs("\tProgram error: gl_texformat_lookup - Program-time error\n", stderr);
+			#endif
+			return 0;
+		}
 	}
 
 	/* Object init */
@@ -207,7 +204,7 @@ int gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 	glfwMakeContextCurrent(this.window);
 	glfwSwapInterval(0);
 
-	/* init GLEW */
+	/* Init GLEW */
 	GLenum glewInitError = glewInit();
 	if (glewInitError != GLEW_OK) {
 		#ifdef VERBOSE
@@ -216,6 +213,27 @@ int gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 		gl_destroy(this);
 		return 0;
 	}
+
+	/* Driver and hardware info */
+	#ifdef VERBOSE
+		fputs("OpenGL driver and hardware info:\n", stdout);
+		int textureSize, textureSizeArray, textureSize3d, textureImageUnit, textureImageUnitVertex;
+		glGetIntegerv(GL_MAX_TEXTURE_SIZE, &textureSize);
+		glGetIntegerv(GL_MAX_ARRAY_TEXTURE_LAYERS, &textureSizeArray);
+		glGetIntegerv(GL_MAX_3D_TEXTURE_SIZE, &textureSize3d);
+		glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &textureImageUnit);
+		glGetIntegerv(GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS, &textureImageUnitVertex);
+		fprintf(stdout, "\t- Vendor:                   %s\n", glGetString(GL_VENDOR));
+		fprintf(stdout, "\t- Renderer:                 %s\n", glGetString(GL_RENDERER));
+		fprintf(stdout, "\t- Version:                  %s\n", glGetString(GL_VERSION));
+		fprintf(stdout, "\t- Shader language version:  %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
+		fprintf(stdout, "\t- Max texture size:         %d\n", textureSize);
+		fprintf(stdout, "\t- Max texture layers:       %d\n", textureSizeArray);
+		fprintf(stdout, "\t- Max 3D texture size:      %d\n", textureSize3d);
+		fprintf(stdout, "\t- Max texture Units:        %d\n", textureImageUnit);
+		fprintf(stdout, "\t- Max Vertex texture units: %d\n", textureImageUnitVertex);
+		fflush(stdout);
+	#endif
 
 	/* Setup functions and their alternative placeholder */
 	if (glFenceSync) {
@@ -238,7 +256,7 @@ int gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 //	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 //	glLineWidth(10);
 	glEnable(GL_PROGRAM_POINT_SIZE);
-	glPointSize(10.0);
+	glPointSize(26.0);
 
 	/* Draw window - mesh */ {
 		gl_vertex_t vertices[] = {
@@ -253,80 +271,47 @@ int gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 	}
 
 	/* Draw window - shader */ {
+		const char* header = "#version 310 es\nprecision mediump float;\n";
+		char configMixLevel[100];
+		sprintf(configMixLevel, "const float mixLevel = %.2f;\n", mix);
+
 		gl_shaderSrc vs[] = {
-			{.isFile = 0, .src = "#version 310 es\n"},
-			{.isFile = 0, .src = "precision mediump float;\n"},
+			{.isFile = 0, .src = header},
 			{.isFile = 0, .src = \
 				"layout (location = 0) in vec2 position;\n"
 				"out vec2 textpos;\n"
 				"void main() {\n"
 				"	gl_Position = vec4(position.x * 2.0 - 1.0, position.y * 2.0 - 1.0, 0.0, 1.0);\n"
-				"	textpos = vec2(position.x, 1.0 - position.y); //Fix y-axis difference screen coord\n"
+				"	textpos = vec2(position.x, 1.0 - position.y);\n" //Fix y-axis upside-down issue
 				"}\n"
 			}
 		};
 		gl_shaderSrc fs[] = {
-			{.isFile = 0, .src = "#version 310 es\n"},
-			{.isFile = 0, .src = "precision mediump float;\n"},
+			{.isFile = 0, .src = header},
+			{.isFile = 0, .src = configMixLevel},
 			{.isFile = 0, .src = \
 				"in vec2 textpos;\n"
 				"uniform sampler2D orginalTexture;\n"
 				"uniform sampler2D processedTexture;\n"
-				"uniform float mixLevel;\n"
 				"out vec4 color;\n"
 				"void main() {\n"
-				"	vec3 od = texture(orginalTexture, textpos).rgb;\n"
-				"	vec3 pd = texture(processedTexture, textpos).rgb;\n"
-//				"	vec3 pd = texture(processedTexture, textpos).rrr;\n"
-				"	vec3 data = mix(od, pd, mixLevel);\n"
-				"	color = vec4(data, 1.0);\n"
+				"	vec4 raw = texture(orginalTexture, textpos);\n"
+				"	vec4 processed = texture(processedTexture, textpos);\n"
+				"	color = raw * mixLevel + processed;\n"
 				"}\n"
 			}
 		};
 		gl_shaderArg args[] = {
 			{.isUBO = 0, .name = "orginalTexture"},
-			{.isUBO = 0, .name = "processedTexture"},
-			{.isUBO = 0, .name = "mixLevel"}
+			{.isUBO = 0, .name = "processedTexture"}
 		};
 		this.defaultShader = gl_shader_create((ivec4){arrayLength(vs), arrayLength(fs), 0, arrayLength(args)}, vs, fs, NULL, args);
 		this.defaultShader_paramOrginal = args[0].id;
 		this.defaultShader_paramProcessed = args[1].id;
-
-		gl_shader_use(&this.defaultShader);
-		gl_shader_setParam(args[2].id, 1, gl_type_float, &mix);
 	}
 
 	/* Init OK */
 	return 1;
-}
-
-void* gl_getInfo(gl_info name, void* data) {
-	void* r = NULL;
-	if (name == gl_info_i1_maxTextureSize) {
-		glGetIntegerv(GL_MAX_TEXTURE_SIZE, data);
-		r = data;
-	} else if (name == gl_info_i1_maxArrayTextureLayers) {
-		glGetIntegerv(GL_MAX_ARRAY_TEXTURE_LAYERS, data);
-		r = data;
-	} else if (name == gl_info_i1_max3dTextureSize) {
-		glGetIntegerv(GL_MAX_3D_TEXTURE_SIZE, data);
-		r = data;
-	} else if (name == gl_info_i1_maxTextureImageUnits) {
-		glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, data);
-		r = data;
-	} else if (name == gl_info_i1_maxVertexTextureImageUnits) {
-		glGetIntegerv(GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS, data);
-		r = data;
-	} else if (name == gl_info_s_vendor) {
-		r = (char*)glGetString(GL_VENDOR);
-	} else if (name == gl_info_s_renderer) {
-		r = (char*)glGetString(GL_RENDERER);
-	} else if (name == gl_info_s_version) {
-		r = (char*)glGetString(GL_VERSION);
-	} else if (name == gl_info_s_shadingLanguageVersion) {
-		r = (char*)glGetString(GL_SHADING_LANGUAGE_VERSION);
-	}
-	return r;
 }
 
 void gl_drawStart(size2d_t* cursorPos) {

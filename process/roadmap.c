@@ -17,11 +17,6 @@ struct Roadmap_ClassDataStructure {
 };
 
 Roadmap roadmap_init(const char* roadmapFile, size2d_t size) {
-	#ifdef VERBOSE
-		fputs("Init roadmap class object\n", stdout);
-		fflush(stdout);
-	#endif
-
 	Roadmap this = malloc(sizeof(struct Roadmap_ClassDataStructure));
 	if (!this) {
 		#ifdef VERBOSE

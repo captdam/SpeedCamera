@@ -15,11 +15,6 @@ struct Speedometer_ClassDataStructure {
 };
 
 Speedometer speedometer_init(const char* glyphs) {
-	#ifdef VERBOSE
-		fputs("Init speedometer class object\n", stdout);
-		fflush(stdout);
-	#endif
-
 	Speedometer this = malloc(sizeof(struct Speedometer_ClassDataStructure));
 	if (!this) {
 		#ifdef VERBOSE

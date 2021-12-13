@@ -14,12 +14,6 @@
  */
 typedef struct GL_ClassDataStructure* GL;
 
-typedef enum GL_Info {
-	gl_info_i1_maxTextureSize, gl_info_i1_maxArrayTextureLayers, gl_info_i1_max3dTextureSize,
-	gl_info_i1_maxTextureImageUnits, gl_info_i1_maxVertexTextureImageUnits,
-	gl_info_s_vendor, gl_info_s_renderer, gl_info_s_version, gl_info_s_shadingLanguageVersion
-} gl_info;
-
 /** Shader and data types, UBO
  */
 typedef unsigned int gl_shader;
@@ -104,17 +98,6 @@ typedef enum GL_Synch_Statue {gl_synch_error = -1, gl_synch_timeout, gl_synch_do
  * @return 1 if success, 0 if fail
  */
 int gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) __attribute__((cold));
-
-/** Get driver and hardware info. 
- * The type of data can be int array, float array or string, see param enum 'name' for the type and array length. 
- * - If data type is int array or float array, the client should pass a pointer with enough memory space to param 'data'. 
- * This program will write the requested info to that location. This function also return the pointer with same address which passed into param 'data'. 
- * - If type is str, this function will ignor the param 'data'. A pointer to a static string will be returned. 
- * @param name What info you want? Can be gl_info_*_*. This also indicates the info data type (int array, float array or string) and length (of array)
- * @param data The returned info, pass-by-reference
- * @return Pointer to the returned data
- */
-void* gl_getInfo(gl_info name, void* data) __attribute__((cold));
 
 /** Call to start a render loop, this process all GLFW window events. 
  * @param cursorPos Current cursor position relative to the window, pass-by-reference
