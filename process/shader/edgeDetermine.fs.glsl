@@ -3,11 +3,10 @@ out vec4 result;
 
 uniform sampler2D current;
 uniform sampler2D previous;
-uniform ivec4 threshold;
+
+/* Defined by client: ivec4 threshold */
 #define CURRENT_THRESHOLD threshold.x
 #define PREVIOUS_THRESHOLD threshold.y
-
-#define COMPLEX_DISTANCE
 
 /** Is p inside the box 
  * leftTop = box.xy and rightBottom = box.zw
@@ -69,5 +68,5 @@ void main() {
 	/** Edge of current frame and previous frame 
 	 * Current in R, previous in G
 	 */
-	result = vec4(detCurrent, detPrevious, 0.0, 0.0);
+	result = vec4(detCurrent, detPrevious, 0.0, step(min(detCurrent, detPrevious), 0.0));
 }

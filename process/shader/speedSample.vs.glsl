@@ -11,10 +11,16 @@ layout (location = 0) in vec4 vertices;
 
 /** Output: Sampled speed
  */
-out flat int speed;
+out float speed;
 
 uniform sampler2D speedmap;
 #define CH_SPEEDMAP_SPEED r
+
+/** Defined by client: 
+const int speedPoolSize = 8;
+const float speedSensitive = 10.0;
+const int speedDisplayCutoff = 4;
+*/
 
 void replaceMin(inout float pool[speedPoolSize], in float value) {
 	int idx = 0;
@@ -44,8 +50,21 @@ void main() {
 	gl_Position = vec4(VERTICE_LEFT + VERTICE_RIGHT - 1.0, VERTICE_TOP + VERTICE_BOTTOM - 1.0, 0.0, 1.0);
 
 	float s = 0.0;
+
+	ivec2 p1Idx = ivec2( vec2(textureSize(speedmap, 0)) * VERTICE_POINT1 );
+	ivec2 p2Idx = ivec2( vec2(textureSize(speedmap, 0)) * VERTICE_POINT2 );
+	for (int y = p1Idx.y; y < p2Idx.y; y++) {
+		for (int x = p1Idx.x; x < p2Idx.x; x++) {
+			ivec2 currentIdx = ivec2(x, y);
+			float currentSpeed = texelFetch(speedmap, currentIdx, 0).CH_SPEEDMAP_SPEED;
+			if (currentSpeed > s) {
+				s = currentSpeed;
+			}
+		}
+	}
+	speed = s;
 	
-	//Sample
+/*	//Sample
 	ivec2 p1Idx = ivec2( vec2(textureSize(speedmap, 0)) * VERTICE_POINT1 );
 	ivec2 p2Idx = ivec2( vec2(textureSize(speedmap, 0)) * VERTICE_POINT2 );
 	int pCnt = (p2Idx.x - p1Idx.x) * (p2Idx.y - p1Idx.y), validCnt = 0;
@@ -69,5 +88,5 @@ void main() {
 		s = max(255.0, avgExZero(speedPool));
 	}
 
-	speed = int(s);
+	speed = int(s);*/
 }

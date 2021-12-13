@@ -10,7 +10,7 @@ uniform highp isampler2D roadmapT2;
 #define CH_ROADMAP1_POS w
 #define CH_ROADMAP2_SEARCH y
 
-uniform vec4 bias;
+/* Defined by client: vec4 bias */
 #define CH_BIAS_OFFSET x
 #define CH_BIAS_FIRSTORDER y
 
@@ -47,5 +47,5 @@ void main() {
 		speed = d * bias.CH_BIAS_FIRSTORDER + bias.CH_BIAS_OFFSET;
 	}
 
-	result = vec4(speed, 0.0, 0.0, 0.0);
+	result = vec4(speed, 0.0, 0.0, speed);
 }

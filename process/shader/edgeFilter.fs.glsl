@@ -21,5 +21,5 @@ void main() {
 	/** Denoised edge
 	 * A single float number, use R channel only
 	 */
-	result = vec4(accum, 0.0, 0.0, 0.0);
+	result = vec4(accum, 0.0, 0.0, accum);
 }
