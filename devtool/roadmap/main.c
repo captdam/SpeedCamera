@@ -1,8 +1,4 @@
-/** This program is used to generate road map file, which contains road-domain and screen-domain data in both perpective and orthographic view. 
- * Perspective data shows the info of the raw video; orthographic data shows the info of projected video. 
- * Orthographic projection applied on x-axis, so all objects travels in the direction of the look direction but 
- * with left-right offsets will look like traveling vertical in orthographic video, instead of sloped in perspective video. 
- * This simplifies the process of object tracing. 
+/** This program is used to generate road map file. 
  */
 
 #include <stdio.h>
@@ -19,6 +15,7 @@
  * Section III:	Table 2: Search distance, P/O projection map 
  * Section IV:	Number of points pair(uint), Focus region points (left-to-right, top-to-bottom) 
  * Section V:	Meta data: ASCII meta data, for reference, ignored by program 
+ * See readme for detail 
  */
 typedef struct FileHeader {
 	int16_t width, height; //Frame size in pixel, also used to calculate the size of this file. ASCII meta data append can be ignored

@@ -1,249 +1,249 @@
-# Roadmap Generator
+# Roadmap
 
-Used to generate road map used in comparing step of the main program.
+A roadmap is an binary file that provides road-domain information associated with screen-domain pixels. This information is used to help the program to understant the scene in the video.
 
-Calculating the distance between pixels (road points) on-the-fly comsumes a lot computation power. Since the distance between road points will never change, we can pre-calculate the distance, save it in a table. When we need it, we just read the value from the table without calculating it.
+For example, if there is an active pixel at screen-domain position (x=30px, y=27px). The program can look up the roadmap, convert that position into road-domain location (x=3.5m, y=7.2m). Which means, there is an object at that geographic location.
 
 ## Terminology
 
-**Road point**: A road point is a point on the road that can be projected on the screen-domain. A camera of x-by-y resolution will have x * y road points.
+The following terminologies are used in this document.
 
-**Neighbor point**: A neighbor point is another road point geographically close to a road point. A road point may have multiple neighbor points.
+There are two domains when we describe the program and the roadmap: **Screen-domain** and **Road-domain**. Generally speaking, _computer_ "think" in screen-domain, it reads and draws pixels in screen-domain; while _human_ look the pixels on screen, but can realize objects in **Road-domain**. A better terminology is "world-domain", but for this program's purpose, since we only look objects on road, we will use "road-domain".
 
-## How to use
+In screen-domain, we will always refer the top-left edge of the screen to (x=0px, y=0px), and refer the bottom-right edge to (x=```width```px, y=```height```px). Note this is different from OpenGL's normalized device coordinate (NDC).
 
-First, configure the program base on the user scene by modifying the source code.
+In road-domain, we will always refer the orgin point (location of camera) to (x=0m, y=0m). We will always refer forward to +y axis and backward to -y axis; and always refer left to -x axis and right to +x axis.
 
-The first part, the 8 define values tells the program information about the size of the camera/video, its field of view, the position of the camera and the measuring range.
+When we refer the coordinate in this document, we will use (x,y), the first elemetn is the x-axis coordinate, the second element is y-axis coordinate. This document uses two ways to differentiate road-domain and screen-domain coordinates:
 
-The second part tells the program the geographical coordnate (x,y,z in meter) of each road point associated with a pixel on the screen. In this example, we assume the road is perfectly flat. The user can modifty this program to fit their need. It is absolutely OK if the user want to use a look-up table for an uneven road or any road condition that cannot (or hard to be) represented by equations.
+- (rx,ry) means road-domain coordinate; (sx,sy) means screen-domain coordinate. In this notation, "r" means road-domain; "s" means screen-domain. This notation is used when there is no actual coordinate value.
 
-The third part tells the program which region of the frame image should be focus and which region of the frame image should be ignored. For example, we need to focus only the road portion of the video, and ignore the greenland beside the road. Reducing the focus region gives large advantage in terms of processing speed and memory usage.
+- (3.5m, 7.3m) means road-domain coordinate, (98px, 128px) means screen-doamin coordinate. In this notation, "m" (meter) is a road-domain unit, commonly used to discribe the distance of two geographic location; "px" (pixel) is a screen-domain uint, commonly used to describe the distance of two pixel on the screen. This notation is used when there is actual coordinate value. 
 
-```C
-/* == Modify following values and functions to generate road map file for a specific scene == */
+**Object**: Object means everything on road-domain. An object can be a car, a truck, or even a bird.
 
-//Screen resolution in pixel
-#define WIDTH 1920
-#define HEIGHT 1080
+**Pixel**: Computer lacks the ability to realize objects. In computer's point of view, everything are pixels. Some objects takes one pixel, some objects can take multiple pixels.
 
-//Camera field of view (Horizontal and Veritcal) in degree
-#define FOVH 57.5
-#define FOVV 32.3
+**Location**: Location is used to describe where an object is. This terminology is used in _road-domain_. Somethime we use "geographic location" to exclusively state this terminology is for road-domain. An example is ```location (x=3.5m, y=7.2m)```, note the unit is in meter (m).
 
-//Position of camera: height in meter, pitch in degree, 0 = horizontal, 90 = sky, -90 = ground
-#define INSTALL_HEIGHT 10.0
-#define INSTALL_PITCH -14.0
+**Position**: Position is used to describe where a pixel is. This terminology is used in _screen-domain_. An example is ```position (x=30px, y=27px)```, note the unit is in pixel (px).
 
-//Max speed of object in km/h, Video FPS. Thes two value also used as threshold for searching neighbor points
-#define MAX_SPEED 120.0
-#define FPS 30.0
+**Threshold**: For roadmap, the threshold means the maximum reasonable possible distance an object can travel during a given duration. Any object faster than the threshold will be ignored. This terminology is used in road-domain and have a unit of m/s.
 
-/** Road location generation
- * @param x screen coordnate x in pixel of a road point
- * @param y screen coordnate y in pixel of a road point
- * @return x,y,z geographical coordnate of a road point
- */
-loc3d_t getLocation(int x, int y) {
-	double pitchTop = (90.0 + INSTALL_PITCH + 0.5*FOVV) * M_PI / 180;
-	double pitchBottom = (90.0 + INSTALL_PITCH - 0.5*FOVV) * M_PI / 180;
-	double pitchStep = (pitchBottom - pitchTop) / (HEIGHT - 1);
-	double pitchCurrent = pitchTop + pitchStep * y;
+**Search distance***: Similar to _threshold_, but in screen-domain. The "search distance" gives the maximum distance a pixel can move between two frames. Any pixel moving exceeding this value will be ignored, as the moving distance is greater than the program's search distance. The unit is pixel/frame.
 
-	double yawSpan = INSTALL_HEIGHT / cos(pitchCurrent) * sin(0.5 * FOVH * M_PI / 180); //Half
-	double yawStep = 2 * yawSpan / (WIDTH - 1);
-	double yawCurrent = -yawSpan + yawStep * x;
+**Video**: The video is a data stream feed to the program that contains the video of objects moving on the road. Source of video can be camera device, file, or anything that can feed a ```pipe```.
 
-	return (loc3d_t){
-		.x = yawCurrent,
-		.y = tan(pitchCurrent) * INSTALL_HEIGHT,
-		.z = 0
-	};
-}
+**Focus region**: A 2D mesh-defined area. The focus region enclose a screen-domain area of the video frame that SHOULD be processed by the program. Pixels out of the focus region MAY be ignored.
 
-/** Focus region, movement outside of the focus region will be ignored
- * @param x screen coordnate x in pixel of a road point
- * @param y screen coordnate y in pixel of a road point
- * @return 1 if in focus region , 0 if out
- */
-int isFocused(int x, int y) {
-	int x1, x2, y1, y2;
+## Purpose of roadmap
 
-	if (y < 400 || y > 1060)
-		return 0;
-	
-	x1 = 940;
-	y1 = 400;
-	x2 = 410;
-	y2 = 1060;
-	if ( x < x1 + (y-y1) * (x1-x2)/(y1-y2) )
-		return 0;
-	
-	x1 = 1060;
-	y1 = 400;
-	x2 = 1496;
-	y2 = 656;
-	if ( x > x1 + (y-y1) * (x1-x2)/(y1-y2) )
-		return 0;
-	
-	if (x > 1496)
-		return 0;
+### Focus region
 
-	return 1;
-}
+In most case, road only occupies a portion of the video frame.
 
-/* == Modify above values and functions to generate road map file for a specific scene == */
-```
+Instead of processing all pixels in the video, the program SHOULD only process pixels that are on the road. Doing so not only saves computation power by reducing number of workload pixels; but also eliminates noise outside of the road. For example, if there is a high-speed railway alongside a 50 km/h road, everytime a train passing by will trigger the speeding alarm without using focus region.
 
-Then, compile with this command:
-```gcc main.c -lm -O3```
-or
-```gcc main.c -lm -O3 -DVERBOSE``` (print the progress of generation, not recommended for remote console)
+Therefore, the roadmap will provide the program a focus region. A focus region is a list of points on the screen-domain that defines the boundary of the road.
 
-...and excute with:
-```./a.out some_place/whatever_you_want_to_call_it.data```
+The focus region is not intended to be used by CPU. The program should construct this list into a mesh (technically speaking, a vertices array object, or VAO) and passing them to the GPU. During the fragment shader stage, the GPU will use hardware interpolation unit to determine whether a pixel is inside or outside of the focus region. The fragment shader will only process pixels in the focus region.
 
-This will generate the required roadmap file for the main program at ```some_place/whatever_you_want_to_call_it.data```.
+### Conversion between road-domain location and screen-roadm position
 
-If the scene changed, you will need to **modify the source code** mentioned above, and **re-compile** and **re-run** this generator program using the above commands.
+In real life, when we need to measure the speed of an object, we usually measure the change of geographic location of that object in a duration. Since ```speed = distance / time```, if an object travels 5 meters in 1 second, the speed of that object is 5 m/s, or 18 km/h.
 
-## What does this file do & How it work
+However, for computer, there is no location but position. Computer cannot directly realize the distance an object travel in a duration in road-domain, all it see is that a pixel travels from position (sx1,sy1) to position (sx2,sy2) in the time of a frame in screen-domain. In order to find the road-domain distance the object travel, we need to convert the screen-domain starting position and ending position into road-domain locations.
 
-This section is for information purpose, actual implementation may be different.
+The purpose of roadmap is to instruct the program to convert the two points, from screen-domain position (sx1,sy1) and (sx2,sy2) to road-domain location (rx1,ry1) and (rx2,ry2).
 
-### What to look when detect movement
-
-This file will tell the program which pixel to look when it detects a movement on a pixel.
-
-This file contains a list of road points and a list of neighbor points.
-
-For a camera of x-by-y resolution, there will be x * y road points. The road points data sturcture tells the program which block of the neighbor list to look.
-
-For a camera of x-by-y resolution, there will be have x * y blocks of neighbor points. Each block contains a number of individual neighbor points (Note that, the number may be 0 for some blocks). Each neighbor point contains two parameters: distance between this neighbor point to its associated road point, and the position of this neighbor point (the position is represented by index of the negihbor points in the frame, which is an 1D array with size of x * y). The neighbor points in each block is sorted by distance from low to high.
-
-### How it work
-
-When the program detects a movement on pixel(x,y) in the screen, it first check the road points list for road(x,y). This returns address to the neighbor points block associated with road(x,y) in the memory, and the length of that block.
-
-Next, the program will read the neighbor points. The neighbor points can be found by using the address given by road(x,y) from the road points list.
-
-The neighbor points conatin the position of the checking pixel and its geographically distance. There are a number of neighbor points need to be check.
-
-The program strats from the first neighbor point, which is the closest to the road point. If the pixel pointed by this position indicates that the object is presented in the last frame, the program stops here and returns the distance. This means, the object is at that position in last frame; so, the object moved for this much distance during the frame interval.
-
-If the object is not presented in the pixel pointed by first neighbor point, the program goes to check the pixel pointed by the second neighbor point, which represents the second-closed point. If not, the program moved to the 3rd neighbor point and so on.
-
-If the program checked all neighbor points associated witch this road point, but cannot find any result, this program returns 0 distance. This means the object moves too fast, it moves more than the threshold distance between the frame interval. This either means the movement is noise, or the object moves too fast. This a edge case, we simply ignore this.
-
-### Why threshold?
-
-We cannot check the entire frame for each road point. It is too much work. If we have a 1920*1080 frame, we need to check 4.2e12 times each frame in worst case scenario (O(n^2)).
-
-When we generate this file, we need to know the FPS (interval between the frame) and the max possible speed of our object. For example, if we are measuring the speed of car, we are sure there is no road-car can be faster than 250km/h. In this case, we only check neighbor points that is within 2.32 meter range from the road point if we are working with 30 FPS video.
+The last step is to perform calculation using the converted road-domain coordinates.
 
 ```
-250 km/h = 69.44 m/s
-69.44m/s / 30frame/s = 2.31 m/frame
+lookup(roadmap, (sx1, sy1)) => (rx1, ry1);
+lookup(roadmap, (sx2, sy2)) => (rx2, ry2);
+distance = sqrt( (rx1-rx2) ^ 2 + (ry1-ry2) ^ 2 );
+speed = distance / frame;
+speed = (distance / frame * FPS) / s
 ```
 
-By doing so, we can limit the number of neighbor points to check; hence reduce compuation need and memory need.
+### Search distance
+
+When we perform speed mesaurement of an object, we need to know the location of that object at the beginning and ending of the duration, which are location (rx1, ry1) and (rx2, ry2). In another word, to find the speed of an active pixel at position (sx1, sy1) at frame N, we need to know that pixel's position (sx2, sy2) at frame N+1. The location (rx2, ry2) should be close to (rx1, ry1); the position (sx1, sy1) should be close to (sx2, sy2). The greater the speed, the larger the distance.
+
+In most case, the program should be able to find the postion (sx2,sy2) near the position (sx1, sy1). However, there are some exceptions that there may only be (sx1, sy1) or (sx2, sy2).
+
+- At the moment of the object entering or exiting the focus region.
+
+- The program fail to detect some objects for a short period.
+
+- There is some object flashing in the video, such as traffic light.
+
+- Noise.
+
+In those case, the program is only able to find (sx1,sy1) or (sx2,sy2) but no another. Therefore, the program cannot determine the speed of that object. In fact, the program may search the entire video frame to try to find the other coordinate. This ends up wasting computation power, finding a wrong coordinate and produce wrong result.
+
+To compensate this problem, we need to define a threshold of speed. This value defines the maximum possible distance an object could possibly travel during in one video frame. The program should stop searching when it cannot find an object in this threshold.
+
+Since the threshold is a road-domain value, and the computer is working in screen-domain, we will need to comvert the threshold into search distance. The search distance is used to describe the maximum pixel distance an active pixel may travel during one video frame.
+
+### Orthographic projection
+
+In most case, a camera is placed on a pole near the road, facing toward the direction of traffic. The view mode is always in perspective view.
+
+However, in perspective view, further object is smaller than closer object, and all projection lines vanished in the center point of the view plane. In another word, an object travel along the forwrd-backward direction in road-domain will not travel in the vertical direction in the screen-domain if it is not on the middle axis. This means, when the program tracing an object, it cannot simply tracing vertically. There will be a slope when tracing the object. Depending on how far the object is from the middle axis, the slope may become vary large.
+
+One way is to add special care when tracing the object by adding the slope. The slope can be calculate at compile time, during program initialization, or on-the-fly by the GPU everytime a tracing is performed. Another way is to project the entire video into a semi-orthographic view (for simplicity, we will use orthographic view from now on without the semi prefix). In this orthographic view, further pixels are stretched horizontally, so their width will be the same as closer pixels. By doing this, object travel along the forwrd-backward direction in road-domain will now travel in the vertical direction in the screen-domain no matter how far it is from the middle axis. Now, when tracing objects, the program can simply look in the vertical direction without worry about the slope.
+
+The orthographic projection only applies on the horizontal direction of the screen (x-axis). It is not practical to apply orthographic projection on the vertical direction of the screen (y-axis). There are a few reasons of applying orthographic projection only on the horizontal direction:
+
+- Orthographic projection on the vertical direction is not necessary, it does not reduce compution complexity like the horizontal projection does.
+
+- Because the furthest point located in the center of a perspctive view has infinite distance, it will require a infinite high framebuffer to store the vertically projected view if that furthest point need be included in the view. This can be solved by defining the focus region to not include the furthest points.
+
+- Further objects are smaller, hence further pixels represent larger road-domain distance. In another word, they have a relatively low road-domain resolution compare to pixels representing closer road-domain points. If we apply projection on the vertical direction, the further portion will has less data density.
+
+In conclusion, the orthographic projection should only stretch the video in horizontal direction. This means, the same point in perspective view and orthographic view will have same y-coordinate but different x-coordinate.
+
+To perform the transformation from perspective view to orthographic view, we can either use a lookup table or a interpolated value in fragment shader. There is no absolute best choice, different machine may have different favor. We decide to use lookup table.
+
+Although the program performs the computation in the orthographic view, when display the result, the result should be transformed back to perspective view.
 
 ## File format
 
-The map file contains 3 parts.
+The roadmap is a binary file. This file contains 5 segments of data.
 
-First of all, we assume all our data can be addressed by using 32-bit pointer. Also, we want to implement our program on 32-bit low-end embedded device. Therefore, we will use ```uint32_t```, ```int32_t``` insteadof ```size_t``` to reduce file size.
+### Segment 1: Header
 
-### Part A - Total size of neighbor points
-
-We need to record the total number of neighbor points of all road points before we can start reading the neighbor points list. This is because we need to allocate memory before we read it into memory. We are using C, not Python or other types of languages supporting dynamic data type and array size.
-
-We only need to record the size of neighbor points list (shown in Part C). The size of road points list (shown in Part B) can be calculated by simply multiply width, heigh and size of ```road_t```.
+The first segment of the roadmap file is the header. The following C code describe the header.
 
 ```C
-return WIDTH * HEIGHT * sizeof(road_t);
+typedef struct FileHeader {
+	int16_t width, height;
+	float searchThreshold;
+	float orthoPixelWidth;
+	unsigned int searchDistanceXOrtho;
+} header_t;
 ```
 
-### Part B - Road points list
+The first field ```width, height``` contains 2 16-bit integers describing the dimention of the video frame and the size of this roadmap file. The video/image from the camera MUST match with this dimention; otherwise, error may occur.
 
-The neighbor points list is a big plain array of ```neighbor_t```, which contains all neighbor points of all road points.
+The second field ```searchThreshold``` descibes the maximum distance an object can travel between two frames. This filed serves as a reference of how the search distance is calculated and can be ignored by the program.
 
-Plain means there is no boundary between two neighbor points blocks of two road points. Just like there is no boundary between two sub-arraies of a 2D array in C.
+The third field ```orthoPixelWidth``` describes the equivalent road-domain width of a pixel in orthographic view. All pixels in orthographic view will have same width. Note the height is different.
 
-We need to tell the program which block of the neighbor points list should it look for a specific road point. We do this by assign each road point a ```base address``` and ```count```. Consider the following data type in C:
+The fourth field ```searchDistanceXOrtho``` describes the horizontal (x-axis) search distance in orthographic view. Since all pixels in orthographic view have the same width, the horizontal search distance will be the same for all pixels. Note the vertical (y-axis) search distance is different.
+
+Together the header takes 1 * (2+2) + 3 * 4 = 16 bytes.
+
+### Segment 2: Table 1 - Road-domain geographic data
+
+The second segment of the roadmap file is a table. This table is used to describe the road-domain geographic location associated with each pixel in both perspective view and orthographic view.
+
+This table has ```height``` * ```width``` entires, where ```height``` and ```width``` are the dimention of the video frame. Each entries contains 4 floating-point numbers. Consider the following C code:
+
 ```C
-struct road_t {
-	uint32_t base;
-	uint32_t count;
-};
+typedef struct FileDataTable1 {
+	float px, py;
+	float ox, oy;
+} data1_t;
+
+int height = 1080, width = 1920;
+data1_t data1[height][width];
 ```
-where:
-- Base means the base index (it IS base INDEX, NOT base ADDRESS) of this pixel.
-- Count means the number of neighbor points of this road point.
 
-This part (Part B) of this file is an array of ```road_t```, each represents one road point. The order is from left-to-right, then top-to-bottom.
+For examples, if there is an active pixel on screen position (x=37px, y=29px) in the perspective view; that means, there is an object on road location (x=```data1[29][37].px```, y=```data1[29][37].py```).
 
-So, let's assume that the width of our frame is 1920. Then, for road point located at (x=1400, y=960), we need to check the following neighbors:
+This segment takes ```height``` * ```width``` * 4 * 4 bytes.
+
+### Segment 3; Table 2 - Search distance & Conversion lookup
+
+The third segment of the roadmap file is another table. This table contains search distance and perspective-orthographic conversion lookup of each pixel.
+
+This table has ```height``` * ```width``` entires, where ```height``` and ```width``` are the dimention of the video frame. Each entries contains 4 unsigned integers. Consider the following C code:
+
 ```C
-uint32_t x = 1400, y = 960, width = 1920;
-road_t* roads = init();
-neighbor_t* neighbors = init();
+typedef struct FileDataTable2 {
+	unsigned int searchDistanceXPersp;
+	unsigned int searchDistanceY;
+	unsigned int lookupXp2o, lookupXo2p;
+} data2_t;
 
-uint32_t startIndex = roads[ y * width + x ].base;
-uint32_t endIndex = startIndex + roads[ y * width + x ].count;
-for (uint32_t i = startIndex; i < endIndex; i++) {
-	do_something(neighbors[i]);
-}
+int height = 1080, width = 1920;
+data2_t data2[height][width];
 ```
 
-### Part C - Neighbor points list
+The first element ```searchDistanceXPersp``` donates the horizontal (x-axis) search distance in perspective view. Note that, in perspective view, further objects looks smaller; therefore, the equivalent road-domain width of each pixel is different. Because of this, we need to record ```searchDistanceXPersp``` for all pixels. On the other hand, in orthographic view, the equivalent road-domain width pixels are same; therefore, we only have one ```searchDistanceXOrtho```, and this value is saved in the header.
 
-Finally, the core part. This part contains a list of neighbor points.
+The second element ```searchDistanceY``` donates the vertical (y-axis) search distance. Since the orthographic view only transform the video in horizontal direction, both the orthographic view and the perspective view share the same ```searchDistanceY``` value.
 
-A neighbor point is a 32-bit structure, it has a 8-bit ```distnace``` and a 24-bit ```pos```. Where:
-- **Distance** is the displacement from the neighbor point to its associated road point. To represent the distance using 8-bit unsigned int, this value is scaled by using equation ```geographical_distance / threshold * 255```
-- **Pos** means The position of this neighbor point. This value is same as the offset (index) of the pointed road point in the frame buffer.
+For example, in orthographic view, if there is an active pixel at screen-domain position (x,y), the program should search the area defined by (x +/- ```table2[y][x].searchDistanceXOrtho```, y +/- ```table2[y][x].searchDistanceY```).
 
-There are width * height neighbor points blocks. Each neighbor points blcok contains a number of individual neighbor points. That start index and length of each neighbor points block can be found in the road point list mentioned in part B.
+Theoretically speaking, in perspective view, if there is an active pixel at screen-domain position (x,y), the program should search the area defined by (x +/- ```table2[y][x].searchDistanceXPersp```, y +/- ```table2[y][x].searchDistanceY```). However, since the far-close axis in road-domain is not always the same as the y-axis in screen-domain, it is not practical to preform searching in perspective view.
 
-### File structure example
+The last two elements ```lookupXp2o``` and ```lookupXo2p``` are used to transform the video between orthographic view and the perspective view. The transfomation in only applied to horizontal direction; so, there is no ```lookupYp2o``` or ```lookupYo2p```.
 
+For example, if a pixel at located at (x,y) in perspective view, it will be project to (```table2[y][x].lookupXp2o```, y) in orthographic view.
+
+This segment takes ```height``` * ```width``` * 4 * 4 bytes.
+
+### Segment 4: Focus region
+
+The fourth segment of the roadmap file is a list of point pairs.
+
+The first 4 bytes of this segment is an unsigned integer ```pCnt``` that gives the number of point pairs. Followed by a list of points in the following structure:
+
+```C
+typedef struct Point_t {
+	float roadX, roadY;
+	unsigned int screenX, screenY;
+} point_t;
+
+unsigned int pCnt = 10;
+point_t points[pCnt][2];
 ```
-Address	(byte)		Content				Description										Ref
-==========================================================================================================================================================
-00000000		(uint32)total_count		Total number of neighbot of all pixel (used to hint memory allocator), see ref-C
-----------------------------------------------------------------------------------------------------------------------------------------------------------
-00000004		(uint32)pixel_0_0_base		Base index of pixel(x0,y0)'s neighbor map, the first pixel, top-left , always 0 for p(0,0), see Ref-A
-00000008		(uint32)pixel_0_0_count		Number of neighbors of pixel(x0,y0)
-0000000C		(uint32)pixel_1_0_base		Base index of pixel(x1,y0)'s neighbor map, the second pixel, top-2nd-left, see Ref-B
-00000010		(uint32)pixel_1_0_count		Number of neighbors of pixel(x1,y0)
-...			...				...
-width*height*8 - 0004	(uint32)pixel_w-1_h-1_base	Base index of pixel(xw-1,yh-1)'s neighbor map, the last pixel, bottom-right
-width*height*8 - 0000	(uint32)pixel_w-1_h-1_count	Number of neighbors of pixel(xw-1,yh-1)
-----------------------------------------------------------------------------------------------------------------------------------------------------------
-width*height*8 + 0004	(uint8)pixel_0_0_distance_1	Distance from point 1 to pixel(x0,y0); 0 = 0, 255 = distance threshold			Ref-A
-	= width*height*8 + 0004 + pixel_0_0_count + 0000
-width*height*8 + 0005	(uint24)pixel_0_0_pos1		Address of point 1; point1.y * width + point1.x
-	= width*height*8 + 0004 + pixel_0_0_count + 0001
-width*height*8 + 0008	(uint8)pixel_0_0_distance_2	Distance from point 2 to pixel(x0,y0)
-	= width*height*8 + 0004 + pixel_0_0_count + 0004
-width*height*8 + 0009	(uint24)pixel_0_0_pos2		Address of point 2
-	= width*height*8 + 0004 + pixel_0_0_count + 0005
-width*height*8 + 000C	(uint8)pixel_0_0_distance_3	Distance from point 3 to pixel(x0,y0)
-	= width*height*8 + 0004 + pixel_0_0_count + 0008
-width*height*8 + 000D	(uint24)pixel_0_0_pos3		Address of point 3
-	= width*height*8 + 0004 + pixel_0_0_count + 0009
-...			...				...
-width*height*8 + 0004 + pixel_1_0_base*4													Ref-B
-	= width*height*8 + 0004 + pixel_0_0_count*4
-			(struct32)pixel_1_0_distance_and_pos_1
-							Distance and position of point 1 to pixel(x1,y1)
-width*height*8 + 0004 + pixel_1_0_base*4 + 0004
-			(struct32)pixel_1_0_distance_and_pos_1
-							Distance and position of point 2 to pixel(x1,y1)
-width*height*8 + 0004 + pixel_1_0_base*4 + 0008
-			(struct32)pixel_1_0_distance_and_pos_2
-...			...				...
-----------------------------------------------------------------------------------------------------------------------------------------------------------
-width*height*8 + 0004 + total_count*4			End of file (EOF), this address is not included in the file					Ref-C
-```
+
+We can consider a point to be a road-domain point, where its location is given by ```roadX``` and ```roadY```; we can also consider a point to be a screen-domain pixel, where its position is described by ```screenX``` and ```screenY```.
+
+Road points are used to describe the screen-domain focus region, defines the area of pixel that should be processed by the program. Pixel outside of this area should be ignored, this method saves computation power and/or to ignores certain area that should be ignored.
+
+In most case, road points are used to define the boundary of the road. Because of this, road points comes in pairs. ```points[i][0]``` is always the left point, ```points[i][1]``` is always the right point. Therefore, ```points[i][0].roadX``` and ```points[i][0].screenX``` is always less than ```points[i][1].roadX``` and ```points[i][1].screenX``` respectively.
+
+In the road points list, the order is from further to closer in road-domain (top to bottom in screen-domain). Therefore, ```points[i][j].screenY``` is always less than ```points[i+N][j].screenY```; but ```points[i][j].roadY``` is always greater than ```points[i+N][j].roadY```.
+
+This segment takes 4 + 2 * ```pCnt``` * 4 * 4 bytes.
+
+## Segment 5: Meta data
+
+The last segment stores human-readable data in ASCII format, such as comments, notes. The content of this segment is arbitrary and the length of this segment is arbitrary. This section SHOULD be ignored by the program.
+
+## Size chart
+- Seg 1: 16 bytes
+- Seg 2: ```height``` * ```width``` * 4 * 4 bytes
+- Seg 3: ```height``` * ```width``` * 4 * 4 bytes
+- Seg 4: 4 + 2 * ```pCnt``` * 4 * 4 bytes
+- Seg 5: DNC
+- Total: (```height``` * ```width``` + ```pCnt```) * 32 + 20 bytes + DNC
+
+## Consideration: Pre-calculated roadmap vs Run-time calculating based on camera orientation
+
+One way to measure the speed is to use the pre-calculated roadmap as described in the earlier section of this document. Another way is to calculate the road-domain location on-the-fly using the orientation of the camera.
+
+For this comparsing, we use an embedded system GPU, the VideoCore IV GPU archtecture which is used on Raspberry pi 3 (https://docs.broadcom.com/doc/12358545) as our reference. This comparsing is theory-base. Since GPU, GPU API and OpenGL are highly absturct, the comparsing may not be practical. Different GPU, different driver, different driver version, different optimization, different environment may produce different result.
+
+### Pros of pre-calculated roadmap
+
+- Only calculate constant data once, at compile-time.
+- Avoid run-time computation-intense operation, which saves time and increases performance.
+- Avoid using large amount of intermidiate value (cache)
+- Support complex road (when the road-domain coordinates cannot be simply described by trigonometry).
+
+### Cons of pre-calculated roadmap
+
+- Uses more texture buffer, higher memory requirements.
+- Intense use of texture and memory lookup unit (TMU).
+- Lack of utilization of mathematical special function unit (SFU).
+
+Note:
+- Paspberry pi 4 is more main stream than PRI3, which uses VideoCore VI. But, there is no document available for this GPU. We believe that VideoCore VI may share some similarity with its predecessor videoCore IV, so we use the document of VideoCore IV for reference. However, it is also worth to pointed out that VideoCore VI supports openGL ES3.1; but its predecessor videoCore IV only supports OpenGL ES 2.x. Therefore, there may be some fundamental difference between them.
+- According to the document, the VideoCore IV GPU may comes with 1 or 2 TMUs. GPUs with multiple TMUs are favored.
+
