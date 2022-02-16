@@ -10,10 +10,6 @@
 
 #include "common.h"
 
-/** GL class object data structure
- */
-typedef struct GL_ClassDataStructure* GL;
-
 /** Shader and data types, UBO
  */
 typedef unsigned int gl_shader;
@@ -92,17 +88,16 @@ typedef enum GL_Synch_Statue {gl_synch_error = -1, gl_synch_timeout, gl_synch_do
 /** Init the GL class (static, only one allowed). 
  * Note: The data is processed in the orginal (full-size) resolution, but the viewer size may be smaller if using windowRation higher than 1, 
  * this should give some performance gain because of less display manager bandwidth [to-be-verified]. 
- * @param frameSize Resolution of the frame
- * @param windowRatio View size is frameSize/windowRatio
- * @param mix Intensity of orginal and processed data
+ * @param windowSize View window size
+ * @param mix Intensity of orginal frame data
  * @return 1 if success, 0 if fail
  */
-int gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) __attribute__((cold));
+int gl_init(size2d_t viewSize, float mix) __attribute__((cold));
 
 /** Call to start a render loop, this process all GLFW window events. 
  * @param cursorPos Current cursor position relative to the window, pass-by-reference
  */
-void gl_drawStart(size2d_t* cursorPos);
+void gl_drawStart(ivec2* cursorPos);
 
 /** Call this to draw a texture in viewer window. 
  * To draw anything in the viewer window, first draw all the objects on a framebuffer; 
@@ -157,8 +152,7 @@ void gl_shader_use(gl_shader* shader);
  * @param type Type of the data (gl_type_float, gl_type_int or gl_type_uint), must match with shader
  * @param data Pointer to the data to be pass
  */
-#define gl_shader_setParam(paramId, length, type, data) gl_shader_setParam_internal(paramId, length, type, (void*)data)
-void gl_shader_setParam_internal(gl_param paramId, uint8_t length, gl_datatype type, void* data);
+void gl_shader_setParam(gl_param paramId, int length, gl_datatype type, void* data);
 
 /** Unload a shader, the shader will be reset to GL_INIT_DEFAULT_SHADER. 
  * @param shader Shader name returned by gl_shader_load()
@@ -191,8 +185,7 @@ void gl_uniformBuffer_bindShader(unsigned int bindingPoint, gl_shader* shader, g
  * @param len Length of the update in bytes
  * @param data Pointer to the data to write into UBO
  */
-#define gl_uniformBuffer_update(ubo, start, len, data) gl_uniformBuffer_update_internal(ubo, start, len, (void*)data)
-void gl_uniformBuffer_update_internal(gl_ubo* ubo, size_t start, size_t len, void* data);
+void gl_uniformBuffer_update(gl_ubo* ubo, size_t start, size_t len, void* data);
 
 /** Delete a uniform buffer (UBO). 
  * @param ubo A gl_ubo previously created by gl_uniformBuffer_create()
@@ -369,18 +362,18 @@ void gl_rsync();
 /** Set a point in the GPU command queue for a later gl_synchWait() call. 
  * @return A gl_synch object
  */
-gl_synch gl_synchSet();
+gl_synch (*gl_synchSet)();
 
 /** Wait GPU command queue. 
  * @param s A gl_synch object previous returned by gl_synchSet()
  * @param timeout Timeout in nano seconds. This functionn will return gl_synch_timeout if the GPU commands before the synch point cannot be preformed before the timeout. This value can be 0
- * @return gl_synch_ok or gl_synch_done if the all commands before the synch point in the GPU queue are done before this call or before the timeout; gl_synch_timeout if timeout passed bu command has not done; gl_synch_error if any error
+ * @return gl_synch_ok or gl_synch_done if the all commands before the synch point in the GPU queue are done before this call or before the timeout; gl_synch_timeout if commands can not be finished before timeout; gl_synch_error if any error
  */
-gl_synch_statue gl_synchWait(gl_synch s, uint64_t timeout);
+gl_synch_statue (*gl_synchWait)(gl_synch s, uint64_t timeout);
 
 /** Delete a gl_synch object if no longer need
  * @param s A gl_synch object previous returned by gl_synchSet()
  */
-void gl_synchDelete(gl_synch s);
+void (*gl_synchDelete)(gl_synch s);
 
 #endif /* #ifndef INCLUDE_GL_H */

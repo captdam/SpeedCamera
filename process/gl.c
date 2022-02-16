@@ -16,20 +16,14 @@
 #include "common.h"
 #include "gl.h"
 
-struct GL_ClassDataStructure {
-	GLFWwindow* window;
-	gl_mesh defaultMesh;
-	gl_shader defaultShader;
-	size2d_t windowSize;
-	gl_param defaultShader_paramOrginal, defaultShader_paramProcessed;
-} this = {
-	.window = NULL,
-	.defaultMesh = GL_INIT_DEFAULT_MESH,
-	.defaultShader = GL_INIT_DEFAULT_SHADER,
-	.windowSize = {0, 0}
-};
+static int glInstanceCount = 0;
+static GLFWwindow* window = NULL;
+static gl_mesh defaultMesh = GL_INIT_DEFAULT_MESH;
+static gl_shader defaultShader = GL_INIT_DEFAULT_SHADER;
+static size2d_t windowSize;
+static gl_param defaultShader_paramOrginal, defaultShader_paramProcessed;
 
-/* Error polling */
+/* Error polling */ /*
 void printAllError(const char* id) {
 	fprintf(stderr, "==== Error log, until ID: '%s' =================\n", id);
 	GLenum error;
@@ -39,7 +33,7 @@ void printAllError(const char* id) {
 		fprintf(stderr, "- GL error: %x\n", error);
 	}
 	fprintf(stderr, "==== End of error list (%s) ====================\n\n", id);
-}
+}*/
 
 /* Texture data encode */
 const struct GL_TexFormat_LookUp {
@@ -85,14 +79,6 @@ const struct GL_TexFormat_LookUp {
 	{gl_texformat_RGB32UI,		GL_RGB32UI,	GL_RGB_INTEGER,		GL_UNSIGNED_INT		},
 	{gl_texformat_RGBA32UI,		GL_RGBA32UI,	GL_RGBA_INTEGER,	GL_UNSIGNED_INT		}
 };
-//GL_TexFormat_LookUp.eFormat should be in increase order and start from 0
-int gl_texformat_lookup_check() {
-	for (int i = 0; i < gl_texformat_placeholderEnd; i++) {
-		if (gl_texformat_lookup[i].eFormat != i)
-			return 0;
-	}
-	return 1;
-}
 
 /* Synch commands */
 gl_synch gl_synchSet_internal() { //Actual code
@@ -102,8 +88,6 @@ gl_synch gl_synchSet_internal() { //Actual code
 gl_synch gl_synchSet_placeholder() { //Placeholder for GPU without this function
 	return NULL;
 }
-gl_synch (*gl_synchSet_ptr)();
-
 gl_synch_statue gl_synchWait_internal(gl_synch s, uint64_t timeout) {
 	gl_synch_statue statue;
 	switch (glClientWaitSync(s, GL_SYNC_FLUSH_COMMANDS_BIT, timeout)) {
@@ -126,15 +110,12 @@ gl_synch_statue gl_synchWait_placeholder(gl_synch s, uint64_t timeout) {
 	gl_fsync();
 	return gl_synch_ok;
 }
-gl_synch_statue (*gl_synchWait_ptr)(gl_synch s, uint64_t timeout);
-
 void gl_synchDelete_internal(gl_synch s) {
 	glDeleteSync(s);
 }
 void gl_synchDelete_placeholder(gl_synch s) {
 	return;
 }
-void (*gl_synchDelete_ptr)();
 
 /* == Window management and driver init == [Static] ========================================= */
 
@@ -154,22 +135,9 @@ void GLAPIENTRY gl_glErrorCallback(GLenum src, GLenum type, GLuint id, GLenum se
 	fprintf(stderr, "OpenGL info: %s type %x, severity %x, message: %s\n", (type == GL_DEBUG_TYPE_ERROR ? "ERROR" : ""), type, severity, message);
 }
 
-int gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
-
-	/* Program check */ {
-		if (!gl_texformat_lookup_check()) {
-			#ifdef VERBOSE
-				fputs("\tProgram error: gl_texformat_lookup - Program-time error\n", stderr);
-			#endif
-			return 0;
-		}
-	}
-
-	/* Object init */
-	if (this.windowSize.x != 0 || this.windowSize.y != 0) {
-		#ifdef VERBOSE
-			fputs("Double init OpenGL\n", stderr);
-		#endif
+int gl_init(size2d_t viewSize, float mix) {
+	if (glInstanceCount) {
+		fputs("\tGL error: double init\n", stderr);
 		return 0;
 	}
 
@@ -178,7 +146,7 @@ int gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 		#ifdef VERBOSE
 			fputs("\tFail to init GLFW\n", stderr);
 		#endif
-		gl_destroy(this);
+		gl_destroy();
 		return 0;
 	}
 
@@ -192,16 +160,16 @@ int gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 	#ifdef VERBOSE
 //		glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
 	#endif
-	this.windowSize = (size2d_t){.width = frameSize.width / windowRatio, .height = frameSize.height / windowRatio};
-	this.window = glfwCreateWindow(this.windowSize.width, this.windowSize.height, "Viewer", NULL, NULL);
-	if (!this.window){
+	windowSize = viewSize;
+	window = glfwCreateWindow(windowSize.width, windowSize.height, "Viewer", NULL, NULL);
+	if (!window){
 		#ifdef VERBOSE
 			fputs("\tFail to open window\n", stderr);
 		#endif
 		gl_destroy();
 		return 0;
 	}
-	glfwMakeContextCurrent(this.window);
+	glfwMakeContextCurrent(window);
 	glfwSwapInterval(0);
 
 	/* Init GLEW */
@@ -210,7 +178,7 @@ int gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 		#ifdef VERBOSE
 			fprintf(stderr, "\tFail init GLEW: %s\n", glewGetErrorString(glewInitError));
 		#endif
-		gl_destroy(this);
+		gl_destroy();
 		return 0;
 	}
 
@@ -236,18 +204,18 @@ int gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 	#endif
 
 	/* Setup functions and their alternative placeholder */
-	if (glFenceSync) {
-		gl_synchSet_ptr = &gl_synchSet_internal;
-		gl_synchWait_ptr = &gl_synchWait_internal;
-		gl_synchDelete_ptr = &gl_synchDelete_internal;
+	if (glFenceSync && glClientWaitSync && glDeleteSync) {
+		gl_synchSet = &gl_synchSet_internal;
+		gl_synchWait = &gl_synchWait_internal;
+		gl_synchDelete = &gl_synchDelete_internal;
 	} else {
-		gl_synchSet_ptr = &gl_synchSet_placeholder;
-		gl_synchWait_ptr = &gl_synchWait_placeholder;
-		gl_synchDelete_ptr = &gl_synchDelete_placeholder;
+		gl_synchSet = &gl_synchSet_placeholder;
+		gl_synchWait = &gl_synchWait_placeholder;
+		gl_synchDelete = &gl_synchDelete_placeholder;
 	}
 
 	/* Event control - callback */
-	glfwSetWindowCloseCallback(this.window, gl_windowCloseCallback);
+	glfwSetWindowCloseCallback(window, gl_windowCloseCallback);
 	glfwSetErrorCallback(gl_glfwErrorCallback);
 	glDebugMessageCallback(gl_glErrorCallback, NULL);
 
@@ -257,6 +225,7 @@ int gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 //	glLineWidth(10);
 	glEnable(GL_PROGRAM_POINT_SIZE);
 	glPointSize(26.0);
+	glfwSetCursor(window, glfwCreateStandardCursor(GLFW_CROSSHAIR_CURSOR));
 
 	/* Draw window - mesh */ {
 		gl_vertex_t vertices[] = {
@@ -267,7 +236,7 @@ int gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 		};
 		gl_index_t indices[] = {0, 3, 2, 0, 2, 1};
 		gl_index_t attributes[] = {2};
-		this.defaultMesh = gl_mesh_create((size2d_t){.height = 4, .width = 2}, 6, attributes, vertices, indices, gl_meshmode_triangles);
+		defaultMesh = gl_mesh_create((size2d_t){2, 4}, 6, attributes, vertices, indices, gl_meshmode_triangles);
 	}
 
 	/* Draw window - shader */ {
@@ -295,9 +264,10 @@ int gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 				"uniform sampler2D processedTexture;\n"
 				"out vec4 color;\n"
 				"void main() {\n"
-				"	vec4 raw = texture(orginalTexture, textpos);\n"
-				"	vec4 processed = texture(processedTexture, textpos);\n"
-				"	color = raw * mixLevel + processed;\n"
+				"	vec4 data = texture(processedTexture, textpos);\n"
+				"	vec3 raw = texture(orginalTexture, textpos).rgb;\n"
+				"	vec3 processed = max(data.rgb, 0.0) * clamp(data.a, 0.0, 1.0);\n"
+				"	color = vec4( mix(processed, raw, mixLevel) , 1.0 );\n"
 				"}\n"
 			}
 		};
@@ -305,48 +275,54 @@ int gl_init(size2d_t frameSize, unsigned int windowRatio, float mix) {
 			{.isUBO = 0, .name = "orginalTexture"},
 			{.isUBO = 0, .name = "processedTexture"}
 		};
-		this.defaultShader = gl_shader_create((ivec4){arrayLength(vs), arrayLength(fs), 0, arrayLength(args)}, vs, fs, NULL, args);
-		this.defaultShader_paramOrginal = args[0].id;
-		this.defaultShader_paramProcessed = args[1].id;
+		defaultShader = gl_shader_create((ivec4){arrayLength(vs), arrayLength(fs), 0, arrayLength(args)}, vs, fs, NULL, args);
+		defaultShader_paramOrginal = args[0].id;
+		defaultShader_paramProcessed = args[1].id;
 	}
 
 	/* Init OK */
+	glInstanceCount++;
 	return 1;
 }
 
-void gl_drawStart(size2d_t* cursorPos) {
+void gl_drawStart(ivec2* cursorPos) {
 	glfwPollEvents();
 
 	double x, y;
-	glfwGetCursorPos(this.window, &x, &y);
-	*cursorPos = (size2d_t){.x = x, .y = y}; //Cast from double to size_t
+	glfwGetCursorPos(window, &x, &y);
+	cursorPos->x = x;
+	cursorPos->y = y;
 }
 
 void gl_drawWindow(gl_tex* orginalTexture, gl_tex* processedTexture) {
 	gl_fb df = {.frame=0};
-	gl_frameBuffer_bind(&df, this.windowSize, 0);
+	gl_frameBuffer_bind(&df, windowSize, 0);
 
-	gl_shader_use(&this.defaultShader);
-	gl_texture_bind(orginalTexture, this.defaultShader_paramOrginal, 0);
-	gl_texture_bind(processedTexture, this.defaultShader_paramProcessed, 1);
+	gl_shader_use(&defaultShader);
+	gl_texture_bind(orginalTexture, defaultShader_paramOrginal, 0);
+	gl_texture_bind(processedTexture, defaultShader_paramProcessed, 1);
 	
-	gl_mesh_draw(&this.defaultMesh);
+	gl_mesh_draw(&defaultMesh);
 }
 
 void gl_drawEnd(const char* title) {
 	if (title)
-		glfwSetWindowTitle(this.window, title);
+		glfwSetWindowTitle(window, title);
 	
-	glfwSwapBuffers(this.window);
+	glfwSwapBuffers(window);
 }
 
 int gl_close(int close) {
-	if (close > 0)
-		glfwSetWindowShouldClose(this.window, GLFW_TRUE);
-	else if (close == 0)
-		glfwSetWindowShouldClose(this.window, GLFW_FALSE);
-	
-	return glfwWindowShouldClose(this.window);
+	if (!close) {
+		glfwSetWindowShouldClose(window, GLFW_FALSE);
+		close = GLFW_FALSE;
+	} else if (close > 0) {
+		glfwSetWindowShouldClose(window, GLFW_TRUE);
+		close = GLFW_TRUE;
+	} else {
+		close = glfwWindowShouldClose(window);
+	}
+	return close;
 }
 
 void gl_destroy() {
@@ -355,13 +331,13 @@ void gl_destroy() {
 		fflush(stdout);
 	#endif
 
-	if (this.window)
+	if (window)
 		glfwTerminate();
-
+	
 	gl_close(1);
-	gl_shader_destroy(&this.defaultShader);
-	gl_mesh_delete(&this.defaultMesh);
-	this.windowSize = (size2d_t){0, 0};
+	gl_shader_destroy(&defaultShader);
+	gl_mesh_delete(&defaultMesh);
+	glInstanceCount--;
 }
 
 /* == OpenGL routines == [Object] =========================================================== */
@@ -642,7 +618,7 @@ void gl_shader_use(gl_shader* shader) {
 	glUseProgram(*shader);
 }
 
-void gl_shader_setParam_internal(gl_param paramId, uint8_t length, gl_datatype type, void* data) {
+void gl_shader_setParam(gl_param paramId, int length, gl_datatype type, void* data) {
 	if (type == gl_type_int) {
 		int* d = data;
 		if (length == 1)
@@ -690,7 +666,7 @@ gl_ubo gl_uniformBuffer_create(unsigned int bindingPoint, size_t size) {
 
 	glGenBuffers(1, &ubo);
 	glBindBuffer(GL_UNIFORM_BUFFER, ubo);
-	glBufferData(GL_UNIFORM_BUFFER, size, NULL, GL_STATIC_DRAW); //in most case, we set params only at the beginning for only once
+	glBufferData(GL_UNIFORM_BUFFER, size, NULL, GL_STATIC_DRAW); //in most case, we set params only at the beginning for only once, so we use STATIC_DRAW
 	glBindBufferBase(GL_UNIFORM_BUFFER, bindingPoint, ubo);
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
@@ -707,7 +683,7 @@ void gl_uniformBuffer_bindShader(unsigned int bindingPoint, gl_shader* shader, g
 	glUniformBlockBinding(*shader, blockId, bindingPoint);
 }
 
-void gl_uniformBuffer_update_internal(gl_ubo* ubo, size_t start, size_t len, void* data) {
+void gl_uniformBuffer_update(gl_ubo* ubo, size_t start, size_t len, void* data) {
 	glBindBuffer(GL_UNIFORM_BUFFER, *ubo);
 	glBufferSubData(GL_UNIFORM_BUFFER, start, len, data);
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
@@ -774,11 +750,11 @@ void gl_mesh_draw(gl_mesh* mesh) {
 		else
 			glDrawArrays(mesh->mode, 0, mesh->drawSize);
 	} else {
-		glBindVertexArray(this.defaultMesh.vao);
-		if (this.defaultMesh.ebo)
-			glDrawElements(this.defaultMesh.mode, this.defaultMesh.drawSize, GL_UNSIGNED_INT, 0);
+		glBindVertexArray(defaultMesh.vao);
+		if (defaultMesh.ebo)
+			glDrawElements(defaultMesh.mode, defaultMesh.drawSize, GL_UNSIGNED_INT, 0);
 		else
-			glDrawArrays(this.defaultMesh.mode, 0, this.defaultMesh.drawSize);
+			glDrawArrays(defaultMesh.mode, 0, defaultMesh.drawSize);
 	}
 	glBindVertexArray(GL_INIT_DEFAULT_MESH.vao);
 }
@@ -960,14 +936,4 @@ void gl_fsync() {
 }
 void gl_rsync() {
 	glFlush();
-}
-
-gl_synch gl_synchSet() {
-	return gl_synchSet_ptr();
-}
-gl_synch_statue gl_synchWait(gl_synch s, uint64_t timeout) {
-	return gl_synchWait_ptr(s, timeout);
-}
-void gl_synchDelete(gl_synch s) {
-	gl_synchDelete_ptr(s);
 }
