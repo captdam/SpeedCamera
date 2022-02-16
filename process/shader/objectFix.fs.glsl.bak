@@ -1,0 +1,76 @@
+in vec2 pxPos;
+out vec4 result;
+
+uniform sampler2D src;
+
+/* Defined by client: FIX_LEVEL (0, 1, or 2) */
+/* Defined by client, if FIX_LEVEL is 1 or 2: SEARCH_DISTANCE ivec2 */
+
+bool searchUp(sampler2D map, ivec2 start, int limit) {
+	for (ivec2 idx = start; idx.y >= 0 && start.y - idx.y < limit; idx.y--) {
+		if (texelFetch(map, idx, 0).r > 0.0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool searchDown(sampler2D map, ivec2 start, int limit) {
+	for (ivec2 idx = start; idx.y < textureSize(map, 0).y && idx.y - start.y < limit; idx.y++) {
+		if (texelFetch(map, idx, 0).r > 0.0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool searchLeft(sampler2D map, ivec2 start, ivec2 limit) {
+	if (limit.y > 0) {
+		for (ivec2 idx = start; idx.x >= 0 && start.x - idx.x < limit.x; idx.x--) {
+			if ( searchUp(map, idx, limit.y) && searchDown(map, idx, limit.y) )
+				return true;
+		}
+	} else {
+		for (ivec2 idx = start; idx.x >= 0 && start.x - idx.x < limit.x; idx.x--) {
+			if (texelFetch(map, idx, 0).r > 0.0)
+				return true;
+		}
+	}
+	return false;
+}
+
+bool searchRight(sampler2D map, ivec2 start, ivec2 limit) {
+	if (limit.y > 0) {
+		for (ivec2 idx = start; idx.x < textureSize(map, 0).x && idx.x - start.x < limit.x; idx.x++) {
+			if ( searchUp(map, idx, limit.y) && searchDown(map, idx, limit.y) )
+				return true;
+		}
+	} else {
+		for (ivec2 idx = start; idx.x < textureSize(map, 0).x && idx.x - start.x < limit.x; idx.x++) {
+			if (texelFetch(map, idx, 0).r > 0.0)
+				return true;
+		}
+	}
+	return false;
+}
+
+void main() {
+	ivec2 pxIdx = ivec2(vec2(textureSize(src, 0)) * pxPos);
+
+	float det = 0.0;
+	if (texelFetch(src, pxIdx, 0).r > 0.0)
+		det = 1.0;
+	else {
+		#if FIX_LEVEL
+			#if FIX_LEVEL == 1
+				if ( searchLeft(src, pxIdx, SEARCH_DISTANCE) && searchRight(src, pxIdx, SEARCH_DISTANCE) )
+					det = 0.5;
+			#elif FIX_LEVEL == 2
+				if ( searchLeft(src, pxIdx, SEARCH_DISTANCE) || searchRight(src, pxIdx, SEARCH_DISTANCE) )
+					det = 0.5;
+			#endif
+		#endif
+	}
+
+	result = vec4(det);
+}

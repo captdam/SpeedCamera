@@ -1,42 +1,55 @@
-in vec2 currentPos;
+in vec2 pxPos;
 out vec4 result;
 
 uniform sampler2D current;
 uniform sampler2D previous;
 
-const mat3 rgb2yuv = mat3(
-	0.299,	0.587,	0.114,
-	-0.147,	-0.289,	0.436,
-	0.615,	-0.515,	-0.1
-);
-const vec4 weight = vec4(
-	1.0,	//Luma
-	2.0,	//Color-U
-	2.0,	//Color-V
-	0.0	//Color-RGBavg
-);
+/* May defined by client: MONO ^ HUE */
+/* May defined by client: BINARY vec4 ^ CLAMP vec4[2]*/
+
+float hue(vec3 rgb) {
+	float max = max(max(rgb.r, rgb.g), rgb.b);
+	float min = min(min(rgb.r, rgb.g), rgb.b);
+
+	float hue = 0.0;
+	if (max == rgb.r)
+		hue = (rgb.g - rgb.b) / (max - min);
+	else if (max == rgb.g)
+		hue = (rgb.b - rgb.r) / (max - min) + 2.0;
+	else
+		hue = (rgb.r - rgb.g) / (max - min) + 4.0;
+
+	if (hue >= 6.0)
+		hue -= 6.0;
+	else if (hue < 0.0)
+		hue += 6.0;
+
+	return hue / 6.0;
+}
 
 void main() {
-	ivec2 currentIdx = ivec2( vec2(textureSize(current, 0)) * currentPos );
+	ivec2 pxIdx = ivec2(vec2(textureSize(current, 0)) * pxPos);
+	vec4 pb = texelFetch(previous, pxIdx, 0);
+	vec4 pc = texelFetch(current, pxIdx, 0);
 
-	vec3 currentRGB = texelFetch(current, currentIdx, 0).rgb;
-	vec3 currentYUV = currentRGB * rgb2yuv;
-	vec3 previousRGB = texelFetch(previous, currentIdx, 0).rgb;
-	vec3 previousYUV = previousRGB * rgb2yuv;
+	vec4 diff = vec4(0.0);
+	#if defined(HUE) //Get hue change
+		float hp = hue(pb.rgb);
+		float hc = hue(pc.rgb);
+		diff = vec4(abs(hc - hp));
+	#elif defined(MONO) //Get luma change
+		vec3 d = abs(pc.rgb - pb.rgb);
+		float mono = dot(d, vec3(0.299, 0.587, 0.114));
+		diff = vec4(mono);
+	#else //Get raw rgb change
+		diff = abs(pc - pb);
+	#endif
 
-	/** Vector scheme: 
-	 * 0:	Changing in luma; 
-	 * 1,2:	Changing in color UV; 
-	 * 3:	Changing in RGB. 
-	 */
-	vec4 diff = max(vec4(
-		currentYUV - previousYUV,
-		dot(currentRGB - previousRGB, vec3(0.333, 0.333, 0.333))
-	), 0.0);
+	#if defined(BINARY)
+		diff = step(BINARY, diff);
+	#elif defined(CLAMP)
+		diff = clamp(diff, CLAMP[0], CLAMP[1]);
+	#endif
 
-	/** Weighted changing
-	 * A single float number, use R channel only
-	 */
-	float weighted = dot(diff, weight);
-	result = vec4(weighted, 0.0, 0.0, weighted);
+	result = diff;
 }

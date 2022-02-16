@@ -15,6 +15,8 @@ out flat int speed;
 uniform sampler2D speedmap;
 
 void main() {
+	float s = 0.0;
+
 	//Speedometer screen position
 	gl_Position = vec4(VERTICES_DRAW_X * 2.0 - 1.0, VERTICES_DRAW_Y * 2.0 - 1.0, 0.0, 1.0);
 
@@ -24,7 +26,16 @@ void main() {
 		VERTICES_DRAW_Y > VERTICES_SAMPLE_Y ? 1.0 : 0.0
 	);
 
-	//Speed: Which speedometer image to display
-	ivec2 sampleIdx = ivec2( vec2(textureSize(speedmap, 0)) * VERTICES_SAMPLE );
-	speed = int(texelFetch(speedmap, sampleIdx, 0).r);
+	//Speed: Get speed value
+	vec2 speedmapSize = vec2(textureSize(speedmap, 0));
+	float unitHeight = abs(VERTICES_DRAW_Y - VERTICES_SAMPLE_Y) * 2.0;
+	ivec2 selfIdx = ivec2(speedmapSize * VERTICES_SAMPLE);
+	ivec2 bottomIdx = ivec2(speedmapSize * (VERTICES_SAMPLE + vec2(0.0, unitHeight)));
+	if (texelFetch(speedmap, bottomIdx, 0).r <= 0.0) {
+		//Only display speed if current speedometer is at bottom edge
+		//Higher edge has large error due to difference between object height and road height
+		s = texelFetch(speedmap, selfIdx, 0).r;
+	}
+
+	speed = int(s);
 }

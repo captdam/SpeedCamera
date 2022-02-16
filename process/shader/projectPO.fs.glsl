@@ -1,25 +1,23 @@
-in vec2 currentPos;
+in vec2 pxPos;
 out vec4 result;
 
 uniform sampler2D src;
 uniform highp isampler2D roadmapT2;
-uniform ivec4 mode;
+
+/* Defined by client: P2O || O2P */
 
 #define CH_ROADMAP2_LOOKUP_P2O z
 #define CH_ROADMAP2_LOOKUP_O2P w
 
-#define MODE mode.x
-#define MODE_P2O 1
-#define MODE_O2P 2
-
 void main() {
-	ivec2 currentIdx = ivec2( vec2(textureSize(src, 0)) * currentPos );
+	ivec2 pxIdx = ivec2(vec2(textureSize(src, 0)) * pxPos);
 
-	ivec2 sampleIdx = ivec2(0, 0);
-	if (MODE == MODE_P2O)
-		sampleIdx = ivec2(texelFetch(roadmapT2, currentIdx, 0).CH_ROADMAP2_LOOKUP_P2O, currentIdx.y);
-	else if (MODE == MODE_O2P)
-		sampleIdx = ivec2(texelFetch(roadmapT2, currentIdx, 0).CH_ROADMAP2_LOOKUP_O2P, currentIdx.y);
+	ivec2 sampleIdx = pxIdx; //Default - no projection if client didn't define mode
+	#if defined(P2O)
+		sampleIdx.x = texelFetch(roadmapT2, pxIdx, 0).CH_ROADMAP2_LOOKUP_P2O;
+	#elif defined(O2P)
+		sampleIdx.x = texelFetch(roadmapT2, pxIdx, 0).CH_ROADMAP2_LOOKUP_O2P;
+	#endif
 
 	result = texelFetch(src, sampleIdx, 0);
 }

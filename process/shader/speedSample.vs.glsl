@@ -17,9 +17,9 @@ uniform sampler2D speedmap;
 #define CH_SPEEDMAP_SPEED r
 
 /** Defined by client: 
-const int speedPoolSize = 8;
-const float speedSensitive = 10.0;
-const int speedDisplayCutoff = 4;
+const int speedPoolSize
+const float speedSensitive
+const int speedDisplayCutoff
 */
 
 void replaceMin(inout float pool[speedPoolSize], in float value) {
@@ -51,27 +51,14 @@ void main() {
 
 	float s = 0.0;
 
-	ivec2 p1Idx = ivec2( vec2(textureSize(speedmap, 0)) * VERTICE_POINT1 );
-	ivec2 p2Idx = ivec2( vec2(textureSize(speedmap, 0)) * VERTICE_POINT2 );
-	for (int y = p1Idx.y; y < p2Idx.y; y++) {
-		for (int x = p1Idx.x; x < p2Idx.x; x++) {
-			ivec2 currentIdx = ivec2(x, y);
-			float currentSpeed = texelFetch(speedmap, currentIdx, 0).CH_SPEEDMAP_SPEED;
-			if (currentSpeed > s) {
-				s = currentSpeed;
-			}
-		}
-	}
-	speed = s;
-	
-/*	//Sample
-	ivec2 p1Idx = ivec2( vec2(textureSize(speedmap, 0)) * VERTICE_POINT1 );
-	ivec2 p2Idx = ivec2( vec2(textureSize(speedmap, 0)) * VERTICE_POINT2 );
-	int pCnt = (p2Idx.x - p1Idx.x) * (p2Idx.y - p1Idx.y), validCnt = 0;
 	float speedPool[speedPoolSize];
 	for (int i = 0; i < speedPoolSize; i++)
 		speedPool[i] = 0.0;
-	
+
+	ivec2 p1Idx = ivec2( vec2(textureSize(speedmap, 0)) * VERTICE_POINT1 );
+	ivec2 p2Idx = ivec2( vec2(textureSize(speedmap, 0)) * VERTICE_POINT2 );
+
+	int validCnt = 0;
 	for (int y = p1Idx.y; y < p2Idx.y; y++) {
 		for (int x = p1Idx.x; x < p2Idx.x; x++) {
 			ivec2 currentIdx = ivec2(x, y);
@@ -83,10 +70,9 @@ void main() {
 		}
 	}
 
-	//Denoise and avg
 	if (validCnt > speedDisplayCutoff) {
-		s = max(255.0, avgExZero(speedPool));
+		s = avgExZero(speedPool);
 	}
 
-	speed = int(s);*/
+	speed = s;
 }

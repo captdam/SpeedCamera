@@ -1,4 +1,4 @@
-in vec2 currentPos;
+in vec2 pxPos;
 out vec4 result;
 
 uniform sampler2D current;
@@ -15,58 +15,51 @@ bool inBox(ivec2 p, ivec4 box) {
 	return p.x >= box.x && p.y >= box.y && p.x < box.z && p.y < box.w;
 }
 
-/** Return the end position of continue path in left and right direction 
- * Always choose hozizontal (x,0) if that point is valid; otherwise, choose up(x,-1) or down(x,-1) 
- * return {leftEnd.xy, rightEnd.xy}
- */
-ivec4 continuePath(sampler2D map, ivec2 start) {
-	ivec4 box = ivec4(0.0, 0.0, textureSize(map, 0));
+bvec2 minPath(sampler2D map, ivec2 start, int goal) {
 	ivec2 lPtr = start, rPtr = start;
 
-	while (true) {
+	while (start.x - lPtr.x < goal) {
 		ivec2 middle = lPtr + ivec2(-1, 0);
 		ivec2 up = lPtr + ivec2(-1, -1);
 		ivec2 down = lPtr + ivec2(-1, +1);
-		if ( texelFetch(map, middle, 0).r > 0.0 && inBox(middle, box) )
+		if (texelFetch(map, middle, 0).r > 0.0)
 			lPtr = middle;
-		else if ( texelFetch(map, up, 0).r > 0.0 && inBox(up, box) )
+		else if (texelFetch(map, up, 0).r > 0.0)
 			lPtr = up;
-		else if ( texelFetch(map, down, 0).r > 0.0 && inBox(down, box) )
+		else if (texelFetch(map, down, 0).r > 0.0)
 			lPtr = down;
 		else
 			break;
 	}
 
-	while (true) {
+	while (rPtr.x - start.x < goal) {
 		ivec2 middle = rPtr + ivec2(+1, 0);
 		ivec2 up = rPtr + ivec2(+1, -1);
 		ivec2 down = rPtr + ivec2(+1, +1);
-		if ( texelFetch(map, middle, 0).r > 0.0 && inBox(middle, box) )
+		if (texelFetch(map, middle, 0).r > 0.0)
 			rPtr = middle;
-		else if ( texelFetch(map, up, 0).r > 0.0 && inBox(up, box) )
+		else if (texelFetch(map, up, 0).r > 0.0)
 			rPtr = up;
-		else if ( texelFetch(map, down, 0).r > 0.0 && inBox(down, box) )
+		else if (texelFetch(map, down, 0).r > 0.0)
 			rPtr = down;
 		else
 			break;
 	}
 
-	return ivec4(lPtr, rPtr);
+	return bvec2(start.x - lPtr.x >= goal, rPtr.x - start.x >= goal);
 }
 
 void main() {
-	ivec2 currentIdx = ivec2( vec2(textureSize(current, 0)) * currentPos );
+	ivec2 pxIdx = ivec2(vec2(textureSize(current, 0)) * pxPos);
 
-	/* Current frame */
-	ivec4 endPosCurrent = continuePath(current, currentIdx);
-	float detCurrent = endPosCurrent.z- endPosCurrent.x> CURRENT_THRESHOLD ? 1.0 : 0.0;
-
-	/* Previous frame */
-	ivec4 endPosPrevious = continuePath(previous, currentIdx);
-	float detPrevious = endPosPrevious.z - endPosPrevious.x > PREVIOUS_THRESHOLD ? 1.0 : 0.0;
+	bvec2 currentTest = minPath(current, pxIdx, CURRENT_THRESHOLD);
+	float currentDet = all(currentTest) ? 1.0 : 0.0;
+	bvec2 previousTest = minPath(previous, pxIdx, PREVIOUS_THRESHOLD);
+	float previousDet = any(previousTest) ? 1.0 : 0.0;
 
 	/** Edge of current frame and previous frame 
 	 * Current in R, previous in G
+	 * Hide this result (when display intermidiate result) if there neither edge detected
 	 */
-	result = vec4(detCurrent, detPrevious, 0.0, step(min(detCurrent, detPrevious), 0.0));
+	result = vec4(currentDet, previousDet, 0.0, step(0.0, max(currentDet, previousDet)));
 }

@@ -1,4 +1,4 @@
-in vec2 currentPos;
+in vec2 pxPos;
 out vec4 result;
 
 uniform sampler2D edgemap;
@@ -15,22 +15,22 @@ uniform highp isampler2D roadmapT2;
 #define CH_BIAS_FIRSTORDER y
 
 void main() {
-	ivec2 currentIdx = ivec2( vec2(textureSize(edgemap, 0)) * currentPos );
+	ivec2 pxIdx = ivec2(vec2(textureSize(edgemap, 0)) * pxPos);
 
 	float speed = 0.0;
 
-	if (texelFetch(edgemap, currentIdx, 0).CH_EDGEMAP_CURRENT > 0.0) {
-		float currentPos = texelFetch(roadmapT1, currentIdx, 0).CH_ROADMAP1_POS;
-		int searchLimit = texelFetch(roadmapT2, currentIdx, 0).CH_ROADMAP2_SEARCH;
+	if (texelFetch(edgemap, pxIdx, 0).CH_EDGEMAP_CURRENT > 0.0) {
+		float currentPos = texelFetch(roadmapT1, pxIdx, 0).CH_ROADMAP1_POS;
+		int searchLimit = texelFetch(roadmapT2, pxIdx, 0).CH_ROADMAP2_SEARCH;
 
 		float upDistance = -1.0, downDistance = -1.0;
-		for (ivec2 destIdx = currentIdx; destIdx.y > currentIdx.y - searchLimit && destIdx.y > 0; destIdx += ivec2(0,-1)) {
+		for (ivec2 destIdx = pxIdx; destIdx.y > pxIdx.y - searchLimit && destIdx.y > 0; destIdx += ivec2(0,-1)) {
 			if (texelFetch(edgemap, destIdx, 0).CH_EDGEMAP_PREVIOUS > 0.0) {
 				upDistance = abs( texelFetch(roadmapT1, destIdx, 0).CH_ROADMAP1_POS - currentPos );
 				break;
 			}
 		}
-		for (ivec2 destIdx = currentIdx; destIdx.y < currentIdx.y + searchLimit && destIdx.y < textureSize(edgemap, 0).y; destIdx += ivec2(0,+1)) {
+		for (ivec2 destIdx = pxIdx; destIdx.y < pxIdx.y + searchLimit && destIdx.y < textureSize(edgemap, 0).y; destIdx += ivec2(0,+1)) {
 			if (texelFetch(edgemap, destIdx, 0).CH_EDGEMAP_PREVIOUS > 0.0) {
 				downDistance = abs( texelFetch(roadmapT1, destIdx, 0).CH_ROADMAP1_POS - currentPos );
 				break;

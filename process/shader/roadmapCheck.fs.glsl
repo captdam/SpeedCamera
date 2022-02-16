@@ -1,4 +1,4 @@
-in vec2 currentPos;
+in vec2 pxPos;
 out vec4 result;
 
 uniform sampler2D roadmapT1;
@@ -24,14 +24,14 @@ uniform vec4 cfgF1;
 #define MODE_OTHORGRID 6
 
 void main() {
-	ivec2 currentIdx = ivec2( vec2(textureSize(roadmapT1, 0)) * currentPos );
+	ivec2 pxIdx = ivec2(vec2(textureSize(roadmapT1, 0)) * pxPos);
 
-	vec4 roadPosCurrent =	texelFetch(roadmapT1, currentIdx, 0);
-	vec4 roadPosUp =	texelFetchOffset(roadmapT1, currentIdx, 0, ivec2( 0, -1));
-	vec4 roadPosDown =	texelFetchOffset(roadmapT1, currentIdx, 0, ivec2( 0, +1));
-	vec4 roadPosLeft =	texelFetchOffset(roadmapT1, currentIdx, 0, ivec2(-1,  0));
-	vec4 roadPosRight =	texelFetchOffset(roadmapT1, currentIdx, 0, ivec2(+1,  0));
-	ivec4 roadInfoCurrent =	texelFetch(roadmapT2, currentIdx, 0);
+	vec4 roadPosCurrent =	texelFetch(roadmapT1, pxIdx, 0);
+	vec4 roadPosUp =	texelFetchOffset(roadmapT1, pxIdx, 0, ivec2( 0, -1));
+	vec4 roadPosDown =	texelFetchOffset(roadmapT1, pxIdx, 0, ivec2( 0, +1));
+	vec4 roadPosLeft =	texelFetchOffset(roadmapT1, pxIdx, 0, ivec2(-1,  0));
+	vec4 roadPosRight =	texelFetchOffset(roadmapT1, pxIdx, 0, ivec2(+1,  0));
+	ivec4 roadInfoCurrent =	texelFetch(roadmapT2, pxIdx, 0);
 
 	vec3 color = vec3(0.0, 0.0, 0.0);
 
