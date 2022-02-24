@@ -818,12 +818,18 @@ int main(int argc, char* argv[]) {
 		}
 
 		/* Create program: Measure */ {
+			char cfg[100];
+			float cfgBiasOffset = 0.0f;
+			float cfgBiasFirstOrder = fps * 3.6f;
+			sprintf(cfg, "#define BIAS vec4(%.3f, %.3f, %.3f, %.3f)"NL, cfgBiasOffset, cfgBiasFirstOrder, 0.0f, 0.0f);
+
 			gl_shaderSrc vs[] = {
 				{.isFile = 0, .src = glShaderHeader},
 				{.isFile = 0, .src = glShaderLine0}, {.isFile = 1, .src = "shader/focusRegion.vs.glsl"}
 			};
 			gl_shaderSrc fs[] = {
 				{.isFile = 0, .src = glShaderHeader},
+				{.isFile = 0, .src = cfg},
 				{.isFile = 0, .src = glShaderLine0}, {.isFile = 1, .src = "shader/measure.fs.glsl"}
 			};
 			gl_shaderArg args[] = {
@@ -995,7 +1001,7 @@ int main(int argc, char* argv[]) {
 		/* Create program: Speed sample */ { //This program can be combined with speedometer if geometry shader is supported
 			const char* cfg =
 				"const int speedPoolSize = 8;"NL
-				"const float speedSensitive = 10.0;"NL
+				"const float speedSensitive = 0.05;"NL
 				"const int speedDisplayCutoff = 4;"NL;
 
 			gl_shaderSrc vs[] = {
@@ -1163,8 +1169,36 @@ int main(int argc, char* argv[]) {
 					gl_mesh_draw(&mesh_ortho);
 				}
 
-				#define RESULT (&framebuffer_stageA)
+				/* Project from  orthographic to perspective */ {
+					gl_shader_use(&shader_projectO2P);
+					gl_texture_bind(&framebuffer_stageA.texture, shader_projectP2O_paramSrc, 0);
+					gl_texture_bind(&texture_roadmap2, shader_projectP2O_paramRoadmapT2, 1);
+					gl_frameBuffer_bind(&framebuffer_speed, vSize, 1);
+					gl_mesh_draw(&mesh_persp);
+				}
+
+				/* Sample the speed, denoise and avg */ {
+					gl_shader_use(&shader_speedSample);
+					gl_texture_bind(&framebuffer_speed.texture, shader_speedSample_paramSpeedmap, 0);
+					gl_frameBuffer_bind(&framebuffer_stageA, vSize, 1);
+					gl_mesh_draw(&mesh_speedsample);
+				}
+
+				/* Display the speed in human-readable text */ {
+					gl_shader_use(&shader_speedometer);
+					gl_texture_bind(&framebuffer_stageA.texture, shader_speedometer_paramSpeedmap, 0);
+					gl_textureArray_bind(&texture_speedometer, shader_speedometer_paramGlyphmap, 1);
+					gl_frameBuffer_bind(&framebuffer_display, vSize, 1);
+					gl_mesh_draw(&mesh_speedometer);
+				}
+
+#if 3 == 4
+#endif
+
+//				#define RESULT (&framebuffer_stageA)
 //				#define RESULT (&framebuffer_edge[rri])
+//				#define RESULT (&framebuffer_speed)
+				#define RESULT (&framebuffer_display)
 
 #if 1 == 2
 
