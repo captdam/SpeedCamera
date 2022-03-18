@@ -9,14 +9,14 @@
 #include "roadmap.h"
 
 struct Roadmap_ClassDataStructure {
-	float* roadPoints; //Focus region vertices {screen-x, screen-y}[frVCnt]
-	size_t roadPointsCnt;
 	roadmap_header header;
 	roadmap_t1* t1;
 	roadmap_t2* t2;
+	unsigned int roadPointsCnt;
+	float* roadPoints; //Focus region vertices {screen-x, screen-y}[frVCnt]
 };
 
-Roadmap roadmap_init(const char* roadmapFile, size2d_t size) {
+Roadmap roadmap_init(const char* roadmapFile) {
 	Roadmap this = malloc(sizeof(struct Roadmap_ClassDataStructure));
 	if (!this) {
 		#ifdef VERBOSE
@@ -38,7 +38,6 @@ Roadmap roadmap_init(const char* roadmapFile, size2d_t size) {
 		roadmap_destroy(this);
 		return NULL;
 	}
-
 	if (!fread(&this->header, sizeof(roadmap_header), 1, fp)) {
 		#ifdef VERBOSE
 			fprintf(stderr, "Error in roadmap file %s: Cannot get header\n", roadmapFile);
@@ -47,18 +46,10 @@ Roadmap roadmap_init(const char* roadmapFile, size2d_t size) {
 		roadmap_destroy(this);
 		return NULL;
 	}
+	size_t s = this->header.width * this->header.height;
 
-	if (this->header.width != size.width || this->header.height != size.height) {
-		#ifdef VERBOSE
-			fprintf(stderr, "Error in roadmap file %s: Size mismatched\n", roadmapFile);
-		#endif
-		fclose(fp);
-		roadmap_destroy(this);
-		return NULL;
-	}
-
-	this->t1 = malloc(size.width * size.height * sizeof(roadmap_t1));
-	this->t2 = malloc(size.width * size.height * sizeof(roadmap_t2));
+	this->t1 = malloc(s * sizeof(roadmap_t1));
+	this->t2 = malloc(s * sizeof(roadmap_t2));
 	if (!this->t1 || !this->t2) {
 		#ifdef VERBOSE
 			fputs("Fail to create buffer for roadmap tables\n", stderr);
@@ -67,8 +58,7 @@ Roadmap roadmap_init(const char* roadmapFile, size2d_t size) {
 		roadmap_destroy(this);
 		return NULL;
 	}
-
-	if (!fread(this->t1, sizeof(roadmap_t1), size.width * size.height, fp)) {
+	if (!fread(this->t1, sizeof(roadmap_t1), s, fp)) {
 		#ifdef VERBOSE
 			fprintf(stderr, "Error in roadmap file %s: Cannot get table 1\n", roadmapFile);
 		#endif
@@ -76,8 +66,7 @@ Roadmap roadmap_init(const char* roadmapFile, size2d_t size) {
 		roadmap_destroy(this);
 		return NULL;
 	}
-
-	if (!fread(this->t2, sizeof(roadmap_t2), size.width * size.height, fp)) {
+	if (!fread(this->t2, sizeof(roadmap_t2), s, fp)) {
 		#ifdef VERBOSE
 			fprintf(stderr, "Error in roadmap file %s: Cannot get table 2\n", roadmapFile);
 		#endif
@@ -86,8 +75,8 @@ Roadmap roadmap_init(const char* roadmapFile, size2d_t size) {
 		return NULL;
 	}
 
-	unsigned int pCount = 0;
-	if (!fread(&pCount, sizeof(unsigned int), 1, fp)) {
+	roadmap_pCnt_t cnt; //Number of POINTS PAIR, in roadmap's data type
+	if (!fread(&cnt, sizeof(cnt), 1, fp)) {
 		#ifdef VERBOSE
 			fprintf(stderr, "Error in roadmap file %s: Cannot get points count\n", roadmapFile);
 		#endif
@@ -95,9 +84,9 @@ Roadmap roadmap_init(const char* roadmapFile, size2d_t size) {
 		roadmap_destroy(this);
 		return NULL;
 	}
-	this->roadPointsCnt = pCount * 2;
+	this->roadPointsCnt = cnt * 2; //Numer of POINTS, in native data type
 
-	this->roadPoints = malloc(2 * sizeof(float) * this->roadPointsCnt);
+	this->roadPoints = malloc(2 * sizeof(float) * this->roadPointsCnt); //Each POINTS contains 2-axis coords
 	if (!this->roadPoints) {
 		#ifdef VERBOSE
 			fputs("Fail to create buffer for focus region vertices\n", stderr);
@@ -106,8 +95,7 @@ Roadmap roadmap_init(const char* roadmapFile, size2d_t size) {
 		roadmap_destroy(this);
 		return NULL;
 	}
-
-	for (unsigned int i = 0; i < pCount; i++) {
+	for (unsigned int i = 0; i < cnt; i++) {
 		roadmap_point_t pointPair[2];
 		if (!fread(pointPair, sizeof(roadmap_point_t), 2, fp)) {
 			#ifdef VERBOSE
@@ -117,19 +105,13 @@ Roadmap roadmap_init(const char* roadmapFile, size2d_t size) {
 			roadmap_destroy(this);
 			return NULL;
 		}
-
-		float leftX = pointPair[0].screenX / (float)size.width;
-		float leftY = pointPair[0].screenY / (float)size.height;
-		float rightX = pointPair[1].screenX / (float)size.width;
-		float rightY = pointPair[1].screenY / (float)size.height;
-		this->roadPoints[i * 2 + 0] = leftX;
-		this->roadPoints[i * 2 + 1] = leftY;
-		this->roadPoints[pCount * 4 - i * 2 - 2] = rightX;
-		this->roadPoints[pCount * 4 - i * 2 - 1] = rightY;
+		this->roadPoints[i * 4 + 0] = pointPair[0].sx;
+		this->roadPoints[i * 4 + 1] = pointPair[0].sy;
+		this->roadPoints[i * 4 + 2] = pointPair[1].sx;
+		this->roadPoints[i * 4 + 3] = pointPair[1].sy;
 	}
 
 	fclose(fp);
-
 	return this;
 }
 
@@ -145,7 +127,7 @@ roadmap_t2* roadmap_getT2(Roadmap this) {
 	return this->t2;
 }
 
-float* roadmap_getRoadPoints(Roadmap this, size_t* size) {
+float* roadmap_getRoadPoints(Roadmap this, unsigned int* size) {
 	*size = this->roadPointsCnt;
 	return this->roadPoints;
 }
