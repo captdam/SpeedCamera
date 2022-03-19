@@ -110,14 +110,6 @@ int main(int argc, char* argv[]) {
 		info("Get frame size and allocate buffer for tables\n");
 		header.width = atoi(argv[1]);
 		header.height = atoi(argv[2]);
-		if ( header.width < 320 || header.width & (typeof(header.width))0b11 ) {
-			err("SIZE - width must be greater than or equal to 320 and be multiply of 4\n");
-			return EXIT_FAILURE;
-		}
-		if ( header.height < 240 || header.height & (typeof(header.height))0b11 ) {
-			err("SIZE - height must be greater than or equal to 240 and be multiply of 4\n");
-			return EXIT_FAILURE;
-		}
 
 		t1 = malloc(sizeof(data1_t) * header.height * header.width);
 		t2 = malloc(sizeof(data2_t) * header.height * header.width);
