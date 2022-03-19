@@ -43,10 +43,10 @@ typedef struct Roadmap_Point_t {
 
 /** Init a roadmap object, allocate memory for data read from map file. 
  * @param roadmapFile Directory to a binary coded file contains road-domain data
- * @param size Number of pixels in the video frame {width, height}, used to check the program cmd againest the roadmap file
+ * @param statue A pointer to message, used to return statue if this function fail
  * @return $this(Opaque) roadmap class object upon success. If fail, free all resource and return NULL
  */
-Roadmap roadmap_init(const char* roadmapFile);
+Roadmap roadmap_init(const char* roadmapFile, char** statue);
 
 /** Get the header of the roadmap file. 
  * @param this This roadmap class object
