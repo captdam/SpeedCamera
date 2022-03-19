@@ -71,13 +71,16 @@ typedef struct Vec4 {
  */
 uint64_t nanotime();
 
-/** Check if ptr is inside the box defined by leftTop point and rightBottom point
- * @param ptr The test point
- * @param leftTop The left-top point, contains smaller x and y coordinates
- * @param rightBottom The right-bottom point, contains greater x and y coordinates
- * @param strict If 0, ptr is inside if on border; if positive, ptr is outside if on border; if negative, ptr is inside if on left-top border but outside if on right-bottom border
- * @return True-equivalent (in most case 1) if ptr is inside; false-equivalent (0) if ptr is outside
+/** Check if a point is inside a box. 
+ * @param x Test point x-coord
+ * @param y Test poiny y-coord
+ * @param left Left x-coord of the box
+ * @param right Right x-coord of the box
+ * @param top Top y-coord of the box
+ * @param bottom Bottom y-coord of the box
+ * @param strict If 0, point is considered inside if on border; if positive, ptr is outside if on border; if negative, ptr is inside if on left-top border but outside if on right-bottom border (similar to 2D for loop checking)
+ * @return True-equivalent (in most case 1) if point is inside; false-equivalent (0) if point is outside
  */
-int inBox(size2d_t ptr, size2d_t leftTop, size2d_t rightBottom, int strict);
+int inBox(const int x, const int y, const int left, const int right, const int top, const int bottom, const int strict);
 
 #endif /* #ifndef INCLUDE_COMMON_H */

@@ -10,14 +10,10 @@ uint64_t nanotime() {
 	return t.tv_sec * 1000000000LLU + t.tv_nsec;
 }
 
-int inBox(size2d_t ptr, size2d_t leftTop, size2d_t rightBottom, int strict) {
-	size_t x = ptr.x, y = ptr.y;
-	size_t left = leftTop.x, right = rightBottom.x;
-	size_t top = leftTop.y, bottom = rightBottom.y;
+int inBox(const int x, const int y, const int left, const int right, const int top, const int bottom, const int strict) {
 	if (strict == 0)
 		return x >= left && x <= right && y >= top && y <= bottom;
-	else if (strict > 0)
+	if (strict > 0)
 		return x > left && x < right && y > top && y < bottom;
-	else
-		return x >= left && x < right && y >= top && y < bottom;
+	return x >= left && x < right && y >= top && y < bottom;
 }
