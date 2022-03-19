@@ -88,12 +88,12 @@ typedef unsigned int gl_index_t; //Mesh index
 
 /** Mesh geometry type */
 typedef enum GL_MeshMode {
-	gl_meshmode_points, gl_meshmode_triangles, gl_meshmode_triangleFan,
+	gl_meshmode_points, gl_meshmode_triangles, gl_meshmode_triangleFan, gl_meshmode_triangleStrip,
 gl_meshmode_placeholderEnd} gl_meshmode;
 
 /* == Texture, PBO for texture transfer and FBO for off-screen rendering ==================== */
 
-/* Texture data format */
+/** Texture data format */
 typedef enum GL_TexFormat {
 	gl_texformat_R8 = 0, gl_texformat_RG8, gl_texformat_RGB8, gl_texformat_RGBA8,
 	gl_texformat_R8I, gl_texformat_RG8I, gl_texformat_RGB8I, gl_texformat_RGBA8I,
@@ -106,7 +106,7 @@ typedef enum GL_TexFormat {
 	gl_texformat_R32UI, gl_texformat_RG32UI, gl_texformat_RGB32UI, gl_texformat_RGBA32UI,
 gl_texformat_placeholderEnd} gl_texformat;
 
-/* Texture type */
+/** Texture type */
 typedef enum GL_TexType {
 	gl_textype_2d, gl_textype_3d, gl_textype_2dArray,
 gl_textype_placeholderEnd} gl_textype;
@@ -121,38 +121,38 @@ typedef struct GL_Texture {
 } gl_tex;
 #define GL_INIT_DEFAULT_TEX (gl_tex){0, 0, 0, 0, 0, 0}
 
+/** Pixel buffer object for texture data transfer */
 typedef unsigned int gl_pbo;
 #define GL_INIT_DEFAULT_PBO (gl_pbo)0
 
+/** Framebuffer object for off-screen rendering */
 typedef unsigned int gl_fbo;
 #define GL_INIT_DEFAULT_FBO (gl_fbo)0
 
 /* == Window and driver management ========================================================== */
 
 /** Set log and error log stream. 
- * @param l Log stream
- * @param e Error log stream
+ * @param stream Log stream
  */
-void gl_logStream(FILE* l, FILE* e);
+void gl_logStream(FILE* stream);
 
 /** Write to log or error log stream. 
- * @param es Stream. 0 for log, 1 for error log
  * @param format A C printf-style format string
  * @param ... A list of arguments
  */
-int gl_logWrite(const int es, const char* format, ...);
+int gl_logWrite(const char* format, ...);
 
 /** Print log to log stream. 
  * @param format A C printf-style format string
  * @param ... A list of arguments
  */
-#define gl_log(format, ...) gl_logWrite(0, "[GL] Log:\t"format"\n" __VA_OPT__(,) __VA_ARGS__)
+#define gl_log(format, ...) gl_logWrite("[GL] Log:\t"format"\n" __VA_OPT__(,) __VA_ARGS__)
 
 /** Print error log to error log stream. 
  * @param format A C printf-style format string
  * @param ... A list of arguments
  */
-#define gl_elog(format, ...) gl_logWrite(1, "[GL] Err:\t"format"\n" __VA_OPT__(,) __VA_ARGS__)
+#define gl_elog(format, ...) gl_logWrite("[GL] Err:\t"format"\n" __VA_OPT__(,) __VA_ARGS__)
 
 /** Init the GL class. 
  * @return 1 if success, 0 if fail
@@ -165,6 +165,12 @@ int gl_init() __attribute__((cold));
  * @param cursorPos Pointer to 2 double, used to return size of the GPU framebuffer {width,height}
  */
 void gl_drawStart(double cursorPos[static 2], int windowSize[static 2], int framebufferSize[static 2]);
+
+/** Set the drawing viewport
+ * @param offset Offset in px {x,y}
+ * @param size Size in px {width,height}
+ */
+void gl_setViewport(const unsigned int offset[static 2], const unsigned int size[static 2]);
 
 /** Call at the end of a render loop. 
  * @param title New window title (pass NULL to use old title)
@@ -181,6 +187,11 @@ int gl_close(int close);
 /** Destroy the GL class, kill the viewer window and release all the GL resource. 
  */
 void gl_destroy();
+
+/** Switch to line mode
+ * @param weight Set the line weight and turn on line mode; 0 to turn off line mode
+ */
+void gl_lineMode(unsigned int weight);
 
 /** Force the GL driver to sync. 
  * Calling thread will be blocked until all previous GL calls executed completely. 
@@ -236,10 +247,10 @@ void gl_program_use(gl_program* program);
  * Call gl_program_use() to bind the shader program before set the parameter. 
  * @param paramId ID of parameter previously returned by gl_program_create()
  * @param length Number of vector in a parameter (vecX, can be 1, 2, 3 or 4, use 1 for non-verctor params, e.g. sampler)
- * @param type Type of the data: gl_type_*
+ * @param type Type of the data: gl_datatype_*
  * @param data Pointer to the data to be pass
  */
-void gl_program_setParam(gl_param paramId, unsigned int length, gl_datatype type, void* data);
+void gl_program_setParam(const gl_param paramId, const unsigned int length, const gl_datatype type, const void* data);
 
 /** Delete a shader program, the shader program will be reset to GL_INIT_DEFAULT_SHADER. 
  * @param program A shader program previously returned by gl_program_create()
@@ -394,11 +405,10 @@ int gl_frameBuffer_check(gl_fbo* fbo);
 
 /** Bind a FBO to current for drawing. 
  * To bind the default buffer (display window), pass NULL. 
- * @param fbo A FBOr previously returned by gl_frameBuffer_create(), or NULL for display window
- * @param size Change the size of viewport. Pass {0,0} to skip this step (use old viewport size)
+ * @param fbo A FBO previously returned by gl_frameBuffer_create(), or NULL for display window
  * @param clear Use non-zero value to erase the content before drawing, use 0 to draw on exist content
  */
-void gl_frameBuffer_bind(gl_fbo* fbo, const unsigned int size[static 2], int clear);
+void gl_frameBuffer_bind(gl_fbo* fbo, int clear);
 
 /** Download a portion of fram buffer from GPU. 
  * @param fbo A FBO previously created by gl_frameBuffer_create()

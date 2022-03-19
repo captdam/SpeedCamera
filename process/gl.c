@@ -10,8 +10,8 @@
 
 /* == Window and driver management ========================================================== */
 
-static FILE* logStream[2] = {NULL, NULL}; //Log and error log stream
-static GLFWwindow* window = NULL; //Display window object
+FILE* logStream = NULL; //Log and error log stream
+GLFWwindow* window = NULL; //Display window object
 
 void __gl_windowCloseCallback(GLFWwindow* window); //Event callback when window closed by user (X button or kill)
 void __gl_glfwErrorCallback(int code, const char* desc); //GLFW error log
@@ -24,24 +24,18 @@ gl_synch_status __gl_synchWaitPH(gl_synch s, uint64_t timeout); //Wait for synch
 void __gl_synchDelete(gl_synch s); //Delete a synch point
 void __gl_synchDeletePH(gl_synch s); //Delete a synch point placeholder
 
-void gl_logStream(FILE* l, FILE* e) {
-	logStream[0] = l;
-	logStream[1] = e;
+void gl_logStream(FILE* stream) {
+	logStream = stream;
 }
 
-int gl_logWrite(const int es, const char* format, ...) {
+int gl_logWrite(const char* format, ...) {
 	va_list args;
 	va_start(args, format);
-	vfprintf(logStream[es], format, args);
+	vfprintf(logStream, format, args);
 	va_end(args);
 }
 
 int gl_init() {
-	if (!logStream[0])
-		logStream[0] = stdout;
-	if (!logStream[1])
-		logStream[1] = stderr;
-
 	#ifdef VERBOSE
 		gl_log("Init OpenGL");
 	#endif
@@ -61,11 +55,10 @@ int gl_init() {
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 //	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-//	glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
 	#ifdef VERBOSE
 //		glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
 	#endif
-	window = glfwCreateWindow(1280, 960, "Viewer", NULL, NULL);
+	window = glfwCreateWindow(1280, 720, "Viewer", NULL, NULL);
 	if (!window){
 		#ifdef VERBOSE
 			gl_elog("\tFail to open window");
@@ -124,7 +117,6 @@ int gl_init() {
 
 	/* OpenGL config */
 //	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-//	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); glLineWidth(10);
 	glEnable(GL_PROGRAM_POINT_SIZE); glPointSize(10.0f);
 	glfwSetCursor(window, glfwCreateStandardCursor(GLFW_CROSSHAIR_CURSOR));
 
@@ -136,6 +128,11 @@ void gl_drawStart(double cursorPos[static 2], int windowSize[static 2], int fram
 	glfwGetCursorPos(window, cursorPos, cursorPos+1);
 	glfwGetWindowSize(window, windowSize, windowSize+1);
 	glfwGetFramebufferSize(window, framebufferSize, framebufferSize+1);
+}
+
+
+void gl_setViewport(const unsigned int offset[static 2], const unsigned int size[static 2]) {
+	glViewport(offset[0], offset[1], size[0], size[1]);
 }
 
 void gl_drawEnd(const char* title) {
@@ -164,6 +161,15 @@ void gl_destroy() {
 	#endif
 	gl_close(1);
 	glfwTerminate();
+}
+
+void gl_lineMode(unsigned int weight) {
+	if (weight) {
+		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+		glLineWidth(weight);
+	} else {
+		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	}
 }
 
 void gl_fsync() {
@@ -268,7 +274,7 @@ gl_program gl_program_create(const gl_programSrc* srcs, gl_programArg* args) {
 
 	/* Prepare buffer, shader and program object */
 	#ifdef VERBOSE
-		gl_log("init shader program");
+		gl_log("Init shader program");
 	#endif
 	GLuint program = 0;
 	struct {
@@ -447,14 +453,14 @@ void gl_program_use(gl_program* program) {
 	glUseProgram(*program);
 }
 
-void gl_program_setParam(gl_param paramId, unsigned int length, gl_datatype type, void* data) {
+void gl_program_setParam(const gl_param paramId, const unsigned int length, const gl_datatype type, const void* data) {
 	if (length - 1 > 3) {
 		gl_elog("Param set fail: GL supports vector size 1 to 4 only");
 		return;
 	}
 
 	if (type == gl_datatype_int) {
-		int* d = data;
+		const int* d = data;
 		if (length == 4)
 			glUniform4i(paramId, d[0], d[1], d[2], d[3]);
 		else if (length == 3)
@@ -464,7 +470,7 @@ void gl_program_setParam(gl_param paramId, unsigned int length, gl_datatype type
 		else
 			glUniform1i(paramId, d[0]);
 	} else if (type == gl_datatype_uint) {
-		unsigned int* d = data;
+		const unsigned int* d = data;
 		if (length == 4)
 			glUniform4ui(paramId, d[0], d[1], d[2], d[3]);
 		else if (length == 3)
@@ -474,7 +480,7 @@ void gl_program_setParam(gl_param paramId, unsigned int length, gl_datatype type
 		else
 			glUniform1ui(paramId, d[0]);
 	} else if (type == gl_datatype_float) {
-		float* d = data;
+		const float* d = data;
 		if (length == 4)
 			glUniform4f(paramId, d[0], d[1], d[2], d[3]);
 		else if (length == 3)
@@ -501,7 +507,7 @@ gl_ubo gl_uniformBuffer_create(unsigned int bindingPoint, size_t size, gl_usage 
 
 	glGenBuffers(1, &ubo);
 	glBindBuffer(GL_UNIFORM_BUFFER, ubo);
-	glBufferData(GL_UNIFORM_BUFFER, size, NULL, usageLookup[usage]); //in most case, we set params only at the beginning for only once, so we use STATIC_DRAW
+	glBufferData(GL_UNIFORM_BUFFER, size, NULL, usageLookup[usage]);
 	glBindBufferBase(GL_UNIFORM_BUFFER, bindingPoint, ubo);
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
@@ -581,6 +587,9 @@ gl_mesh gl_mesh_create(const unsigned int count[static 3], gl_index_t* elementsS
 			break;
 		case gl_meshmode_triangleFan:
 			mesh.mode = GL_TRIANGLE_FAN;
+			break;
+		case gl_meshmode_triangleStrip:
+			mesh.mode =  GL_TRIANGLE_STRIP;
 			break;
 		default:
 			return GL_INIT_DEFAULT_MESH;
@@ -859,12 +868,8 @@ int gl_frameBuffer_check(gl_fbo* fbo) {
 	return *fbo != GL_INIT_DEFAULT_FBO;
 }
 
-void gl_frameBuffer_bind(gl_fbo* fbo, const unsigned int size[static 2], int clear) {
+void gl_frameBuffer_bind(gl_fbo* fbo, int clear) {
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo ? *fbo : 0);
-
-	if (size[0] && size[1]) {
-		glViewport(0, 0, size[0], size[1]);
-	}
 
 	if (clear) {
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
