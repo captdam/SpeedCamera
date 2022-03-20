@@ -6,18 +6,23 @@ uniform highp isampler2D roadmapT2;
 
 /* Defined by client: P2O || O2P */
 
-#define CH_ROADMAP2_LOOKUP_P2O z
-#define CH_ROADMAP2_LOOKUP_O2P w
-
 void main() {
 	ivec2 pxIdx = ivec2(vec2(textureSize(src, 0)) * pxPos);
-
-	ivec2 sampleIdx = pxIdx; //Default - no projection if client didn't define mode
+	 
 	#if defined(P2O)
-		sampleIdx.x = texelFetch(roadmapT2, pxIdx, 0).CH_ROADMAP2_LOOKUP_P2O;
+		/* Note: 
+		* Use texture with normalized coord instead of texelFetch with absolute coord, 
+		* roadmap may have different size than the video.
+		*/
+		pxIdx.x = texture(roadmapT2, pxPos).z * textureSize(src, 0).x / textureSize(roadmapT2, 0).x;
 	#elif defined(O2P)
-		sampleIdx.x = texelFetch(roadmapT2, pxIdx, 0).CH_ROADMAP2_LOOKUP_O2P;
+		pxIdx.x = texture(roadmapT2, pxPos).w * textureSize(src, 0).x / textureSize(roadmapT2, 0).x;
 	#endif
+		//Default: pxIdx.x not changed, no projection
 
-	result = texelFetch(src, sampleIdx, 0);
+	result = texelFetch(src, pxIdx, 0);
+	/* Note: 
+	* Use texelFetch() to avoid sample when project. 
+	* When data is stored in texture, We should directly fetch that data without any processing on it. 
+	*/
 }

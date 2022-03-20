@@ -16,12 +16,10 @@ uniform vec4 cfgF1;
 #define CH_ROADMAP2_LOOKUP_O2P w
 
 #define MODE cfgI1.x
-#define MODE_PRINTT1XY 1
-#define MODE_PRINTT1ZW 2
-#define MODE_PRINTT2XY 3
-#define MODE_PRINTT2ZW 4
-#define MODE_PERSPGRID 5
-#define MODE_OTHORGRID 6
+#define MODE_T1 1
+#define MODE_T2 2
+#define MODE_PERSPGRID 3
+#define MODE_OTHORGRID 4
 
 void main() {
 	ivec2 pxIdx = ivec2(vec2(textureSize(roadmapT1, 0)) * pxPos);
@@ -33,33 +31,27 @@ void main() {
 	vec4 roadPosRight =	texelFetchOffset(roadmapT1, pxIdx, 0, ivec2(+1,  0));
 	ivec4 roadInfoCurrent =	texelFetch(roadmapT2, pxIdx, 0);
 
-	vec3 color = vec3(0.0, 0.0, 0.0);
+	vec4 color = vec4(0.0);
 
-	if (MODE == MODE_PRINTT1XY) {
-		color = vec3(roadPosCurrent.xy, 0.0);
-	} else if (MODE == MODE_PRINTT1ZW) {
-		color = vec3(roadPosCurrent.zw, 0.0);
-	} else if (MODE == MODE_PRINTT2XY) {
-		color = vec3(roadInfoCurrent.xy, 0.0);
-	} else if (MODE == MODE_PRINTT2ZW) {
-		color = vec3(roadInfoCurrent.zw, 0.0);
+	if (MODE == MODE_T1) {
+		color = roadPosCurrent;
+	} else if (MODE == MODE_T2) {
+		color = vec4(roadInfoCurrent);
 	} else if (MODE == MODE_PERSPGRID) {
 		if ( sign(roadPosUp.CH_ROADMAP1_PY) != sign(roadPosDown.CH_ROADMAP1_PY) )
-			color = vec3(1.0, 0.2, 0.2);
+			color = vec4(1.0, 0.2, 0.2, 1.0);
 		else if ( floor(roadPosLeft.CH_ROADMAP1_PX / cfgF1.x) != floor(roadPosRight.CH_ROADMAP1_PX / cfgF1.x) )
-			color = vec3(0.1, 0.6, 0.1);
+			color = vec4(0.1, 0.1, 0.8, 1.0);
 		else if ( floor(roadPosUp.CH_ROADMAP1_PY / cfgF1.y) != floor(roadPosDown.CH_ROADMAP1_PY / cfgF1.y) )
-			color = vec3(0.1, 0.1, 0.6);
+			color = vec4(0.1, 0.8, 0.1, 1.0);
 	} else if (MODE == MODE_OTHORGRID) {
 		if ( sign(roadPosUp.CH_ROADMAP1_OY) != sign(roadPosDown.CH_ROADMAP1_OY) )
-			color = vec3(1.0, 0.2, 0.2);
+			color = vec4(1.0, 0.2, 0.2, 1.0);
 		else if ( floor(roadPosLeft.CH_ROADMAP1_OX / cfgF1.x) != floor(roadPosRight.CH_ROADMAP1_OX / cfgF1.x) )
-			color = vec3(0.1, 0.6, 0.1);
+			color = vec4(0.1, 0.1, 0.8, 1.0);
 		else if ( floor(roadPosUp.CH_ROADMAP1_OY / cfgF1.y) != floor(roadPosDown.CH_ROADMAP1_OY / cfgF1.y) )
-			color = vec3(0.1, 0.1, 0.6);
-	} else {
-		color = cfgF1.xyz;
+			color = vec4(0.1, 0.8, 0.1, 1.0);
 	}
 
-	result = vec4(color, 1.0);
+	result = vec4(color/*, 1.0*/);
 }
