@@ -14,7 +14,8 @@ struct Roadmap_ClassDataStructure {
 Roadmap roadmap_init(const char* roadmapFile, char** statue) {
 	Roadmap this = malloc(sizeof(struct Roadmap_ClassDataStructure));
 	if (!this) {
-		*statue = "Fail to create roadmap class object data structure";
+		if (statue)
+			*statue = "Fail to create roadmap class object data structure";
 		return NULL;
 	}
 	*this = (struct Roadmap_ClassDataStructure){
@@ -25,12 +26,14 @@ Roadmap roadmap_init(const char* roadmapFile, char** statue) {
 
 	FILE* fp = fopen(roadmapFile, "rb");
 	if (!fp) {
-		*statue = "Fail to open roadmap file";
+		if (statue)
+			*statue = "Fail to open roadmap file";
 		roadmap_destroy(this);
 		return NULL;
 	}
 	if (!fread(&this->header, sizeof(roadmap_header), 1, fp)) {
-		*statue = "Error in roadmap file: Cannot read header";
+		if (statue)
+			*statue = "Error in roadmap file: Cannot read header";
 		fclose(fp);
 		roadmap_destroy(this);
 		return NULL;
@@ -40,19 +43,22 @@ Roadmap roadmap_init(const char* roadmapFile, char** statue) {
 	this->t1 = malloc(s * sizeof(roadmap_t1));
 	this->t2 = malloc(s * sizeof(roadmap_t2));
 	if (!this->t1 || !this->t2) {
-		*statue = "Fail to allocate buffer memory for roadmap tables";
+		if (statue)
+			*statue = "Fail to allocate buffer memory for roadmap tables";
 		fclose(fp);
 		roadmap_destroy(this);
 		return NULL;
 	}
 	if (!fread(this->t1, sizeof(roadmap_t1), s, fp)) {
-		*statue = "Error in roadmap file: Cannot read table 1";
+		if (statue)
+			*statue = "Error in roadmap file: Cannot read table 1";
 		fclose(fp);
 		roadmap_destroy(this);
 		return NULL;
 	}
 	if (!fread(this->t2, sizeof(roadmap_t2), s, fp)) {
-		*statue = "Error in roadmap file: Cannot read table 2";
+		if (statue)
+			*statue = "Error in roadmap file: Cannot read table 2";
 		fclose(fp);
 		roadmap_destroy(this);
 		return NULL;
@@ -60,7 +66,8 @@ Roadmap roadmap_init(const char* roadmapFile, char** statue) {
 
 	roadmap_pCnt_t cnt; //Number of POINTS PAIR, in roadmap's data type
 	if (!fread(&cnt, sizeof(cnt), 1, fp)) {
-		*statue = "Error in roadmap file: Cannot read focus region points count";
+		if (statue)
+			*statue = "Error in roadmap file: Cannot read focus region points count";
 		fclose(fp);
 		roadmap_destroy(this);
 		return NULL;
@@ -69,7 +76,8 @@ Roadmap roadmap_init(const char* roadmapFile, char** statue) {
 
 	this->roadPoints = malloc(2 * sizeof(float) * this->roadPointsCnt); //Each POINTS contains 2-axis coords
 	if (!this->roadPoints) {
-		*statue = "Fail to allocate buffer memory for focus region";
+		if (statue)
+			*statue = "Fail to allocate buffer memory for focus region";
 		fclose(fp);
 		roadmap_destroy(this);
 		return NULL;
@@ -77,7 +85,8 @@ Roadmap roadmap_init(const char* roadmapFile, char** statue) {
 	for (unsigned int i = 0; i < cnt; i++) {
 		roadmap_point_t pointPair[2];
 		if (!fread(pointPair, sizeof(roadmap_point_t), 2, fp)) {
-			*statue = "Error in roadmap file: Cannot read focus region";
+			if (statue)
+				*statue = "Error in roadmap file: Cannot read focus region";
 			fclose(fp);
 			roadmap_destroy(this);
 			return NULL;
