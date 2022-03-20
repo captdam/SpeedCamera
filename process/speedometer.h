@@ -28,9 +28,8 @@ Speedometer speedometer_init(const char* glyphs, char** statue);
  * By calling this method, the flat 2D glyph map will be converted into 2D array texture; which means, there will be 256 different 2D textures in the array. 
  * Each of the 256 glyph can be access by using index (z-axis). This works for 2D array texture. 
  * @param this This speedometer class object
- * @return On success, return 1; if fail (out of memory), return 0
  */
-int speedometer_convert(Speedometer this);
+void speedometer_convert(Speedometer this);
 
 
 /** Get a pointer to the glyph. 

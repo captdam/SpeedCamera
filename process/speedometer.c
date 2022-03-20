@@ -60,7 +60,7 @@ Speedometer speedometer_init(const char* glyphs, char** statue) {
 	return this;
 }
 
-int speedometer_convert(Speedometer this) {
+void speedometer_convert(Speedometer this) {
 	unsigned int gWidth = this->size[0], gHeight = this->size[1];
 	uint32_t temp[16][gHeight][gWidth]; //For a row, 16 char
 
@@ -85,8 +85,6 @@ int speedometer_convert(Speedometer this) {
 		}
 		memcpy(rowPtr, temp, sizeof(temp));
 	}
-
-	return 1;
 }
 
 uint32_t* speedometer_getGlyph(Speedometer this, unsigned int size[static 2]) {
