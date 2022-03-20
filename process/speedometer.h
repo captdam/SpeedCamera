@@ -13,12 +13,15 @@
 typedef struct Speedometer_ClassDataStructure* Speedometer;
 
 /** Init a speedometer object, allocate memory, read speedometer glyph from bitmap file. 
- * The glyph bitmap file must contains 256 glyphs, 16 rows in total, each row contains 16 glyphs. This bitmap must be in RGBA8 (uint32_t) format. 
- * There is no restriction on the size of the glyph, but all of them should have same size. 
+ * The glyph bitmap file must contains 256 glyphs, 16 rows in total, each row contains 16 glyphs. 
+ * Order of glyphs must be left-to-right, top-to-bottom. 
+ * This bitmap must be in RGBA8 (uint32_t/pixel) format. 
+ * There is no restriction on the size of the each glyph, but all of them should have same size. 
  * @param glyphs Directory to a glyphs file, must be in plain RGBA8 raw data format
+ * @param statue If not NULL, return error message in case this function fail
  * @return $this(Opaque) speedometer class object upon success. If fail, free all resource and return NULL
  */
-Speedometer speedometer_init(const char* glyphs);
+Speedometer speedometer_init(const char* glyphs, char** statue);
 
 /** Convert the glyph to array. 
  * By default, the glyph map layout is 16 * 16; in another word, a flat texture contains 256 small texture. This works for 2D texture. 
@@ -30,14 +33,12 @@ Speedometer speedometer_init(const char* glyphs);
 int speedometer_convert(Speedometer this);
 
 
-/** Get a pointer to the glyph loaded from file, which can be upload to GPU as texture. 
- * This 2D bitmap contains a collection of 256 glpphs. 16 glyphs in one row, and there are 16 rows. 
- * The order is from small to large: left to right, then top to bottom. 
+/** Get a pointer to the glyph. 
  * @param this This speedometer class object
- * @param size Size of each glyph, pass-by-reference
- * @return Pointer to the bitmap glyph (format = RGBA8, uint32_t)
+ * @param size Width and height of each glyph, pass-by-reference
+ * @return Pointer to the bitmap glyph
  */
-uint32_t* speedometer_getGlyph(Speedometer this, size2d_t* size);
+uint32_t* speedometer_getGlyph(Speedometer this, unsigned int size[static 2]);
 
 /** Destroy this speedometer class object, frees resources. 
  * @param this This speedometer class object
