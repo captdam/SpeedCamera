@@ -17,15 +17,20 @@ void main() {
 	float dis = 0.0;
 
 	if (texelFetch(current, pxIdx, 0).r == 1.0) { //==1.0 means edge
-		float currentPos = texelFetch(roadmapT1, pxIdx, 0).CH_ROADMAP1_POS_OY;
+		float currentPos = texture(roadmapT1, pxPos).CH_ROADMAP1_POS_OY; //roadmap may have different size, interpolation is OK
 
-		int limitUp = texelFetch(roadmapT2, pxIdx, 0).CH_ROADMAP2_SEARCHDUP;
-		int limitDown = texelFetch(roadmapT2, pxIdx, 0).CH_ROADMAP2_SEARCHDOWN;
+		int limitUp = texture(roadmapT2, pxPos).CH_ROADMAP2_SEARCHDUP;
+		int limitDown = texture(roadmapT2, pxPos).CH_ROADMAP2_SEARCHDOWN;
 
 		float distanceUp = -1.0;
 		for (ivec2 idx = pxIdx; idx.y >= limitUp; idx.y--) {
 			if (texelFetch(previous, idx, 0).r > 0.0) { //>0.0 means object
-				float roadPos = texelFetch(roadmapT1, idx, 0).CH_ROADMAP1_POS_OY;
+				
+//				ivec2 roadIdx = idx * textureSize(roadmapT1, 0) / textureSize(current, 0);
+//				float roadPos = texelFetch(roadmapT1, roadIdx, 0).CH_ROADMAP1_POS_OY;
+
+				float roadPos = texture( roadmapT1 , vec2(idx) / vec2(textureSize(current,0)) ).CH_ROADMAP1_POS_OY;
+
 				distanceUp = roadPos - currentPos;
 				break;
 			}
@@ -34,7 +39,12 @@ void main() {
 		float distanceDown = -1.0;
 		for (ivec2 idx = pxIdx; idx.y <= limitDown; idx.y++) {
 			if (texelFetch(previous, idx, 0).r > 0.0) {
-				float roadPos = texelFetch(roadmapT1, idx, 0).CH_ROADMAP1_POS_OY;
+		
+//				ivec2 roadIdx = idx * textureSize(roadmapT1, 0) / textureSize(current, 0);
+//				float roadPos = texelFetch(roadmapT1, roadIdx, 0).CH_ROADMAP1_POS_OY;
+
+				float roadPos = texture( roadmapT1 , vec2(idx) / vec2(textureSize(current,0)) ).CH_ROADMAP1_POS_OY;
+
 				distanceDown = currentPos - roadPos;
 				break;
 			}
@@ -48,5 +58,5 @@ void main() {
 			dis = distanceDown;
 	}
 
-	result = vec4(dis * BIAS, 0.0, 0.0, 1.0);
+	result = vec4(min(dis * BIAS, 255.0), 0.0, 0.0, 1.0);
 }

@@ -28,6 +28,14 @@
 /* GPU buffer memory format */
 #define INTERNAL_COLORFORMAT gl_texformat_RGBA32F //Must use RGBA16F or RGBA32F
 
+/* Shader config */
+#define SHADER_CHANGINGSENSOR_THRESHOLD "0.05" //minimum changing in RGB to pass test
+#define SHADER_OBJECTFIX_HDISTANCE "1.0" //Object fix gap distance in meter 
+#define SHADER_OBJECTFIX_VDISTANCE "1.0"
+#define SHADER_EDGEREFINE_BOTTOMDENOISE "5" //Bottom and side clerance of edge in px
+#define SHADER_EDGEREFINE_SIDEDNOISE "20"
+#define SHADER_FINAL_RAWLUMA "0.1" //Blend intensity of raw 
+
 /* Input video interleave */
 #define INPUT_INTERLEAVE 1 //Read 1 frame for every X frame, used to skip some frames
 
@@ -297,6 +305,10 @@ int th_reader_readRGBADirect() {
 
 /* -- Main thread --------------------------------------------------------------------------- */
 
+const int robin2[] = {1, 0, 1};
+const int robin4[] = {3, 2, 1, 0, 3, 2, 1};
+const int robin8[] = {7, 6, 5, 4, 3, 2, 1, 0, 7, 6, 5, 4, 3, 2, 1};
+
 int main(int argc, char* argv[]) {
 	const unsigned int zeros[4] = {0, 0, 0, 0}; //Zero array with 4 elements (can be used as zeros[1], zeros[2] or zeros[3] as well, it is just a pointer in C)
 
@@ -384,6 +396,8 @@ int main(int argc, char* argv[]) {
 	fb fb_display = DEFAULT_FB; //Display human-readable text
 	fb fb_stageA = DEFAULT_FB;
 	fb fb_stageB = DEFAULT_FB;
+	const int* fb_raw_robin = robin2;
+	const int* fb_object_robin = robin4;
 
 	//Program - Roadmap check
 	struct {
@@ -810,8 +824,7 @@ int main(int argc, char* argv[]) {
 		/* Create program: Changing sensor */ {
 			const char* cfg =
 				"#define MONO"NL
-//				"#define HUE"NL
-				"#define BINARY vec4(vec3(0.05), -1.0)"NL
+				"#define BINARY vec4(vec3("SHADER_CHANGINGSENSOR_THRESHOLD"), -1.0)"NL
 //				"#define CLAMP vec4[2](vec4(vec3(0.0), 1.0), vec4(vec3(1.0), 1.0))"NL
 			;
 
@@ -840,11 +853,11 @@ int main(int argc, char* argv[]) {
 		/* Create program: Object fix (2 stages) */ {
 			char* horizontal =
 				"#define HORIZONTAL"NL
-				"#define SEARCH_DISTANCE 0.7"NL
+				"#define SEARCH_DISTANCE "SHADER_OBJECTFIX_HDISTANCE NL
 			;
 			char* vertical =
 				"#define VERTICAL"NL
-				"#define SEARCH_DISTANCE 1.0"NL
+				"#define SEARCH_DISTANCE "SHADER_OBJECTFIX_VDISTANCE NL
 			;
 
 			gl_programSrc src[] = {
@@ -880,8 +893,8 @@ int main(int argc, char* argv[]) {
 
 		/* Create program: Edge refine */ {
 			const char* cfg =
-				"#define DENOISE_BOTTOM 5"NL
-				"#define DENOISE_SIDE 20"NL
+				"#define DENOISE_BOTTOM "SHADER_EDGEREFINE_BOTTOMDENOISE NL
+				"#define DENOISE_SIDE "SHADER_EDGEREFINE_SIDEDNOISE NL
 			;
 
 			gl_programSrc src[] = {
@@ -978,11 +991,13 @@ int main(int argc, char* argv[]) {
 		}
 
 		/* Create program: Final display */ {
+			char cfg[] = "#define RAW_LUMA "SHADER_FINAL_RAWLUMA NL;
+
 			gl_programSrc src[] = {
 				{gl_programSrcType_vertex,	gl_programSrcLoc_mem,	"#version 310 es\nprecision mediump float;\n"},
 				{gl_programSrcType_vertex,	gl_programSrcLoc_file,	"shader/final.vs.glsl"},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	"#version 310 es\nprecision lowp float;\n"}, //Just blend, lowp is good enough
-				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	"#define MIX_LEVEL 0.1\n"},
+				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	cfg},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_file,	"shader/final.fs.glsl"},
 				{.str = NULL}
 			};
@@ -1013,12 +1028,8 @@ int main(int argc, char* argv[]) {
 
 		info("Program ready!");
 		while(!gl_close(-1)) {
-			const int robin2[] = {1, 0, 1};
-			const int* history2 = &robin2[ 1 - ((unsigned int)frameCnt & (unsigned int)0b1) ];
-			const int robin4[] = {3, 2, 1, 0, 3, 2, 1};
-			const int* history4 = &robin4[ 3 - ((unsigned int)frameCnt & (unsigned int)0b11) ];
-			const int robin8[] = {7, 6, 5, 4, 3, 2, 1, 0, 7, 6, 5, 4, 3, 2, 1};
-			const int* history8 = &robin8[ 7 - ((unsigned int)frameCnt & (unsigned int)0b111) ];
+			const int* fb_raw_idx = fb_raw_robin + fb_raw_robin[0] - ( (unsigned int)frameCnt & (unsigned int)fb_raw_robin[0] );
+			const int* fb_object_idx = fb_object_robin + fb_object_robin[0] - ( (unsigned int)frameCnt & (unsigned int)fb_object_robin[0] );
 
 			int sizeWin[2], sizeFB[2];
 			double cursorPosWin[2];
@@ -1063,14 +1074,14 @@ int main(int argc, char* argv[]) {
 				/* Blur the raw to remove noise */ {
 					gl_program_use(&program_blurFilter.pid);
 					gl_texture_bind(&texture_orginalBuffer, program_blurFilter.src, 0);
-					gl_frameBuffer_bind(&fb_raw[ history2[0] ].fbo, 1);
+					gl_frameBuffer_bind(&fb_raw[ fb_raw_idx[0] ].fbo, 1);
 					gl_mesh_draw(&mesh_persp);
 				}
 
 				/* Finding changing to detect moving object*/ {
 					gl_program_use(&program_changingSensor.pid);
-					gl_texture_bind(&fb_raw[ history2[0] ].tex, program_changingSensor.current, 0);
-					gl_texture_bind(&fb_raw[ history2[1] ].tex, program_changingSensor.previous, 1);
+					gl_texture_bind(&fb_raw[ fb_raw_idx[0] ].tex, program_changingSensor.current, 0);
+					gl_texture_bind(&fb_raw[ fb_raw_idx[1] ].tex, program_changingSensor.previous, 1);
 					gl_frameBuffer_bind(&fb_stageA.fbo, 1);
 					gl_mesh_draw(&mesh_persp);
 				}
@@ -1100,14 +1111,14 @@ int main(int argc, char* argv[]) {
 				/* Refine edge, thinning the thick edge */ {
 					gl_program_use(&program_edgeRefine.pid);
 					gl_texture_bind(&fb_stageB.tex, program_edgeRefine.src, 0);
-					gl_frameBuffer_bind(&fb_object[ history4[0] ].fbo, 1);
+					gl_frameBuffer_bind(&fb_object[ fb_object_idx[0] ].fbo, 1);
 					gl_mesh_draw(&mesh_ortho);
 				}
 
 				/* Measure the distance of edge moving between current frame and previous frame */ {
 					gl_program_use(&program_measure.pid);
-					gl_texture_bind(&fb_object[ history4[0] ].tex, program_measure.current, 0);
-					gl_texture_bind(&fb_object[ history4[INPUT_INTERLEAVE] ].tex, program_measure.previous, 1);
+					gl_texture_bind(&fb_object[ fb_object_idx[0] ].tex, program_measure.current, 0);
+					gl_texture_bind(&fb_object[ fb_object_idx[INPUT_INTERLEAVE] ].tex, program_measure.previous, 1);
 					gl_texture_bind(&texture_roadmap1, program_measure.roadmapT1, 2);
 					gl_texture_bind(&texture_roadmap2, program_measure.roadmapT2, 3);
 					gl_frameBuffer_bind(&fb_stageA.fbo, 1);
@@ -1136,10 +1147,12 @@ int main(int argc, char* argv[]) {
 					gl_frameBuffer_bind(&fb_display.fbo, 1);
 					gl_mesh_draw(&mesh_persp);
 				}
+#if 1==6
+#endif
 
-//				#define RESULT fb_stageB
-//				#define RESULT fb_raw[ history2[0] ]
-//				#define RESULT fb_object[ history4[0] ]
+//				#define RESULT fb_stageA
+//				#define RESULT fb_raw[ fb_raw_idx[0] ]
+//				#define RESULT fb_object[ fb_object_idx[0] ]
 //				#define RESULT fb_speed
 				#define RESULT fb_display
 
