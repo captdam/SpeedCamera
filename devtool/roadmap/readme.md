@@ -333,26 +333,35 @@ When the video resolution matches with the roadmap size, the program can directl
 vec2 searchLimit = texelFetch(map, ivec2(x,y), 1);
 ``` 
 
-However, if the video resolution differs from the roadmap size, additional computation is required. This is because some data in the roadmap uses absolute coordinates that is associated with the size. When sizes are different, the absolute coordinates are different as well. For example, if the program needs to find the search distance of a pixel at ```(x px, y px)``` in a ```videoWidth * videoHeight``` video using a ```mapWidth * mapHeight``` roadmap, the shader will be:
+However, if the video resolution differs from the roadmap size, additional computation is required. This is because some data in the roadmap uses coordinates that is associated with the size of roadmap. When sizes are different, the coordinates are different as well. For example, if the program needs to find the search distance of a pixel at ```(x px, y px)``` in a video using a roadmap with different size, the shader will be:
 
 ```GLSL
-vec2 normalizedPos = ivec2(x,y) / textureSize(video); // textureSize(video) will return video size {videoWidth, videoHeight}
-ivec2 mapSearchLimit = texture(map, normalizedPos); // this is absolute search distance of the map size
-/* Use texture() so the GPU can sample the map when pos is in between of two pixels */ 
-ivec2 searchLimit = mapSearchDistance * textureSize(video) / textureSize(map); //absolute search distance of the video size
+vec2 roadIdx = ivec2(x,y) * textureSize(map, 0) / textureSize(video, 0); //Function textureSize(video, 0) will return video size {videoWidth, videoHeight}, LOD = 0 --> no mipmap
+ivec2 mapSearchLimit = texelFetch(map, roadIdx, 0).xy; //Search distance of the map size
+ivec2 searchLimit = mapSearchDistance * textureSize(video, 0) / textureSize(map, 0); //Search distance of the video size
 ```
 
-If the program needs to find the road-domain location of a pixel at ```(x px, y px)``` in a ```videoWidth * videoHeight``` video using a ```mapWidth * mapHeight``` roadmap, the shader will be:
+The program can also use normalized coordinates. By doing this, the GPU TMU hardware performs the actual coordinate calculation. For example, if the program needs to find the road-domain location in perspective view of a pixel at ```(x px, y px)``` in a video using a roadmap with different size, the shader will be:
 
 ```GLSL
-ivec4 videoPos = ivec2(x,y);
-ivec2 mapPos = videoPos * textureSize(map) / textureSize(video); // or videoPos * ivec2(mapWidth,mapHeight) / ivec2(videoWidth,videoHeight)
-vec4 loc = texelFetch(map, mapPos, 1);
-vec2 prespectiveLoc = loc.xy;
+vec2 normPos = ivec2(x,y) / vec2(textureSize(video, 0));
+vec2 loc = texture(map, pos).xy;
 ```
 
-Restricting the roadmap to be the same size as the video can simply the shader code and provide the fastest routine. However, it is sometimes worth allowing the use of roadmap in different sizes. There are a few benefits: 
+This method used ```texture()```. Unlike ```texelFetch()``` which accepts absolute coordinate and return the data in texture directly, ```texture()``` accepts NTC and interpolate value. When the texture filter paramter is ```GL_*LINEAR```, the TMU will perform sampling on data by calculating the weighted average of nearest four tiles (linear filter). This is especially useful when interpolation is required. For example, if we need to find the data at ```(1px, 13px)``` of a ```16px * 16px``` video using a ```8px * 4px``` roadmap, ```texture()``` will perform:
+
+```
+x: 1/16 --> ( 1 / (16-1) * (8-1) ) / 8 = 0.4667/8; x = 0.4667 * x0 + 0.5333 * x1;
+y: 13/16 --> ( 13 / (16-1) * (4-1) ) / 4 = 2.6/4; y = 0.4 * y2 + 0.6 * y3;
+tl = 0.4667 * 0.4; tr = 0.5333 * 0.4;
+bl = 0.4667 * 0.6; br = 0.5333 * 0.6;
+result = tl * map(x=0px, y=2px) + tr * map(1px,2px) + bl * map(0px,3px) + br * map(1px,3px);
+```
+
+In this example, the result is weighted average of near pixels instead of the single nearest pixel. This provides a smooth result.  
+
+In conclusion, restricting the roadmap to be the same size as the video can simply the shader code and provide the fastest routine. However, it is sometimes worth allowing the use of roadmap in different sizes. There are a few benefits: 
 
 - Flexibility. It allows changing input video resolution without updating the roadmap.
 
-- It allows using smaller roadmap. Smaller roadmap consumes less memory space, increasing cache hit rate, reduce chance of stall.
+- It allows using smaller roadmap. Smaller roadmap consumes less memory space, increasing cache hit rate, reduce chance of stall; hence, increase routine execution speed.
