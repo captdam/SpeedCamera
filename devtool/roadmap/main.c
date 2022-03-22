@@ -14,13 +14,15 @@
  * Section I:	File header. 
  * Section II:	Table 1: Road-domain geographic data in prospective and orthographic views. 
  * Section III:	Table 2: Search distance, prospective and orthographic projection map. 
- * Section IV:	Number of points pair, focus region points. 
+ * Section IV:	Focus region points. 
  * Section V:	Meta data: ASCII meta data, for reference, ignored by program. 
  */
 
 // Section I: File header
 typedef struct FileHeader {
-	uint32_t width, height; //Frame size in pixel, also used to calculate the size of this file
+	uint32_t width, height; //Frame size in pixel
+	uint32_t pCnt; //Number of road points
+	uint32_t fileSize; //Size of roadmap file without meta data, in byte
 } header_t;
 
 // Section II: Table 1: Road-domain geographic data in prospective and orthographic views
@@ -31,15 +33,14 @@ typedef struct FileDataTable1 {
 
 // Section III: Table 2: Search distance, prospective and orthographic projection map
 typedef struct FileDataTable2 {
-	uint32_t searchLimitUp, searchLimitDown; //Up/down search limit y-coord
-	uint32_t lookupXp2o, lookupXo2p; //Projection lookup table. Y-crood in orthographic and perspective views are same
+	float searchLimitUp, searchLimitDown; //Up/down search limit y-coord
+	float lookupXp2o, lookupXo2p; //Projection lookup table. Y-crood in orthographic and perspective views are same
 } data2_t;
 
-// Section IV: Number of points pair, focus region points
-typedef uint32_t pCnt_t;
+// Section IV: Focus region points
 typedef struct Point_t {
 	float rx, ry; //Road-domain location (m)
-	float sx, sy; //Screen domain position (0.0 for left and top, 1.0 for right and bottom)
+	float sx, sy; //Screen domain position (NTC)
 } point_t;
 
 #define DELI "%*[^0-9.-]" //Delimiter
@@ -77,16 +78,16 @@ int readline(const char* src, const char* token, const unsigned int argc, const 
 header_t header;
 data1_t* t1;
 data2_t* t2;
-pCnt_t pCnt;
 point_t(* p)[2];
 
 void new() __attribute__ ((constructor));
 void new() {
 	header.width = 0;
 	header.height = 0;
+	header.pCnt = 0;
+	header.fileSize = 0;
 	t1 = NULL;
 	t2 = NULL;
-	pCnt = 0;
 	p = NULL;
 }
 
@@ -98,6 +99,8 @@ void destroy() {
 }
 
 int main(int argc, char* argv[]) {
+	unsigned pPairCnt = 0;
+
 	if (argc != 3) {
 		err("ERROR: Bad arg: Use this width height < info.txt > output.map\n");
 		err("\twidth and height is the size of frame in px\n");
@@ -110,6 +113,20 @@ int main(int argc, char* argv[]) {
 		info("Get frame size and allocate buffer for tables\n");
 		header.width = atoi(argv[1]);
 		header.height = atoi(argv[2]);
+
+		if (header.width > 2048 || header.width < 320 || (unsigned int)header.width & (unsigned int)0b111) { //float16 interval > 0 if value > 2048 (abs)
+			err("Width cannot be greater than 2048 or less than 320, and must be multiply of 8\n");
+			return EXIT_FAILURE;
+		}
+		if (header.height > 2048 || header.height < 240 || (unsigned int)header.height & (unsigned int)0b111) {
+			err("Height cannot be greater than 2048 or less than 240, and must be multiply of 8\n");
+			return EXIT_FAILURE;
+		}
+		/* Note:
+		Float16 use 10 bits frac.
+		For absolute coord, when value > 2048, interval > 1.
+		For NTC, interval = 2^-11, which is 1/2048 resolution.
+		*/
 
 		t1 = malloc(sizeof(data1_t) * header.height * header.width);
 		t2 = malloc(sizeof(data2_t) * header.height * header.width);
@@ -131,39 +148,47 @@ int main(int argc, char* argv[]) {
 					err("Cannot read POINT: bad format, require '...float...float...float...float...float...float'\n");
 					return EXIT_FAILURE;
 				}
-				if (!( p = realloc(p, (pCnt+1) * sizeof(point_t) * 2) )) {
+				if (!( p = realloc(p, (pPairCnt+1) * sizeof(point_t) * 2) )) {
 					err("Cannot allocate memory for points storage when reading info file (errno=%d)\n", errno);
 					return EXIT_FAILURE;
 				}
-				if (pCnt) { //This check does not apply on first road point pair
-					if (sy <= p[pCnt-1][0].sy) {
-						err("POINT %u - Screen Y should be in top-to-bottom order, current y-coord (%.4f) should be greater than last y-coord (%.4f)\n", pCnt, sy, p[pCnt-1][0].sy);
+
+				point_t* current = p[pPairCnt];
+				current[0] = (point_t){.sx = sxl, .sy = sy, .rx = rxl, .ry = ry};
+				current[1] = (point_t){.sx = sxr, .sy = sy, .rx = rxr, .ry = ry};
+				unsigned int sxl = current[0].sx * header.width, sxr = current[1].sx * header.width, sy = current[0].sy * header.height;
+				info("POINT: PL pos (%.4f,%.4f) <%upx,%upx> @ loc (%.4f,%.4f)\n", current[0].sx, current[0].sy, sxl, sy, current[0].rx, current[0].ry);
+				info("POINT: PR pos (%.4f,%.4f) <%upx,%upx> @ loc (%.4f,%.4f)\n", current[1].sx, current[1].sy, sxr, sy, current[1].rx, current[1].ry);
+
+				if (pPairCnt) { //This check does not apply on first road point pair
+					point_t* previous = p[pPairCnt - 1];
+					if (current[0].sy <= previous[0].sy) {
+						err("POINT %u - Screen y-coord should be in top-to-bottom order, current y-coord (%.4f) should be greater than last y-coord (%.4f)\n", pPairCnt, current[0].sy, previous[0].sy);
 						return EXIT_FAILURE;
 					}
-					if (ry >= p[pCnt-1][0].ry) {
-						err("POINT %u - Road point at bottom position should be closer, current y-coord (%.4f) should be lower than last y-coord (%.4f)\n", pCnt, ry, p[pCnt-2][0].ry);
+					if (current[0].ry >= previous[0].ry) {
+						err("POINT %u - Road point at bottom position should be closer, current y-coord (%.4f) should be lower than last y-coord (%.4f)\n",pPairCnt, current[0].ry, previous[0].ry);
 						return EXIT_FAILURE;
 					}
-					if (sxr <= sxl) {
-						err("POINT %u - Right point (%.4f) should have greater x-coord than left point (%.4f)\n", pCnt, sxr, sxl);
+					if (current[1].sx <= current[0].sx) {
+						err("POINT %u - Right point (%.4f) should have greater screen x-coord than left point (%.4f)\n", pPairCnt, current[1].sx, current[0].sx);
 						return EXIT_FAILURE;
 					}
-					if (rxr <= rxl) {
-						err("POINT %u - Right point (%.4f) should have greater x-coord than left point (%.4f)\n", pCnt, rxr, rxl);
+					if (current[1].rx <= current[0].rx) {
+						err("POINT %u - Right point (%.4f) should have greater road x-coord than left point (%.4f)\n", pPairCnt, current[1].rx, current[0].rx);
 						return EXIT_FAILURE;
 					}
 				}
-				p[pCnt][0] = (point_t){.sx = sxl, .sy = sy, .rx = rxl, .ry = ry};
-				p[pCnt][1] = (point_t){.sx = sxr, .sy = sy, .rx = rxr, .ry = ry};
-				unsigned int usxl = p[pCnt][0].sx * header.width, usxr = p[pCnt][1].sx * header.width, usy = p[pCnt][0].sy * header.height;
-				info("POINT: PL pos (%.4f,%.4f) <%upx,%upx> @ loc (%.4f,%.4f)\n", p[pCnt][0].sx, p[pCnt][0].sy, usxl, usy, p[pCnt][0].rx, p[pCnt][0].ry);
-				info("POINT: PR pos (%.4f,%.4f) <%upx,%upx> @ loc (%.4f,%.4f)\n", p[pCnt][1].sx, p[pCnt][1].sy, usxr, usy, p[pCnt][1].rx, p[pCnt][1].ry);
-				pCnt++;
+
+				pPairCnt++;
 			} else {
 				err("Unknown info: %s", buffer);
 				return EXIT_FAILURE;
 			}
 		}
+
+		header.pCnt = pPairCnt * 2;
+		header.fileSize = sizeof(header_t) + header.width * header.height * (sizeof(data1_t) + sizeof(data2_t)) + header.pCnt * sizeof(point_t);
 	}
 
 	/* Find road data */ {
@@ -171,16 +196,16 @@ int main(int argc, char* argv[]) {
 		/* Perspective */ {
 			info("Generate perspective view roadmap\n");
 			float csl[2], csr[2], crl[2], crr[2], cry[2], crx[2]; //Coefficient screen/road left-x/right-x of focus region mesh, road y relative to screen y-coord, coefficient road x to screen x
-			unsigned int currentPointIdx = -1; //0xFFFFFFFF
+			unsigned int currentPointIdx = -1; //0xFFFFFFFF...
 			for (unsigned int y = 0; y < header.height; y++) {
 				float yNorm = (float)y / header.height; //Normalized y-coord
 				unsigned int requestPointIndex;
 				if (yNorm < p[0][0].sy) {
 					requestPointIndex = 0;
-				} else if (yNorm > p[pCnt-1][0].sy) {
-					requestPointIndex = pCnt - 2;
+				} else if (yNorm > p[pPairCnt-1][0].sy) {
+					requestPointIndex = pPairCnt - 2;
 				} else {
-					for (unsigned int i = 0; i < pCnt - 2; i++) {
+					for (unsigned int i = 0; i < pPairCnt - 2; i++) {
 						if (isBetween(yNorm, p[i][0].sy, p[i+1][0].sy) >= 0) {
 							requestPointIndex = i;
 							break;
@@ -233,24 +258,29 @@ int main(int argc, char* argv[]) {
 
 	/* Calculate search distance */ {
 		info("Calculate search distance\n");
-		/* Notes:
-		 * 1 - Use limit instead of distance:
+		/* Notes: 
+		 * 1 - Use limit instead of distance: 
 		 * Some GL driver (eg RPI) support texelFetchOffset() with const offset only; therefore GLSL code 
 		 * "for (ivec2 OFFSET; ...; offset += DISTANCE) { xxx = texelFetchOffset(sampler, base, lod, OFFSET); }" 
-		 * will not work. Then we have to use GLSL code
-		 * "for (ivec2 IDX; idx < LIMIT; idx++) { xxx = texelFetch(sampler, IDX, lod); }".
-		 * 2 - Let the program decide the limit: 
+		 * will not work. Although 
+		 * "for (ivec2 OFFSET; ...; offset += DISTANCE) { xxx = texelFetchOffset(sampler, base + OFFSET, lod); }"
+		 * does work, but introduce extra computation per iteration. Then we have to use GLSL code 
+		 * "for (ivec2 IDX; idx < LIMIT; idx++) { xxx = texelFetch(sampler, IDX, lod); }". 
+		 * 2 - Use NTC instead of absolute coord:
+		 * For some reasons, RPI seems not work with isampler. 
+		 * 3 - Let the program decide the limit: 
 		 * The search distance is the maximum distance that an object could reasonably travel between two frames. 
-		 * Since the input video FPS is not known, it doesn't make sense defining the limit now. However, what we
+		 * Since the input video FPS is not known, it doesn't make sense defining the limit now. However, what we 
 		 * know now is the up and down edge of the focus region. 
 		 */
-		unsigned int limitUp = p[0][0].sy * header.height, limitDown = p[pCnt-1][0].sy * header.height;
+		float limitUp = p[0][0].sy, limitDown = p[pPairCnt-1][0].sy;
 		for (unsigned int y = 0; y < header.height; y++) {
+			float yNorm = (float)y / header.height;
 			data2_t* ptr = t2 + y * header.width;
-			if (y < limitUp || y > limitDown) {
+			if (yNorm < limitUp || yNorm > limitDown) {
 				for (unsigned int x = header.width; x; x--) {
-					ptr->searchLimitUp = y;
-					ptr->searchLimitDown = y;
+					ptr->searchLimitUp = yNorm;
+					ptr->searchLimitDown = yNorm;
 					ptr++;
 				}
 			} else {
@@ -266,21 +296,21 @@ int main(int argc, char* argv[]) {
 	/* Find lookup table */ {
 		info("Finding view transform lookup table\n");
 		for (unsigned int y = 0; y < header.height; y++) {
+			unsigned int left = y * header.width, right = left + header.width - 1;
 			for (unsigned int x = 0; x < header.width; x++) {
-				unsigned int left = y * header.width, right = left + header.width - 1;
 				unsigned int current = left + x;
 
 				/* Perspective to Orthographic */ {
 					float road = t1[current].ox;
 					if (road <= t1[left].px) {
-						t2[current].lookupXp2o = 0;
+						t2[current].lookupXp2o = 0.0;
 					} else if (road >= t1[right].px) {
-						t2[current].lookupXp2o = header.width - 1;
+						t2[current].lookupXp2o = 1.0;
 					} else {
 						for (unsigned int i = 0; i < header.width - 2; i++) {
 							int check = isBetween(road, t1[left+i].px, t1[left+i+1].px);
 							if (check != -1) {
-								t2[current].lookupXp2o = i + check;
+								t2[current].lookupXp2o = (float)(i + check) / header.width;
 								break;
 							}
 						}
@@ -292,12 +322,12 @@ int main(int argc, char* argv[]) {
 					if (road <= t1[left].ox) {
 						t2[current].lookupXo2p = 0;
 					} else if (road >= t1[right].ox) {
-						t2[current].lookupXo2p = header.width - 1;
+						t2[current].lookupXo2p = 1.0;
 					} else {
 						for (unsigned int i = 0; i < header.width - 2; i++) {
 							int check = isBetween(road, t1[left+i].ox, t1[left+i+1].ox);
 							if (check != -1) {
-								t2[current].lookupXo2p = i + check;
+								t2[current].lookupXo2p = (float)(i + check) / header.width;
 								break;
 							}
 						}
@@ -312,15 +342,16 @@ int main(int argc, char* argv[]) {
 		fwrite(&header, sizeof(header), 1, stdout);
 		fwrite(t1, sizeof(data1_t), header.height * header.width, stdout);
 		fwrite(t2, sizeof(data2_t), header.height * header.width, stdout);
-		fwrite(&pCnt, sizeof(pCnt), 1, stdout);
-		fwrite(p, sizeof(point_t), pCnt * 2, stdout);
+		fwrite(p, sizeof(point_t), header.pCnt, stdout);
 
 		fputs("\n\n== Metadata: ===================================================================\n", stdout);
 		fprintf(stdout, "Camera resolution: %upx x %upx (%usqpx)\n", header.width, header.height, header.width * header.height);
-		for (size_t i = 0; i < pCnt; i++) {
-			unsigned int usxl = p[i][0].sx * header.width, usxr = p[i][1].sx * header.width, usy = p[i][0].sy * header.height;
-			fprintf(stdout, "POINT: PL pos (%.4f,%.4f) <%upx,%upx> @ loc (%.4f,%.4f)\n", p[i][0].sx, p[i][0].sy, usxl, usy, p[i][0].rx, p[i][0].ry);
-			fprintf(stdout, "POINT: PR pos (%.4f,%.4f) <%upx,%upx> @ loc (%.4f,%.4f)\n", p[i][1].sx, p[i][1].sy, usxr, usy, p[i][1].rx, p[i][1].ry);
+		for (size_t i = 0; i < pPairCnt; i++) {
+			point_t left = p[i][0];
+			point_t right = p[i][1];
+			unsigned int sxl = left.sx * header.width, sxr = right.sx * header.width, sy = left.sy * header.height;
+			fprintf(stdout, "POINT: PL pos (%.4f,%.4f) <%upx,%upx> @ loc (%.4f,%.4f)\n", left.sx, left.sy, sxl, sy, left.rx, left.ry);
+			fprintf(stdout, "POINT: PR pos (%.4f,%.4f) <%upx,%upx> @ loc (%.4f,%.4f)\n", right.sx, right.sy, sxr, sy, right.rx, right.ry);
 		}
 	}
 
