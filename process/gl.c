@@ -8,6 +8,8 @@
 
 #include "gl.h"
 
+//#define SHADER_HEADER_SUPPORTTEXT
+
 /* == Window and driver management ========================================================== */
 
 FILE* logStream = NULL; //Log and error log stream
@@ -308,12 +310,14 @@ gl_program gl_program_create(const gl_programSrc* srcs, gl_programArg* args) {
 
 			/* Write shader code section header to buffer */
 			if (shaderBuffer[type].count) { //First section has no header: GLSL spec: #version must be first line
-				char header[192];
-				const char* headerTemplate[gl_programSrcLoc_placeholderEnd] = {
-					"#line 1 \"Shader %s shader, section %u, from memory @ %p \"",
-					"#line 1 \"Shader %s shader, section %u, from file: %s \""
-				};
-				snprintf(header, sizeof(header), headerTemplate[s->loc], shaderTypeDescription[type], shaderBuffer[type].count, str);
+				char header[192] = "#line 1"; //Default macro
+				#ifdef SHADER_HEADER_SUPPORTTEXT
+					const char* headerTemplate[gl_programSrcLoc_placeholderEnd] = {
+						"#line 1 \"Shader %s shader, section %u, from memory @ %p \"",
+						"#line 1 \"Shader %s shader, section %u, from file: %s \""
+					};
+					snprintf(header, sizeof(header), headerTemplate[s->loc], shaderTypeDescription[type], shaderBuffer[type].count, str);
+				#endif
 				len = strlen(header);
 				/* Note:
 				* snprintf() has guarantee size of header string length will not excess sizeof(header), so we don't need use any function with size check later (e.g. strnlen). 
