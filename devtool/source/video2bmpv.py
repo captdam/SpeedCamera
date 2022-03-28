@@ -26,8 +26,8 @@ import cv2
 import numpy
 
 src =		'on3.mov'		#The input file, a video file in common video format such as .mp4
-dest =		'on3.data'		#Where to save the plain bitmap video 
-width =		1280			#Output frame size in pixel
+dest =		'../../on3-720v10.data'	#Where to save the plain bitmap video 
+width =	1280			#Output frame size in pixel
 height =	720
 fpsSkip =	2			#Skip frames. E.g.: if src is 30fps and skip is 2, dest will be 30 / (1+2) = 10fps
 scheme =	cv2.COLOR_BGR2RGBA	#The default scheme of openCV is BGR, the output can be RGBA, RGB or GRAY
