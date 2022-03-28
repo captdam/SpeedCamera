@@ -22,7 +22,7 @@
 #define GL_SYNCH_TIMEOUT 5000000000LLU //For gl sync timeout
 
 /* Debug time delay */
-#define FRAME_DELAY (50 * 1000)
+#define FRAME_DELAY 0 //(50 * 1000)
 #define FRAME_DEBUGSKIPSECOND 10
 
 /* GPU buffer memory format */
@@ -37,7 +37,7 @@
 #define SHADER_FINAL_RAWLUMA "0.1" //Blend intensity of raw 
 
 /* Input video interleave */
-#define INPUT_INTERLEAVE 1 //Read 1 frame for every X frame, used to skip some frames
+#define INPUT_INTERLEAVE 1 //Read 1 frame for every X frame, used to skip some frames [1,7]
 
 /* Speedometer */
 #define SPEEDOMETER_FILE "./textmap.data"
@@ -47,6 +47,7 @@
 volatile char debug_threadSpeed = ' '; //Which thread takes longer
 #endif
 
+/* Video data upload to GPU */
 //#define USE_PBO_UPLOAD
 
 #define info(format, ...) {fprintf(stderr, "Log:\t"format"\n" __VA_OPT__(,) __VA_ARGS__);} //Write log
@@ -337,12 +338,12 @@ int main(int argc, char* argv[]) {
 		info("\tFPS: %u, Color: %s", fps, color);
 		info("\tRoadmap: %s", roadmapFile);
 
-		if (sizeData[0] & (unsigned int)0b111 || sizeData[0] < 320 || sizeData[0] > 4056) {
-			error("Bad width: Width must be multiple of 8, 320 <= width <= 4056");
+		if (sizeData[0] & (unsigned int)0b111 || sizeData[0] < 320 || sizeData[0] > 2048) {
+			error("Bad width: Width must be multiple of 8, 320 <= width <= 2048");
 			return status;
 		}
-		if (sizeData[1] & (unsigned int)0b111 || sizeData[1] < 240 || sizeData[1] > 3040) {
-			error("Bad height: Height must be multiple of 8, 240 <= height <= 3040");
+		if (sizeData[1] & (unsigned int)0b111 || sizeData[1] < 240 || sizeData[1] > 2048) {
+			error("Bad height: Height must be multiple of 8, 240 <= height <= 2048");
 			return status;
 		}
 		if (color[0] != '1' && color[0] != '3' && color[0] != '4') {
@@ -369,13 +370,14 @@ int main(int argc, char* argv[]) {
 	#else
 		void* rawData[2] = {NULL, NULL};
 	#endif
-	gl_tex texture_orginalBuffer = GL_INIT_DEFAULT_TEX;
+	gl_tex texture_orginalBuffer[2] = {GL_INIT_DEFAULT_TEX, GL_INIT_DEFAULT_TEX}; //Front texture for using, back texture up updating
 
 	//Roadinfo, a mesh to store focus region, and texture to store road-domain data
 	gl_mesh mesh_persp = GL_INIT_DEFAULT_MESH;
 	gl_mesh mesh_ortho = GL_INIT_DEFAULT_MESH;
-	gl_tex texture_roadmap1 = GL_INIT_DEFAULT_TEX;
-	gl_tex texture_roadmap2 = GL_INIT_DEFAULT_TEX;
+	gl_tex texture_roadmap1 = GL_INIT_DEFAULT_TEX; //Geo coord in persp and ortho views
+	gl_tex texture_roadmap2 = GL_INIT_DEFAULT_TEX; //Up and down search limit, P2O and O2P project lookup
+	gl_tex texture_roadmap3 = GL_INIT_DEFAULT_TEX; //Pixel road width and height in persp and ortho view
 
 	//To display human readable text on screen
 	const char* speedometer_filename = SPEEDOMETER_FILE;
@@ -391,13 +393,21 @@ int main(int argc, char* argv[]) {
 	} fb;
 	#define DEFAULT_FB (fb){GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX}
 	fb fb_raw[2] = {DEFAULT_FB, DEFAULT_FB}; //Raw video data with minor pre-process
-	fb fb_object[4] = {DEFAULT_FB, DEFAULT_FB, DEFAULT_FB, DEFAULT_FB}; //Object detection of current previous frames
+	fb fb_object[2] = {DEFAULT_FB, DEFAULT_FB}; //Object detection of current and previous frames
 	fb fb_speed = DEFAULT_FB; //Displacement of two moving edge (speed of moving edge)
 	fb fb_display = DEFAULT_FB; //Display human-readable text
 	fb fb_stageA = DEFAULT_FB;
 	fb fb_stageB = DEFAULT_FB;
 	const int* fb_raw_robin = robin2;
-	const int* fb_object_robin = robin4;
+	#if INPUT_INTERLEAVE == 1
+		const int* fb_object_robin = robin2;
+	#elif INPUT_INTERLEAVE >= 2 && INPUT_INTERLEAVE <= 3
+		const int* fb_object_robin = robin4;
+	#elif INPUT_INTERLEAVE >= 4 && INPUT_INTERLEAVE <= 7
+		const int* fb_object_robin = robin8;
+	#else
+		#error INPUT_INTERLEAVE allow [1,7]
+	#endif
 
 	//Program - Roadmap check
 	struct {
@@ -414,25 +424,23 @@ int main(int argc, char* argv[]) {
 		program_roadmapCheck_modeShowOrthoGrid = 4
 	};
 
-	//Program - Project perspective to orthographic
+	//Program - Project perspective to orthographic and orthographic to perspective
 	struct {
 		gl_program pid;
 		gl_param src;
 		gl_param roadmapT2;
 	} program_projectP2O = {.pid = GL_INIT_DEFAULT_PROGRAM};
-	//Program - Project orthographic to perspective
 	struct {
 		gl_program pid;
 		gl_param src;
 		gl_param roadmapT2;
 	} program_projectO2P = {.pid = GL_INIT_DEFAULT_PROGRAM};
 
-	//Program - Blur filter
+	//Program - Blur filter and edge filter
 	struct {
 		gl_program pid;
 		gl_param src;
 	} program_blurFilter = {.pid = GL_INIT_DEFAULT_PROGRAM};
-	//Program - Edge filter
 	struct {
 		gl_program pid;
 		gl_param src;
@@ -450,6 +458,7 @@ int main(int argc, char* argv[]) {
 		gl_program pid;
 		gl_param src;
 		gl_param roadmapT1;
+		gl_param roadmapT3;
 	} program_objectFix[2] = {{.pid = GL_INIT_DEFAULT_PROGRAM}, {.pid = GL_INIT_DEFAULT_PROGRAM}};
 
 	//Program - Edge refine
@@ -499,8 +508,8 @@ int main(int argc, char* argv[]) {
 	/* Use a texture to store raw frame data & Start reader thread */ {
 		info("Prepare video upload buffer...");
 		#ifdef USE_PBO_UPLOAD
-			pbo[0] = gl_pixelBuffer_create(sizeData[0] * sizeData[1] * 4); //Always use RGBA8 (good performance)
-			pbo[1] = gl_pixelBuffer_create(sizeData[0] * sizeData[1] * 4);
+			pbo[0] = gl_pixelBuffer_create(sizeData[0] * sizeData[1] * 4, gl_usage_stream); //Always use RGBA8 (good performance)
+			pbo[1] = gl_pixelBuffer_create(sizeData[0] * sizeData[1] * 4, gl_usage_stream);
 			if ( !gl_pixelBuffer_check(&(pbo[0])) || !gl_pixelBuffer_check(&(pbo[1])) ) {
 				error("Fail to create pixel buffers for orginal frame data uploading");
 				goto label_exit;
@@ -514,8 +523,9 @@ int main(int argc, char* argv[]) {
 			}
 		#endif
 
-		texture_orginalBuffer = gl_texture_create(gl_texformat_RGBA8, gl_textype_2d, sizeData);
-		if (!gl_texture_check(&texture_orginalBuffer)) {
+		texture_orginalBuffer[0] = gl_texture_create(gl_texformat_RGBA8, gl_textype_2d, sizeData);
+		texture_orginalBuffer[1] = gl_texture_create(gl_texformat_RGBA8, gl_textype_2d, sizeData);
+		if ( !gl_texture_check(&texture_orginalBuffer[0]) || !gl_texture_check(&texture_orginalBuffer[1]) ) {
 			error("Fail to create texture buffer for orginal frame data storage");
 			goto label_exit;
 		}
@@ -543,11 +553,10 @@ int main(int argc, char* argv[]) {
 
 		/* Focus region */ {
 			gl_index_t attributes[] = {2};
-			unsigned int vCnt;
-			float (* vertices)[2] = (float(*)[2])roadmap_getRoadPoints(roadmap, &vCnt);
-
+			float (* vertices)[2] = (float(*)[2])roadmap_getRoadPoints(roadmap);
+			
 			float outLeft = 1.0f, outRight = 0.0f, outTop = 1.0f, outBottom = 0.0f;
-			for (unsigned int i = 0; i < vCnt; i++) {
+			for (unsigned int i = 0; i < roadinfo.pCnt; i++) {
 				outLeft = fminf(outLeft, vertices[i][0]);
 				outRight = fmaxf(outRight, vertices[i][0]);
 				outTop = fminf(outTop, vertices[i][1]);
@@ -560,7 +569,7 @@ int main(int argc, char* argv[]) {
 				{outLeft, outBottom}
 			};
 
-			mesh_persp = gl_mesh_create((const unsigned int[3]){2, vCnt, 0}, attributes, (gl_vertex_t*)vertices, NULL, gl_meshmode_triangleStrip, gl_usage_static);
+			mesh_persp = gl_mesh_create((const unsigned int[3]){2, roadinfo.pCnt, 0}, attributes, (gl_vertex_t*)vertices, NULL, gl_meshmode_triangleStrip, gl_usage_static);
 			mesh_ortho = gl_mesh_create((const unsigned int[3]){2, 4, 0}, attributes, (gl_vertex_t*)vOthor, NULL, gl_meshmode_triangleFan, gl_usage_static);
 			if ( !gl_mesh_check(&mesh_persp) || !gl_mesh_check(&mesh_ortho) ) {
 				roadmap_destroy(roadmap);
@@ -570,9 +579,10 @@ int main(int argc, char* argv[]) {
 		}
 		
 		/* Road data */ {
-			texture_roadmap1 = gl_texture_create(gl_texformat_RGBA32F, gl_textype_2d, sizeRoadmap);
-			texture_roadmap2 = gl_texture_create(gl_texformat_RGBA32I, gl_textype_2d, sizeRoadmap);
-			if (!gl_texture_check(&texture_roadmap1) || !gl_texture_check(&texture_roadmap2)) {
+			texture_roadmap1 = gl_texture_create(gl_texformat_RGBA16F, gl_textype_2d, sizeRoadmap); //Mediump is good enough for road-domain geo locations
+			texture_roadmap2 = gl_texture_create(gl_texformat_RGBA16F, gl_textype_2d, sizeRoadmap); //Mediump (1/1024) is OK for pixel indexing
+			texture_roadmap3 = gl_texture_create(gl_texformat_RGBA16F, gl_textype_2d, sizeRoadmap); //Mediump is good enough for road-domain geo locations
+			if ( !gl_texture_check(&texture_roadmap1) || !gl_texture_check(&texture_roadmap2) || !gl_texture_check(&texture_roadmap3) ) {
 				roadmap_destroy(roadmap);
 				error("Fail to create texture buffer for roadmap - road-domain data storage");
 				goto label_exit;
@@ -580,16 +590,8 @@ int main(int argc, char* argv[]) {
 
 			gl_texture_update(&texture_roadmap1, roadmap_getT1(roadmap), zeros, sizeRoadmap);
 			gl_texture_update(&texture_roadmap2, roadmap_getT2(roadmap), zeros, sizeRoadmap);
+//			gl_texture_update(&texture_roadmap3, roadmap_getT3(roadmap), zeros, sizeRoadmap);
 		}
-
-		gl_synch barrier = gl_synchSet();
-		if (gl_synchWait(barrier, GL_SYNCH_TIMEOUT) == gl_synch_timeout) {
-			error("Roadmap GPU uploading fatal stall");
-			gl_synchDelete(barrier);
-			roadmap_destroy(roadmap);
-			goto label_exit;
-		}
-		gl_synchDelete(barrier);
 
 		roadmap_destroy(roadmap); //Free roadmap memory after data uploading finished
 	}
@@ -614,15 +616,6 @@ int main(int argc, char* argv[]) {
 		}
 		gl_texture_update(&texture_speedometer, glyph, zeros, glyphSize);
 
-		gl_synch barrier = gl_synchSet();
-		if (gl_synchWait(barrier, GL_SYNCH_TIMEOUT) == gl_synch_timeout) {
-			gl_synchDelete(barrier);
-			speedometer_destroy(speedometer);
-			error("Speedometer GPU uploading fatal stall");
-			goto label_exit;
-		}
-		gl_synchDelete(barrier);
-
 		speedometer_destroy(speedometer); //Free speedometer memory after data uploading finished
 	}
 
@@ -646,7 +639,7 @@ int main(int argc, char* argv[]) {
 		info("Create GPU buffers...");
 
 		for (unsigned int i = 0; i < sizeof(fb_raw) / sizeof(fb_raw[0]); i++) {
-			fb_raw[i].tex = gl_texture_create(gl_texformat_RGBA8, gl_textype_2d, sizeData);
+			fb_raw[i].tex = gl_texture_create(gl_texformat_RGBA8, gl_textype_2d, sizeData); //Input video, RGBA8
 			if (!gl_texture_check(&fb_raw[i].tex)) {
 				error("Fail to create texture to store raw video data (%u)", i);
 				goto label_exit;
@@ -659,7 +652,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		for (unsigned int i = 0; i < sizeof(fb_object) / sizeof(fb_object[0]); i++) {
-			fb_object[i].tex = gl_texture_create(gl_texformat_RGBA8, gl_textype_2d, sizeData);
+			fb_object[i].tex = gl_texture_create(gl_texformat_RGBA8, gl_textype_2d, sizeData); //Enum < 256
 			if (!gl_texture_check(&fb_object[i].tex)) {
 				error("Fail to create texture to store object (%u)", i);
 				goto label_exit;
@@ -671,7 +664,7 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-		fb_speed.tex = gl_texture_create(INTERNAL_COLORFORMAT, gl_textype_2d, sizeData);
+		fb_speed.tex = gl_texture_create(INTERNAL_COLORFORMAT, gl_textype_2d, sizeData); //Data
 		if (!gl_texture_check(&fb_speed.tex)) {
 			error("Fail to create texture to store speed");
 			goto label_exit;
@@ -682,7 +675,7 @@ int main(int argc, char* argv[]) {
 			goto label_exit;
 		}
 
-		fb_display.tex = gl_texture_create(gl_texformat_RGBA8, gl_textype_2d, sizeData);
+		fb_display.tex = gl_texture_create(gl_texformat_RGBA8, gl_textype_2d, sizeData); //Ouput video, RGBA8
 		if (!gl_texture_check(&fb_display.tex)) {
 			error("Fail to create texture to store speed");
 			goto label_exit;
@@ -693,8 +686,8 @@ int main(int argc, char* argv[]) {
 			goto label_exit;
 		}
 
-		fb_stageA.tex = gl_texture_create(INTERNAL_COLORFORMAT, gl_textype_2d, sizeData);
-		fb_stageB.tex = gl_texture_create(INTERNAL_COLORFORMAT, gl_textype_2d, sizeData);
+		fb_stageA.tex = gl_texture_create(INTERNAL_COLORFORMAT, gl_textype_2d, sizeData); //Data
+		fb_stageB.tex = gl_texture_create(INTERNAL_COLORFORMAT, gl_textype_2d, sizeData); //Data
 		if ( !gl_texture_check(&fb_stageA.tex) || !gl_texture_check(&fb_stageB.tex) ) {
 			error("Fail to create texture to store moving edge");
 			goto label_exit;
@@ -709,14 +702,13 @@ int main(int argc, char* argv[]) {
 
 	/* Load shader programs */ {
 		info("Load shaders...");
+		gl_program_setCommonHeader("#version 310 es");
 		#define NL "\n"
-		const char* glShaderHeader = "#version 310 es"NL"precision mediump float;"NL;
 
 		/* Create program: Roadmap check */ {
 			gl_programSrc src[] = {
-				{gl_programSrcType_vertex,	gl_programSrcLoc_mem,	glShaderHeader},
 				{gl_programSrcType_vertex,	gl_programSrcLoc_file,	"shader/focusRegion.vs.glsl"},
-				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	glShaderHeader},
+				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	"precision highp float;"},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_file,	"shader/roadmapCheck.fs.glsl"},
 				{.str = NULL}
 			};
@@ -739,13 +731,11 @@ int main(int argc, char* argv[]) {
 		}
 
 		/* Create program: Project P2O and P2O */ {
-			const char* modeP2O = "#define P2O"NL;
-			const char* modeO2P = "#define O2P"NL;
+			const char* modeP2O = "#define P2O";
+			const char* modeO2P = "#define O2P";
 
 			gl_programSrc src[] = {
-				{gl_programSrcType_vertex,	gl_programSrcLoc_mem,	glShaderHeader},
 				{gl_programSrcType_vertex,	gl_programSrcLoc_file,	"shader/focusRegion.vs.glsl"},
-				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	glShaderHeader},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	NULL},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_file,	"shader/projectPO.fs.glsl"},
 				{.str = NULL}
@@ -756,7 +746,7 @@ int main(int argc, char* argv[]) {
 				{.name = NULL}
 			};
 
-			src[3].str = modeP2O;
+			src[1].str = modeP2O;
 			if (!( program_projectP2O.pid = gl_program_create(src, arg) )) {
 				error("Fail to create shader program: Project perspective to orthographic");
 				goto label_exit;
@@ -764,7 +754,7 @@ int main(int argc, char* argv[]) {
 			program_projectP2O.src = arg[0].id;
 			program_projectP2O.roadmapT2 = arg[1].id;
 
-			src[3].str = modeO2P;
+			src[1].str = modeO2P;
 			if (!( program_projectO2P.pid = gl_program_create(src, arg) )) {
 				error("Fail to create shader program: Project orthographic to perspective");
 				goto label_exit;
@@ -775,16 +765,15 @@ int main(int argc, char* argv[]) {
 
 		/* Create program: Blur and edge filter*/ {
 			const char* blur =
-				"const struct Mask {float v; ivec2 idx;} mask[] = Mask[]("NL
+				"const struct Mask {mediump float v; mediump ivec2 idx;} mask[] = Mask[]("NL
 				"	Mask(1.0 / 16.0, ivec2(-1, -1)),	Mask(2.0 / 16.0, ivec2( 0, -1)),	Mask(1.0 / 16.0, ivec2(+1, -1)),"NL
 				"	Mask(2.0 / 16.0, ivec2(-1,  0)),	Mask(4.0 / 16.0, ivec2( 0,  0)),	Mask(2.0 / 16.0, ivec2(+1,  0)),"NL
 				"	Mask(1.0 / 16.0, ivec2(-1, +1)),	Mask(2.0 / 16.0, ivec2( 0, +1)),	Mask(1.0 / 16.0, ivec2(+1, +1))"NL
 				");"NL
 			;
 			const char* edge =
-				"#define CLAMP_L vec4(vec3(0.0), 1.0)"NL
-				"#define CLAMP_H vec4(vec3(1.0), 1.0)"NL
-				"const struct Mask {float v; ivec2 idx;} mask[] = Mask[]("NL
+				"#define CLAMP vec4[2](vec4(vec3(0.0), 1.0), vec4(vec3(1.0), 1.0))"NL
+				"const struct Mask {mediump float v; mediump ivec2 idx;} mask[] = Mask[]("NL
 				"	Mask(-1.0, ivec2(0, -2)),"NL
 				"	Mask(-2.0, ivec2(0, -1)),"NL
 				"	Mask(+6.0, ivec2(0,  0)),"NL
@@ -794,9 +783,7 @@ int main(int argc, char* argv[]) {
 			;
 
 			gl_programSrc src[] = {
-				{gl_programSrcType_vertex,	gl_programSrcLoc_mem,	glShaderHeader},
 				{gl_programSrcType_vertex,	gl_programSrcLoc_file,	"shader/focusRegion.vs.glsl"},
-				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	glShaderHeader},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	NULL},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_file,	"shader/kernel.fs.glsl"},
 				{.str = NULL}
@@ -806,14 +793,14 @@ int main(int argc, char* argv[]) {
 				{.name = NULL}
 			};
 
-			src[3].str = blur;
+			src[1].str = blur;
 			if (!( program_blurFilter.pid = gl_program_create(src, arg) )) {
 				error("Fail to create shader program: Blur filter");
 				goto label_exit;
 			}
 			program_blurFilter.src = arg[0].id;
 
-			src[3].str = edge;
+			src[1].str = edge;
 			if (!( program_edgeFilter.pid = gl_program_create(src, arg) )) {
 				error("Fail to create shader program: Edge filter");
 				goto label_exit;
@@ -825,13 +812,11 @@ int main(int argc, char* argv[]) {
 			const char* cfg =
 				"#define MONO"NL
 				"#define BINARY vec4(vec3("SHADER_CHANGINGSENSOR_THRESHOLD"), -1.0)"NL
-//				"#define CLAMP vec4[2](vec4(vec3(0.0), 1.0), vec4(vec3(1.0), 1.0))"NL
+			//	"#define CLAMP vec4[2](vec4(vec3(0.0), 1.0), vec4(vec3(1.0), 1.0))"NL
 			;
 
 			gl_programSrc src[] = {
-				{gl_programSrcType_vertex,	gl_programSrcLoc_mem,	glShaderHeader},
 				{gl_programSrcType_vertex,	gl_programSrcLoc_file,	"shader/focusRegion.vs.glsl"},
-				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	glShaderHeader},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	cfg},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_file,	"shader/changingSensor.fs.glsl"},
 				{.str = NULL}
@@ -861,9 +846,7 @@ int main(int argc, char* argv[]) {
 			;
 
 			gl_programSrc src[] = {
-				{gl_programSrcType_vertex,	gl_programSrcLoc_mem,	glShaderHeader},
 				{gl_programSrcType_vertex,	gl_programSrcLoc_file,	"shader/focusRegion.vs.glsl"},
-				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	glShaderHeader},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	NULL},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_file,	"shader/objectFix.fs.glsl"},
 				{.str = NULL}
@@ -871,10 +854,11 @@ int main(int argc, char* argv[]) {
 			gl_programArg arg[] = {
 				{gl_programArgType_normal,	"src"},
 				{gl_programArgType_normal,	"roadmapT1"},
+				{gl_programArgType_normal,	"roadmapT3"},
 				{.name = NULL}
 			};
 
-			src[3].str = horizontal;
+			src[1].str = horizontal;
 			if (!( program_objectFix[0].pid = gl_program_create(src, arg) )) {
 				error("Fail to create shader program: Object fix - Stage 1 horizontal");
 				goto label_exit;
@@ -882,7 +866,7 @@ int main(int argc, char* argv[]) {
 			program_objectFix[0].src = arg[0].id;
 			program_objectFix[0].roadmapT1 = arg[1].id;
 
-			src[3].str = vertical;
+			src[1].str = vertical;
 			if (!( program_objectFix[1].pid = gl_program_create(src, arg) )) {
 				error("Fail to create shader program: Object fix - Stage 2 vertical");
 				goto label_exit;
@@ -898,9 +882,8 @@ int main(int argc, char* argv[]) {
 			;
 
 			gl_programSrc src[] = {
-				{gl_programSrcType_vertex,	gl_programSrcLoc_mem,	glShaderHeader},
 				{gl_programSrcType_vertex,	gl_programSrcLoc_file,	"shader/focusRegion.vs.glsl"},
-				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	glShaderHeader},
+				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	"precision mediump float;"},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	cfg},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_file,	"shader/edgeRefine.fs.glsl"},
 				{.str = NULL}
@@ -923,9 +906,8 @@ int main(int argc, char* argv[]) {
 			sprintf(cfg, "#define BIAS %.10f"NL, cfgBias);
 
 			gl_programSrc src[] = {
-				{gl_programSrcType_vertex,	gl_programSrcLoc_mem,	glShaderHeader},
 				{gl_programSrcType_vertex,	gl_programSrcLoc_file,	"shader/focusRegion.vs.glsl"},
-				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	glShaderHeader},
+				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	"precision mediump float;"},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	cfg},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_file,	"shader/measure.fs.glsl"},
 				{.str = NULL}
@@ -950,9 +932,8 @@ int main(int argc, char* argv[]) {
 
 		/* Create program: Sample */ {
 			gl_programSrc src[] = {
-				{gl_programSrcType_vertex,	gl_programSrcLoc_mem,	glShaderHeader},
 				{gl_programSrcType_vertex,	gl_programSrcLoc_file,	"shader/focusRegion.vs.glsl"},
-				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	glShaderHeader},
+				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	"precision mediump float;"},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_file,	"shader/sample.fs.glsl"},
 				{.str = NULL}
 			};
@@ -970,9 +951,8 @@ int main(int argc, char* argv[]) {
 
 		/* Create program: Display */ {
 			gl_programSrc src[] = {
-				{gl_programSrcType_vertex,	gl_programSrcLoc_mem,	glShaderHeader},
 				{gl_programSrcType_vertex,	gl_programSrcLoc_file,	"shader/focusRegion.vs.glsl"},
-				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	glShaderHeader},
+				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	"precision mediump float;"},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_file,	"shader/display.fs.glsl"},
 				{.str = NULL}
 			};
@@ -994,9 +974,7 @@ int main(int argc, char* argv[]) {
 			char cfg[] = "#define RAW_LUMA "SHADER_FINAL_RAWLUMA NL;
 
 			gl_programSrc src[] = {
-				{gl_programSrcType_vertex,	gl_programSrcLoc_mem,	"#version 310 es\nprecision mediump float;\n"},
 				{gl_programSrcType_vertex,	gl_programSrcLoc_file,	"shader/final.vs.glsl"},
-				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	"#version 310 es\nprecision lowp float;\n"}, //Just blend, lowp is good enough
 				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	cfg},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_file,	"shader/final.fs.glsl"},
 				{.str = NULL}
@@ -1028,6 +1006,7 @@ int main(int argc, char* argv[]) {
 
 		info("Program ready!");
 		while(!gl_close(-1)) {
+			const int* robin2_idx = robin2 + robin2[0] - ( (unsigned int)frameCnt & (unsigned int)robin2[0] );
 			const int* fb_raw_idx = fb_raw_robin + fb_raw_robin[0] - ( (unsigned int)frameCnt & (unsigned int)fb_raw_robin[0] );
 			const int* fb_object_idx = fb_object_robin + fb_object_robin[0] - ( (unsigned int)frameCnt & (unsigned int)fb_object_robin[0] );
 
@@ -1046,13 +1025,18 @@ int main(int argc, char* argv[]) {
 				/* Asking the read thread to upload next frame while the main thread processing current frame */ {
 					void* addr;
 					#ifdef USE_PBO_UPLOAD
-						gl_pixelBuffer_updateToTexture(&pbo[ (frameCnt+0)&1 ], &texture_orginalBuffer); //Current frame PBO (index = +0) <-- Data already in GPU, this operation is fast
-						addr = gl_pixelBuffer_updateStart(&pbo[ (frameCnt+1)&1 ], sizeData[0] * sizeData[1] * 4); //Next frame PBO (index = +1)
+						gl_pixelBuffer_updateToTexture(&pbo[ robin2_idx[0] ], &texture_orginalBuffer[ robin2_idx[1] ]);
+						addr = gl_pixelBuffer_updateStart(&pbo[ robin2_idx[1] ], sizeData[0] * sizeData[1] * 4);
 					#else
-						gl_texture_update(&texture_orginalBuffer, rawData[ (frameCnt+0)&1 ], zeros, sizeData);
-						addr = rawData[ (frameCnt+1)&1 ];
+						gl_texture_update(&texture_orginalBuffer[ robin2_idx[1] ], rawData[ robin2_idx[0] ], zeros, sizeData);
+						addr = rawData[ robin2_idx[1] ];
 					#endif
+					gl_rsync(); //Request the GL driver start the queue
 					th_reader_start(addr);
+					/* Note: 3-stage uploading scheme. 
+					 * Process front texture while OpenGL DMA front buffer to back texture. 
+					 * OpenGL DMA front buffer while read thread read video into back buffer. 
+					 */
 				}
 
 				#ifdef VERBOSE_TIME
@@ -1061,21 +1045,33 @@ int main(int argc, char* argv[]) {
 
 				gl_setViewport(zeros, sizeData);
 
-				/* Debug use ONLY: Check roadmap */ /*{
+//#define ROADMAP_CHECK program_roadmapCheck_modeShowT2 //program_roadmapCheck_modeshow*
+#ifdef ROADMAP_CHECK
+				/* Debug use ONLY: Check roadmap */ {
 					gl_program_use(&program_roadmapCheck.pid);
 					gl_texture_bind(&texture_roadmap1, program_roadmapCheck.roadmapT1, 0);
 					gl_texture_bind(&texture_roadmap2, program_roadmapCheck.roadmapT2, 1);
-					gl_program_setParam(program_roadmapCheck.cfgI1, 4, gl_datatype_int, (const int[4]){program_roadmapCheck_modeShowPerspGrid, 0, 0, 0});
+					gl_program_setParam(program_roadmapCheck.cfgI1, 4, gl_datatype_int, (const int[4]){ROADMAP_CHECK, 0, 0, 0});
 					gl_program_setParam(program_roadmapCheck.cfgF1, 4, gl_datatype_float, (const float[4]){1.0, 2.0, 1.0, 1.0});
 					gl_frameBuffer_bind(&fb_stageB.fbo, 1);
 					gl_mesh_draw(&mesh_final);
-				}*/
+				}
+				#define RESULT fb_stageB
+#else
 
 				/* Blur the raw to remove noise */ {
 					gl_program_use(&program_blurFilter.pid);
-					gl_texture_bind(&texture_orginalBuffer, program_blurFilter.src, 0);
-					gl_frameBuffer_bind(&fb_raw[ fb_raw_idx[0] ].fbo, 1);
+					gl_texture_bind(&texture_orginalBuffer[robin2_idx[0] ], program_blurFilter.src, 0);
+					gl_frameBuffer_bind(&fb_raw[ fb_raw_idx[0] ].fbo, 0);
 					gl_mesh_draw(&mesh_persp);
+				}
+
+				/* Project from perspective to orthographic */ {
+					gl_program_use(&program_projectP2O.pid);
+					gl_texture_bind(&fb_raw[ fb_raw_idx[0] ].tex, program_projectP2O.src, 0);
+					gl_texture_bind(&texture_roadmap2, program_projectP2O.roadmapT2, 1);
+					gl_frameBuffer_bind(&fb_stageB.fbo, 1);
+					gl_mesh_draw(&mesh_ortho);
 				}
 
 				/* Finding changing to detect moving object*/ {
@@ -1099,6 +1095,7 @@ int main(int argc, char* argv[]) {
 					gl_frameBuffer_bind(&fb_stageA.fbo, 1);
 					gl_mesh_draw(&mesh_persp);
 				}
+#if 1== 6
 
 				/* Project from perspective to orthographic */ {
 					gl_program_use(&program_projectP2O.pid);
@@ -1125,7 +1122,7 @@ int main(int argc, char* argv[]) {
 					gl_mesh_draw(&mesh_ortho);
 				}
 
-				/* Project from  orthographic to perspective */ {
+				/* Project from orthographic to perspective */ {
 					gl_program_use(&program_projectO2P.pid);
 					gl_texture_bind(&fb_stageA.tex, program_projectO2P.src, 0);
 					gl_texture_bind(&texture_roadmap2, program_projectO2P.roadmapT2, 1);
@@ -1147,19 +1144,19 @@ int main(int argc, char* argv[]) {
 					gl_frameBuffer_bind(&fb_display.fbo, 1);
 					gl_mesh_draw(&mesh_persp);
 				}
-#if 1==6
 #endif
 
-//				#define RESULT fb_stageA
+				#define RESULT fb_stageA
 //				#define RESULT fb_raw[ fb_raw_idx[0] ]
 //				#define RESULT fb_object[ fb_object_idx[0] ]
 //				#define RESULT fb_speed
-				#define RESULT fb_display
+//				#define RESULT fb_display
+#endif /* #ifdef ROADMAP_CHECK */
 
 				/* Draw final result on screen */ {
 					gl_setViewport(zeros, sizeFB);
 					gl_program_use(&program_final.pid);
-					gl_texture_bind(&texture_orginalBuffer, program_final.orginal, 0);
+					gl_texture_bind(&texture_orginalBuffer[ robin2_idx[0] ], program_final.orginal, 0);
 					gl_texture_bind(&RESULT.tex, program_final.result, 1);
 					gl_frameBuffer_bind(NULL, 0);
 					gl_mesh_draw(&mesh_final);
@@ -1176,25 +1173,22 @@ int main(int argc, char* argv[]) {
 				gl_synchDelete(barrier);
 
 				char title[100];
-				sprintf(title, "Viewer - frame %u", frameCnt);
-				gl_drawEnd(title);
-
 				#ifdef VERBOSE_TIME
 					uint64_t timestampRenderEnd = nanotime();
+					#ifdef DEBUG_THREADSPEED
+						snprintf(title, sizeof(title), "Viewer - frame %u - %c - %.3lf/%.3lf", frameCnt, debug_threadSpeed, (timestampRenderEnd - timestampRenderStart) / (double)1e6, (timestampRenderEnd - timestamp) / (double)1e6);
+					#else
+						snprintf(title, sizeof(title), "Viewer - frame %u - %.3lf/%.3lf", frameCnt, (timestampRenderEnd - timestampRenderStart) / (double)1e6, (timestampRenderEnd - timestamp) / (double)1e6);
+					#endif
+					timestamp = timestampRenderEnd;
+				#else
+					snprintf(title, sizeof(title), "Viewer - frame %u", frameCnt);
 				#endif
+				gl_drawEnd(title);
 				
 				th_reader_wait(); //Wait reader thread finish uploading frame data
 				#ifdef USE_PBO_UPLOAD
 					gl_pixelBuffer_updateFinish();
-				#endif
-
-				#ifdef VERBOSE_TIME
-					#ifdef DEBUG_THREADSPEED
-						info("%c - Frame %u takes %.3lfms/%.3lfms (in-frame/inter-frame)", debug_threadSpeed, frameCnt, (timestampRenderEnd - timestampRenderStart) / (double)1e6, (timestampRenderEnd - timestamp) / (double)1e6);
-					#else
-						info("Frame %u takes %.3lfms/%.3lfms (in-frame/inter-frame)", frameCnt, (timestampRenderEnd - timestampRenderStart) / (double)1e6, (timestampRenderEnd - timestamp) / (double)1e6);
-					#endif
-					timestamp = timestampRenderEnd;
 				#endif
 
 				#if FRAME_DELAY
@@ -1260,7 +1254,8 @@ label_exit:
 	gl_mesh_delete(&mesh_persp);
 
 	th_reader_destroy();
-	gl_texture_delete(&texture_orginalBuffer);
+	gl_texture_delete(&texture_orginalBuffer[1]);
+	gl_texture_delete(&texture_orginalBuffer[0]);
 	#ifdef USE_PBO_UPLOAD
 		gl_pixelBuffer_delete(&pbo[1]);
 		gl_pixelBuffer_delete(&pbo[0]);

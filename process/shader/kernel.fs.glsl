@@ -1,23 +1,28 @@
-in vec2 pxPos;
-out vec4 result;
+in highp vec2 pxPos;
+out lowp vec4 result; //lowp for RGBA8 video
 
-uniform sampler2D src;
+uniform lowp sampler2D src; //lowp for RGBA8 video
 
 /* May defined by client: MONO */
 /* May defined by client: BINARY vec4 ^ CLAMP vec4[2]*/
 /* Declared by client: const struct Mask {float v; ivec2 idx;} mask[] */
 
 void main() {
-	ivec2 pxIdx = ivec2(vec2(textureSize(src, 0)) * pxPos);
+	mediump ivec2 srcSize = textureSize(src, 0);
+	mediump vec2 srcSizeF = vec2(srcSize);
 
-	vec4 accum = vec4(0.0, 0.0, 0.0, 0.0);
+	mediump ivec2 pxIdx = ivec2( srcSizeF * pxPos );
+
+	mediump vec4 accum = vec4(0.0, 0.0, 0.0, 0.0); //During accum, may excess lowp range
 	for (int i = 0; i < mask.length(); i++) {
 		Mask thisMask = mask[i];
-		accum += thisMask.v * texelFetch(src, pxIdx + thisMask.idx, 0);
+		mediump ivec2 idxOffset = thisMask.idx;
+		mediump float weight = thisMask.v;
+		accum += weight * texelFetch(src, pxIdx + idxOffset, 0);
 	}
 
 	#ifdef MONO
-		float mono = dot(accum.rgb, vec3(0.299, 0.587, 0.114)) * accum.a;
+		mediump float mono = dot(accum.rgb, vec3(0.299, 0.587, 0.114)) * accum.a;
 		accum = vec4(vec3(mono), 1.0);
 	#endif
 

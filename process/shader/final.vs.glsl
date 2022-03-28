@@ -1,6 +1,6 @@
-layout (location = 0) in vec2 position;
+layout (location = 0) in highp vec2 position;
 
-out vec2 pxPos;
+out highp vec2 pxPos;
 
 void main() {
 	gl_Position = vec4(position.x * 2.0 - 1.0, position.y * 2.0 - 1.0, 0.0, 1.0);
