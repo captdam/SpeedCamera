@@ -40,30 +40,59 @@ bool searchDown(sampler2D map, ivec2 start, int limit) {
 }
 
 void main() {
-	ivec2 pxIdx = ivec2(vec2(textureSize(src, 0)) * pxPos);
-
 	float det = 0.0;
-	if (texelFetch(src, pxIdx, 0).r > 0.0)
+	if (texture(src, pxPos).r > 0.0)
 		det = 1.0;
 	else {
-		ivec2 roadIdx = ivec2(vec2(textureSize(roadmapT1, 0)) * pxPos);
-		float xLeft, xRight;
-		if (pxPos.x < 0.5) {
-			xLeft = texelFetchOffset(roadmapT1, roadIdx, 0, ivec2(+1,0)).x; //Do not read edge
-			xRight = texelFetchOffset(roadmapT1, roadIdx, 0, ivec2(+2,0)).x;
-		} else {
-			xLeft = texelFetchOffset(roadmapT1, roadIdx, 0, ivec2(-2,0)).x;
-			xRight = texelFetchOffset(roadmapT1, roadIdx, 0, ivec2(-1,0)).x;
-		}
-		float pWidth = xRight - xLeft;
+		ivec2 srcSizeI = textureSize(src, 0);
+		vec2 srcSizeF = vec2(srcSizeI);
+
+		vec2 offset8 = vec2(0.125, 0);
+		float roadWidth8 = pxPos.x < 0.5 ? //Size of 1/8 NTC
+			( texture(roadmapT1, pxPos + offset8).x - texture(roadmapT1, pxPos          ).x ):
+			( texture(roadmapT1, pxPos          ).x - texture(roadmapT1, pxPos - offset8).x );
+		float pWidth = roadWidth8 * 8.0 / srcSizeF.x; //Pixel width in src
 		int limit = int(ceil( SEARCH_DISTANCE / pWidth ));
 
+		ivec2 pxIdx = ivec2(srcSizeF * pxPos);
 		#if defined(HORIZONTAL)
-			if ( searchLeft(src, pxIdx, limit) && searchRight(src, pxIdx, limit) )
-				det = 0.5;
+			
+			float foundLeft = 0.0, foundRight = 0.0; //Avoid using bool, stalls pipeline
+			int edgeLeft = max(0, pxIdx.x - limit), edgeRight = min(srcSizeI.x - 1, pxIdx.x + limit);
+			
+			for (ivec2 idx = pxIdx; idx.x >= edgeLeft; idx.x--) {
+				if (texelFetch(src, idx, 0).r > 0.0) {
+					foundLeft = 0.7;
+					break;
+				}
+			}
+			for (ivec2 idx = pxIdx; idx.x <= edgeRight; idx.x++) {
+				if (texelFetch(src, idx, 0).r > 0.0) {
+					foundRight = 0.7;
+					break;
+				}
+			}
+			det = foundLeft * foundRight; //0.49 if both side found
+
 		#elif defined(VERTICAL)
-			if ( searchUp(src, pxIdx, limit) && searchDown(src, pxIdx, limit) )
-				det = 0.5;
+
+			float foundUp = 0.0, foundDown = 0.0;
+			int edgeUp = max(0, pxIdx.y - limit), edgeDown = min(srcSizeI.y - 1, pxIdx.y + limit);
+			
+			for (ivec2 idx = pxIdx; idx.y >= edgeUp; idx.y--) {
+				if (texelFetch(src, idx, 0).r > 0.0) {
+					foundUp = 0.7;
+					break;
+				}
+			}
+			for (ivec2 idx = pxIdx; idx.y <= edgeDown; idx.y++) {
+				if (texelFetch(src, idx, 0).r > 0.0) {
+					foundDown = 0.7;
+					break;
+				}
+			}
+			det = foundUp * foundDown;
+
 		#else
 			#error(Must define one of HORIZONTAL and VERTICAL exclusively (XOR))
 		#endif

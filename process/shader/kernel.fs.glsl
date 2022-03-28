@@ -13,7 +13,7 @@ void main() {
 	vec4 accum = vec4(0.0, 0.0, 0.0, 0.0);
 	for (int i = 0; i < mask.length(); i++) {
 		Mask thisMask = mask[i];
-		accum += thisMask.v * texelFetchOffset(src, pxIdx, 0, thisMask.idx);
+		accum += thisMask.v * texelFetch(src, pxIdx + thisMask.idx, 0);
 	}
 
 	#ifdef MONO

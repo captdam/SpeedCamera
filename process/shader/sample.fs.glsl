@@ -3,9 +3,11 @@ out vec4 result;
 
 uniform sampler2D src;
 
-struct sr_t{float total; int count;};
-sr_t search(sampler2D map, float threshold, ivec2 start, int dir) {
-	sr_t res = {0.0, 0};
+#define SEARCH_TOTAL x
+#define SEARCH_COUNT y
+
+vec2 search(sampler2D map, float threshold, ivec2 start, int dir) {
+	vec2 res = vec2(0.0);
 	ivec2 idx = start;
 	while (true) {
 		ivec2 dest;
@@ -15,8 +17,8 @@ sr_t search(sampler2D map, float threshold, ivec2 start, int dir) {
 		value = texelFetch(map, dest, 0).r;
 		if (value > threshold) {
 			idx = dest;
-			res.total += value;
-			res.count++;
+			res.SEARCH_TOTAL += value;
+			res.SEARCH_COUNT += 1.0;
 			continue;
 		}
 
@@ -24,8 +26,8 @@ sr_t search(sampler2D map, float threshold, ivec2 start, int dir) {
 		value = texelFetch(map, dest, 0).r;
 		if (value > threshold) {
 			idx = dest;
-			res.total += value;
-			res.count++;
+			res.SEARCH_TOTAL += value;
+			res.SEARCH_COUNT += 1.0;
 			continue;
 		}
 
@@ -33,8 +35,8 @@ sr_t search(sampler2D map, float threshold, ivec2 start, int dir) {
 		value = texelFetch(map, dest, 0).r;
 		if (value > threshold) {
 			idx = dest;
-			res.total += value;
-			res.count++;
+			res.SEARCH_TOTAL += value;
+			res.SEARCH_COUNT += 1.0;
 			continue;
 		}
 
@@ -50,13 +52,13 @@ void main() {
 
 	float current = texelFetch(src, pxIdx, 0).r;
 	if (current > 0.0) {
-		sr_t left = search(src, 0.0, pxIdx, -1);
-		sr_t right = search(src, 0.0, pxIdx, +1);
+		vec2 left = search(src, 0.0, pxIdx, -1);
+		vec2 right = search(src, 0.0, pxIdx, +1);
 
-		if (left.count == right.count || left.count == right.count + 1) { //Get center point
-			float total = left.total + right.total;
-			int count = left.count + right.count;
-			res = total / float(count);
+		if (left.SEARCH_COUNT == right.SEARCH_COUNT || left.SEARCH_COUNT == right.SEARCH_COUNT + 1.0) { //Get center point
+			float total = left.SEARCH_TOTAL + right.SEARCH_TOTAL;
+			float count = left.SEARCH_COUNT + right.SEARCH_COUNT;
+			res = total / count;
 		}
 	}
 

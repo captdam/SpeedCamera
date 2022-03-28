@@ -63,21 +63,6 @@ void main() {
 		refined = 0.3; //Object but fail edge detection
 	}
 
-/*	if (ok) {
-		for (int i = 1; i < DENOISE_SIDE; i++) {
-			ivec2 idxl = pxIdx + ivec2(-i, 0);
-			ivec2 idxr = pxIdx + ivec2(+i, 0);
-			if (
-				texelFetch(src, idxl, 0).r == 0.0 ||
-				texelFetch(src, idxr, 0).r == 0.0
-			) {
-				ok = false;
-				break;
-			}
-		}
-		refined = 0.6; //Edge but fail center check
-	}*/
-
 	if (ok) {
 		bvec2 centerEdge = minPath(src, pxIdx, 0.5, DENOISE_SIDE);
 		ok = all(centerEdge);
