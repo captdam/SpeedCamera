@@ -37,11 +37,11 @@ Roadmap roadmap_init(const char* roadmapFile, char** statue) {
 		roadmap_destroy(this);
 		return NULL;
 	}
+	unsigned int pixelCount = this->header.width * this->header.height;
 	unsigned int sizeHeader = sizeof(roadmap_header);
-	unsigned int sizeT1 = this->header.width * this->header.height * sizeof(roadmap_t1);
-	unsigned int sizeT2 = this->header.width * this->header.height * sizeof(roadmap_t2);
+	unsigned int sizeT1 = pixelCount * sizeof(roadmap_t1);
+	unsigned int sizeT2 = pixelCount * sizeof(roadmap_t2);
 	unsigned int sizePoints = this->header.pCnt * sizeof(roadmap_point_t);
-	fprintf(stderr, "%u -- %"PRIu32"\n", sizeHeader + sizeT1 + sizeT2 + sizePoints, this->header.fileSize);
 	if (sizeHeader + sizeT1 + sizeT2 + sizePoints != this->header.fileSize) {
 		if (statue)
 			*statue = "Calculated file size not match with file header"; //Possible endian issue
@@ -50,10 +50,8 @@ Roadmap roadmap_init(const char* roadmapFile, char** statue) {
 		return NULL;
 	}
 
-	size_t s = this->header.width * this->header.height;
-
-	this->t1 = malloc(s * sizeof(roadmap_t1));
-	this->t2 = malloc(s * sizeof(roadmap_t2));
+	this->t1 = malloc(pixelCount * sizeof(roadmap_t1));
+	this->t2 = malloc(pixelCount * sizeof(roadmap_t2));
 	if (!this->t1 || !this->t2) {
 		if (statue)
 			*statue = "Fail to allocate buffer memory for roadmap tables";
@@ -61,14 +59,14 @@ Roadmap roadmap_init(const char* roadmapFile, char** statue) {
 		roadmap_destroy(this);
 		return NULL;
 	}
-	if (!fread(this->t1, sizeof(roadmap_t1), s, fp)) {
+	if (!fread(this->t1, sizeof(roadmap_t1), pixelCount, fp)) {
 		if (statue)
 			*statue = "Error in roadmap file: Cannot read table 1";
 		fclose(fp);
 		roadmap_destroy(this);
 		return NULL;
 	}
-	if (!fread(this->t2, sizeof(roadmap_t2), s, fp)) {
+	if (!fread(this->t2, sizeof(roadmap_t2), pixelCount, fp)) {
 		if (statue)
 			*statue = "Error in roadmap file: Cannot read table 2";
 		fclose(fp);
