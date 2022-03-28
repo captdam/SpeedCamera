@@ -217,7 +217,7 @@ There are two ways to define the search distance. One way is to define the maxim
 int limit = 10;
 ivec2 base = ivec2(800, 600);
 for (ivec2 offset = ivec2(0,0); offset.y < limit; offset.y++) {
-	texelFetchOffset(sampler, base, 1, offset);
+	texelFetchOffset(sampler, base, 0, offset);
 }
 ```
 
@@ -227,11 +227,23 @@ Another way is to define the edge of search limit in screen-domain, like this co
 int limit = 10;
 ivec2 base = ivec2(800, 600);
 for (ivec2 idx = base; idx.y < base.y + limit; idx.y++) {
-	texelFetch(sampler, idx, 1);
+	texelFetch(sampler, idx, 0);
 }
 ```
 
 Both shaders compiled on Linux + GLFW + GLEW with NVidia GPU driver; however, on Raspberry Pi, the first one (offset displacement method) cannot be compiled on Linux + GLFW + GLEW with RPI driver. Although this behavior is not documented in the [OpenGL ES 3.1 document](https://www.khronos.org/registry/OpenGL-Refpages/es3/html/texelFetchOffset.xhtml), it is suspected some OpenGL driver requires ```const``` value for the ```texelFetchOffset``` function argument. 
+
+Although there is a workaround for the first method:
+
+```GLSL
+int limit = 10;
+ivec2 base = ivec2(800, 600);
+for (ivec2 offset = ivec2(0,0); offset.y < limit; offset.y++) {
+	texelFetchOffset(sampler, base + offset, 0);
+}
+```
+
+This will introduce an extra addition in each iteration. In each iteration, the second method performs one checking on ```idx``` and one increment on ```idx```; the workaround perform one checking on ```offset```, one increment on ```offset``` and one addition on ```base + offset```. Some compiler can optimize this code, some may not.
 
 #### The actual search distance should be determined by the program
 
