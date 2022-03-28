@@ -8,7 +8,9 @@
 
 #include "gl.h"
 
-#define SHADER_HEADER_SUPPORTTEXT
+#if !defined(__arm__) && !defined(__aarch64__)
+	#define SHADER_HEADER_SUPPORTTEXT
+#endif
 
 /* == Window and driver management ========================================================== */
 
@@ -234,6 +236,8 @@ void GLAPIENTRY __gl_glErrorCallback(GLenum src, GLenum type, GLuint id, GLenum 
 
 /* == Shader and shader param data types, UBO =============================================== */
 
+char* shaderCommonHeader = ""; //Default is empty, with 0-terminator, NOT NULL
+
 /** Load content of a shader from file into memory. 
  * This function append a null terminator to indicate the end of the shader section. 
  * If length is not NULL, it can be used to get the length of the content (without the appended null terminator). 
@@ -251,9 +255,19 @@ char* __gl_loadFileToMemory(const char* filename, long int* length);
  */
 void __gl_unloadFileFromMemory(char* buffer);
 
+void gl_program_setCommonHeader(const char* header) {
+	shaderCommonHeader = (char*)header;
+}
+
 gl_program gl_program_create(const gl_programSrc* srcs, gl_programArg* args) {
 	const int shaderTypeLookup[] = {GL_VERTEX_SHADER, GL_FRAGMENT_SHADER, GL_GEOMETRY_SHADER}; //Associated with enum GL_ProgramSourceCodeType
 	const char* shaderTypeDescription[] = {"vertex", "fragment", "geometry (optional)"};
+
+	#ifdef VERBOSE
+		gl_log("Init shader program");
+	#endif
+
+	uint32_t shaderTypePresent = 0x00000000;
 
 	/* Check function param */ {
 		for (gl_programSrc* s = (gl_programSrc*)srcs; s->str; s++) {
@@ -265,6 +279,7 @@ gl_program gl_program_create(const gl_programSrc* srcs, gl_programArg* args) {
 				gl_elog("Bad shader code source");
 				return GL_INIT_DEFAULT_PROGRAM;
 			}
+			shaderTypePresent |= 1 << s->type;
 		}
 		for (gl_programArg* a = args; a->name; a++) {
 			if (a->type >= gl_programArgType_placeholderEnd || a->type < 0) {
@@ -275,14 +290,11 @@ gl_program gl_program_create(const gl_programSrc* srcs, gl_programArg* args) {
 	}
 
 	/* Prepare buffer, shader and program object */
-	#ifdef VERBOSE
-		gl_log("Init shader program");
-	#endif
 	GLuint program = 0;
 	struct {
 		char* buffer;
 		unsigned int count;
-		unsigned int size; //4G is enough for a shader src
+		unsigned int size; //4G (uint_max) is enough for a shader src
 	} shaderBuffer[gl_programSrcType_placeholderEnd];
 	for (unsigned int type = 0; type < gl_programSrcType_placeholderEnd; type++) {
 		shaderBuffer[type].buffer = NULL;
@@ -295,78 +307,93 @@ gl_program gl_program_create(const gl_programSrc* srcs, gl_programArg* args) {
 			free(shaderBuffer[i].buffer); \
 	}
 
-	/* Load shader source code into buffer */ {
-		for (gl_programSrc* s = (gl_programSrc*)srcs; s->str; s++) {
-			const gl_programSrcType type = s->type;
-			const char* str = s->str;
-			long int len;
-			char* code;
-			#ifdef VERBOSE
-				if (s->loc == gl_programSrcLoc_mem)
-					gl_log("  - Load section %u of %s shader, from memory @ %p", shaderBuffer[type].count, shaderTypeDescription[type], str);
-				else
-					gl_log("  - Load section %u of %s shader, from file: %s", shaderBuffer[type].count, shaderTypeDescription[type], str);
-			#endif
-
-			/* Write shader code section header to buffer */
-			if (shaderBuffer[type].count) { //First section has no header: GLSL spec: #version must be first line
-				char header[192] = "#line 1"; //Default macro
-				#ifdef SHADER_HEADER_SUPPORTTEXT
-					const char* headerTemplate[gl_programSrcLoc_placeholderEnd] = {
-						"#line 1 \"Shader %s shader, section %u, from memory @ %p \"",
-						"#line 1 \"Shader %s shader, section %u, from file: %s \""
-					};
-					snprintf(header, sizeof(header), headerTemplate[s->loc], shaderTypeDescription[type], shaderBuffer[type].count, str);
-				#endif
-				len = strlen(header);
-				/* Note:
-				* snprintf() has guarantee size of header string length will not excess sizeof(header), so we don't need use any function with size check later (e.g. strnlen). 
-				* It is possible the actual header content excess header size. Which means, the tail new-line in header will be ignored. 
-				* In this case, we add the new-line character exclusively after write the header. 
-				* strlen() returns the length of header without the null-terminator. We allocate memory size of strlen()+1, and then put new-line at the last memory space. 
-				*/
-				if (!( shaderBuffer[type].buffer = realloc(shaderBuffer[type].buffer, shaderBuffer[type].size + len + 1) )) {
-					gl_elog("Fail to write header for %s shader buffer, section %u", shaderTypeDescription[type], shaderBuffer[type].count);
-					destroy_all_shader_buffer();
-					return GL_INIT_DEFAULT_PROGRAM;
-				}
-				memcpy(shaderBuffer[type].buffer + shaderBuffer[type].size /* Address after resize, offset at the end of previous content */, header, len);
-				shaderBuffer[type].buffer[ shaderBuffer[type].size + len ] = '\n';
-				shaderBuffer[type].size += len + 1; /* New buffer size */
-			}
-
-			/* Load shader code content */
-			if (s->loc == gl_programSrcLoc_mem) {
-				code = (char*)str; //Copy the pointer to code, no memory allocation here
-				len = strlen(code);
-			} else {
-				code = __gl_loadFileToMemory(str, &len); //Read file into memory space code --> Copy content from code to buffer --> Free memory space code
-				if (!code) {
-					if (!len)
-						gl_elog("Fail to load shader from file %s: Cannot open file", str);
-					else if (len < 0)
-						gl_elog("Fail to load shader from file %s: Cannot get file length", str);
-					else
-						gl_elog("Fail to load shader from file %s: Cannot create buffer", str);
-					destroy_all_shader_buffer();
-					return GL_INIT_DEFAULT_PROGRAM;
-				}
-			}
-
-			/* Write shader code content to buffer */
-			if (!( shaderBuffer[type].buffer = realloc(shaderBuffer[type].buffer, shaderBuffer[type].size + len) )) {
-				gl_elog("Fail to write code for %s shader buffer, section %u", shaderTypeDescription[type], shaderBuffer[type].count);
+	/* Write shader header */
+	for (unsigned int type = 0; type < gl_programSrcType_placeholderEnd; type++) {
+		if (shaderTypePresent & (1 << type)) {
+			long int len = strlen(shaderCommonHeader);
+			if (!( shaderBuffer[type].buffer = malloc(len + 1) )) {
+				gl_elog("Fail to write code for %s shader buffer, section header", shaderTypeDescription[type]);
 				destroy_all_shader_buffer();
 				return GL_INIT_DEFAULT_PROGRAM;
 			}
-			memcpy(shaderBuffer[type].buffer + shaderBuffer[type].size, code, len);
-			shaderBuffer[type].size += len;
-			shaderBuffer[type].count++;
+			memcpy(shaderBuffer[type].buffer, shaderCommonHeader, len);
+			shaderBuffer[type].buffer[len] = '\n';
+			shaderBuffer[type].size += len + 1;
+		}
+	}
 
-			/* Free temp buffer for code content loading */
-			if (s->loc == gl_programSrcLoc_file) {
-				__gl_unloadFileFromMemory(code);
+	/* Load shader source code into buffer */
+	for (gl_programSrc* s = (gl_programSrc*)srcs; s->str; s++) {
+		const gl_programSrcType type = s->type;
+		const char* str = s->str;
+		long int len;
+		char* code;
+
+		#ifdef VERBOSE
+			if (s->loc == gl_programSrcLoc_mem)
+				gl_log("  - Load section %u of %s shader, from memory @ %p", shaderBuffer[type].count, shaderTypeDescription[type], str);
+			else
+				gl_log("  - Load section %u of %s shader, from file: %s", shaderBuffer[type].count, shaderTypeDescription[type], str);
+		#endif
+
+		/* Write shader code section header to buffer */
+		char header[192] = "#line 1"; //Default macro
+		#ifdef SHADER_HEADER_SUPPORTTEXT
+			const char* headerTemplate[gl_programSrcLoc_placeholderEnd] = {
+				"#line 1 \"Shader %s shader, section %u, from memory @ %p \"", //Do not put new-line here
+				"#line 1 \"Shader %s shader, section %u, from file: %s \""
+			};
+			snprintf(header, sizeof(header), headerTemplate[s->loc], shaderTypeDescription[type], shaderBuffer[type].count, str);
+		#endif
+		len = strlen(header);
+		/* Note:
+		* snprintf() has guarantee size of header string length will not excess sizeof(header), so we don't need use any function with size check later (e.g. strnlen). 
+		* It is possible the actual header content excess header size. Which means, the tail new-line in header will be ignored. 
+		* In this case, we add the new-line character exclusively after write the header. 
+		* strlen() returns the length of header without the null-terminator. We allocate memory size of strlen()+1, and then put new-line at the last memory space. 
+		*/
+		if (!( shaderBuffer[type].buffer = realloc(shaderBuffer[type].buffer, shaderBuffer[type].size + len + 1) )) {
+			gl_elog("Fail to write header for %s shader buffer, section %u", shaderTypeDescription[type], shaderBuffer[type].count);
+			destroy_all_shader_buffer();
+			return GL_INIT_DEFAULT_PROGRAM;
+		}
+		memcpy(shaderBuffer[type].buffer + shaderBuffer[type].size /* Address after resize, offset at the end of previous content */, header, len);
+		shaderBuffer[type].buffer[ shaderBuffer[type].size + len ] = '\n';
+		shaderBuffer[type].size += len + 1; /* New buffer size */
+
+		/* Load shader code content */
+		if (s->loc == gl_programSrcLoc_mem) {
+			code = (char*)str; //Copy the pointer to code, no memory allocation here
+			len = strlen(code);
+		} else {
+			code = __gl_loadFileToMemory(str, &len); //Read file into memory space code --> Copy content from code to buffer --> Free memory space code
+			if (!code) {
+				if (!len)
+					gl_elog("Fail to load shader from file %s: Cannot open file", str);
+				else if (len < 0)
+					gl_elog("Fail to load shader from file %s: Cannot get file length", str);
+				else
+					gl_elog("Fail to load shader from file %s: Cannot create buffer", str);
+				destroy_all_shader_buffer();
+				return GL_INIT_DEFAULT_PROGRAM;
 			}
+		}
+
+		/* Write shader code content to buffer */
+		if (!( shaderBuffer[type].buffer = realloc(shaderBuffer[type].buffer, shaderBuffer[type].size + len + 1) )) {
+			gl_elog("Fail to write code for %s shader buffer, section %u", shaderTypeDescription[type], shaderBuffer[type].count);
+			destroy_all_shader_buffer();
+			return GL_INIT_DEFAULT_PROGRAM;
+		}
+		memcpy(shaderBuffer[type].buffer + shaderBuffer[type].size, code, len);
+		shaderBuffer[type].buffer[ shaderBuffer[type].size + len ] = '\n'; //Append a new-line in case the application/file doesn't provide one
+		shaderBuffer[type].size += len + 1;
+		
+		shaderBuffer[type].count++;
+
+		/* Free temp buffer for code content loading */
+		if (s->loc == gl_programSrcLoc_file) {
+			__gl_unloadFileFromMemory(code);
 		}
 	}
 
@@ -822,7 +849,7 @@ int gl_pixelBuffer_check(gl_pbo* pbo) {
 
 void* gl_pixelBuffer_updateStart(gl_pbo* pbo, size_t size) {
 	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, *pbo);
-	return glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, size, GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT | GL_MAP_UNSYNCHRONIZED_BIT);
+	return glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, size, GL_MAP_WRITE_BIT/* | GL_MAP_INVALIDATE_BUFFER_BIT*/ | GL_MAP_UNSYNCHRONIZED_BIT);
 }
 
 void gl_pixelBuffer_updateFinish() {

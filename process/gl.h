@@ -225,6 +225,13 @@ void (*gl_synchDelete)(gl_synch s);
 
 /* == Shader and shader param data types, UBO =============================================== */
 
+/** Set the header of all shader program. 
+ * All shaders should begin with "#version". This function is used to set this common header so it is not required exerytime a shader is created. 
+ * This lib will not keep a copy of this string, so it is the application's resbonsibility to make sure this string is live when creating shader programs. 
+ * @param header Pointer to the string
+ */
+void gl_program_setCommonHeader(const char* header);
+
 /** Create a shader program. 
  * @param src A list of gl_programSrc indicates the source code. The last gl_programSrc should have a NULL .src to indicate the end of list
  * @param args A list of gl_programArg used to return the ID of each param. The last gl_programArg should have a NULL .name to indicate the end of list
@@ -374,7 +381,7 @@ int gl_pixelBuffer_check(gl_pbo* pbo);
  */
 void* gl_pixelBuffer_updateStart(gl_pbo* pbo, size_t size);
 
-/** Finish the data transfer started by gl_pixelBuffer_updateStart()
+/** Finish the data transfer started by gl_pixelBuffer_updateStart(). 
  */
 void gl_pixelBuffer_updateFinish();
 
