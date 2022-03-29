@@ -1,3 +1,7 @@
 cd process
 gcc *.c -D_FILE_OFFSET_BITS=64 -O3 -DVERBOSE -DVERBOSE_TIME -lX11 -lGLEW -lGL -lglfw3 -lpthread -lm -ldl && time ./a.out 1280 720 10 40123 ../on3-720.map
 pv ../on3-720v10.data > tmpframefifo.data
+
+gcc *.c -D_FILE_OFFSET_BITS=64 -O3 -DVERBOSE -DVERBOSE_TIME00 -lX11 -lGLEW -lGL -lglfw3 -lpthread -lm -ldl && time ./a.out 1280 720 10 40123 ../on3-720.map
+cd /media/pi
+pv on3-720v10.data > ~/Desktop/SpeedCamera/process/tmpframefifo.data

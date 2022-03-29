@@ -1,17 +1,17 @@
-in vec2 pxPos;
-out vec4 result;
+in highp vec2 pxPos;
+out highp vec4 result; //Data, speed
 
-uniform sampler2D src;
+uniform sampler2D src; //Data, speed
 
 #define SEARCH_TOTAL x
 #define SEARCH_COUNT y
 
-vec2 search(sampler2D map, float threshold, ivec2 start, int dir) {
-	vec2 res = vec2(0.0);
-	ivec2 idx = start;
+highp vec2 search(highp sampler2D map, highp float threshold, mediump ivec2 start, lowp int dir) {
+	highp vec2 res = vec2(0.0);
+	mediump ivec2 idx = start;
 	while (true) {
-		ivec2 dest;
-		float value;
+		mediump ivec2 dest;
+		highp float value;
 
 		dest = idx + ivec2(dir, 0); //Middle
 		value = texelFetch(map, dest, 0).r;
@@ -40,27 +40,26 @@ vec2 search(sampler2D map, float threshold, ivec2 start, int dir) {
 			continue;
 		}
 
-		break;
+		break; //Next, next up, and next dwon not found, stop search
 	}
 	return res;
 }
 
 void main() {
-	ivec2 pxIdx = ivec2(vec2(textureSize(src, 0)) * pxPos);
+	mediump ivec2 pxIdx = ivec2(vec2(textureSize(src, 0)) * pxPos);
 
-	float res = 0.0;
+	highp float res = 0.0;
 
-	float current = texelFetch(src, pxIdx, 0).r;
-	if (current > 0.0) {
-		vec2 left = search(src, 0.0, pxIdx, -1);
-		vec2 right = search(src, 0.0, pxIdx, +1);
+	if (texelFetch(src, pxIdx, 0).r > 0.0) {
+		highp vec2 left = search(src, 0.0, pxIdx, -1);
+		highp vec2 right = search(src, 0.0, pxIdx, +1);
 
-		if (left.SEARCH_COUNT == right.SEARCH_COUNT || left.SEARCH_COUNT == right.SEARCH_COUNT + 1.0) { //Get center point
-			float total = left.SEARCH_TOTAL + right.SEARCH_TOTAL;
-			float count = left.SEARCH_COUNT + right.SEARCH_COUNT;
+		if (abs(0.5 + left.SEARCH_COUNT - right.SEARCH_COUNT) < 1.0) { //Get center point, left == right or left == right - 1
+			highp float total = left.SEARCH_TOTAL + right.SEARCH_TOTAL;
+			highp float count = left.SEARCH_COUNT + right.SEARCH_COUNT;
 			res = total / count;
 		}
 	}
 
-	result = vec4(res, 0.0, 0.0, 1.0);
+	result = vec4(res);
 }

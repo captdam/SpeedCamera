@@ -22,8 +22,8 @@ Roadmap roadmap_init(const char* roadmapFile, char** statue) {
 		.t1 = NULL,
 		.t2 = NULL
 	};
-
 	FILE* fp = fopen(roadmapFile, "rb");
+
 	if (!fp) {
 		if (statue)
 			*statue = "Fail to open roadmap file";
@@ -50,15 +50,18 @@ Roadmap roadmap_init(const char* roadmapFile, char** statue) {
 		return NULL;
 	}
 
+
+	this->roadPoints = malloc(2 * sizeof(float) * this->header.pCnt); //Each POINTS contains 2-axis coords
 	this->t1 = malloc(pixelCount * sizeof(roadmap_t1));
 	this->t2 = malloc(pixelCount * sizeof(roadmap_t2));
-	if (!this->t1 || !this->t2) {
+	if ( !this->roadPoints || !this->t1 || !this->t2 ) {
 		if (statue)
-			*statue = "Fail to allocate buffer memory for roadmap tables";
+			*statue = "Fail to allocate buffer memory for roadmap data";
 		fclose(fp);
 		roadmap_destroy(this);
 		return NULL;
 	}
+
 	if (!fread(this->t1, sizeof(roadmap_t1), pixelCount, fp)) {
 		if (statue)
 			*statue = "Error in roadmap file: Cannot read table 1";
@@ -73,15 +76,6 @@ Roadmap roadmap_init(const char* roadmapFile, char** statue) {
 		roadmap_destroy(this);
 		return NULL;
 	}
-
-	this->roadPoints = malloc(2 * sizeof(float) * this->header.pCnt); //Each POINTS contains 2-axis coords
-	if (!this->roadPoints) {
-		if (statue)
-			*statue = "Fail to allocate buffer memory for focus region";
-		fclose(fp);
-		roadmap_destroy(this);
-		return NULL;
-	}
 	for (float* p = this->roadPoints; p < this->roadPoints + 2 * this->header.pCnt;) {
 		roadmap_point_t roadpoint;
 		if (!fread(&roadpoint, sizeof(roadmap_point_t), 1, fp)) {
@@ -91,7 +85,7 @@ Roadmap roadmap_init(const char* roadmapFile, char** statue) {
 			roadmap_destroy(this);
 			return NULL;
 		}
-		*p++ = roadpoint.sx; //Discard road-domain coord
+		*p++ = roadpoint.sx; //Discard road-domain geo coord
 		*p++ = roadpoint.sy;
 	}
 

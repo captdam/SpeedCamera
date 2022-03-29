@@ -30,10 +30,11 @@
 
 /* Shader config */
 #define SHADER_CHANGINGSENSOR_THRESHOLD "0.05" //minimum changing in RGB to pass test
-#define SHADER_OBJECTFIX_HDISTANCE "1.0" //Object fix gap distance in meter 
+#define SHADER_OBJECTFIX_STEP "2.0" //Search step, default (min) is 2.0, larger value skips some pixel but increase performance
+#define SHADER_OBJECTFIX_HDISTANCE "1.0" //Object fix gap distance in meter, larger value decrease performance
 #define SHADER_OBJECTFIX_VDISTANCE "1.0"
-#define SHADER_EDGEREFINE_BOTTOMDENOISE "5" //Bottom and side clerance of edge in px
-#define SHADER_EDGEREFINE_SIDEDNOISE "20"
+#define SHADER_EDGEREFINE_BOTTOMDENOISE "0.007" //Bottom and side clerance of edge in NTC
+#define SHADER_EDGEREFINE_SIDEDNOISE "0.015"
 #define SHADER_FINAL_RAWLUMA "0.1" //Blend intensity of raw 
 
 /* Input video interleave */
@@ -377,7 +378,6 @@ int main(int argc, char* argv[]) {
 	gl_mesh mesh_ortho = GL_INIT_DEFAULT_MESH;
 	gl_tex texture_roadmap1 = GL_INIT_DEFAULT_TEX; //Geo coord in persp and ortho views
 	gl_tex texture_roadmap2 = GL_INIT_DEFAULT_TEX; //Up and down search limit, P2O and O2P project lookup
-	gl_tex texture_roadmap3 = GL_INIT_DEFAULT_TEX; //Pixel road width and height in persp and ortho view
 
 	//To display human readable text on screen
 	const char* speedometer_filename = SPEEDOMETER_FILE;
@@ -458,8 +458,10 @@ int main(int argc, char* argv[]) {
 		gl_program pid;
 		gl_param src;
 		gl_param roadmapT1;
-		gl_param roadmapT3;
 	} program_objectFix[2] = {{.pid = GL_INIT_DEFAULT_PROGRAM}, {.pid = GL_INIT_DEFAULT_PROGRAM}};
+	struct {
+		float left, right, top, bottom;
+	} program_objectFix_param;
 
 	//Program - Edge refine
 	struct {
@@ -569,6 +571,11 @@ int main(int argc, char* argv[]) {
 				{outLeft, outBottom}
 			};
 
+			program_objectFix_param.left = outLeft;
+			program_objectFix_param.right = outRight;
+			program_objectFix_param.top = outTop;
+			program_objectFix_param.bottom = outBottom;
+
 			mesh_persp = gl_mesh_create((const unsigned int[3]){2, roadinfo.pCnt, 0}, attributes, (gl_vertex_t*)vertices, NULL, gl_meshmode_triangleStrip, gl_usage_static);
 			mesh_ortho = gl_mesh_create((const unsigned int[3]){2, 4, 0}, attributes, (gl_vertex_t*)vOthor, NULL, gl_meshmode_triangleFan, gl_usage_static);
 			if ( !gl_mesh_check(&mesh_persp) || !gl_mesh_check(&mesh_ortho) ) {
@@ -581,8 +588,7 @@ int main(int argc, char* argv[]) {
 		/* Road data */ {
 			texture_roadmap1 = gl_texture_create(gl_texformat_RGBA16F, gl_textype_2d, sizeRoadmap); //Mediump is good enough for road-domain geo locations
 			texture_roadmap2 = gl_texture_create(gl_texformat_RGBA16F, gl_textype_2d, sizeRoadmap); //Mediump (1/1024) is OK for pixel indexing
-			texture_roadmap3 = gl_texture_create(gl_texformat_RGBA16F, gl_textype_2d, sizeRoadmap); //Mediump is good enough for road-domain geo locations
-			if ( !gl_texture_check(&texture_roadmap1) || !gl_texture_check(&texture_roadmap2) || !gl_texture_check(&texture_roadmap3) ) {
+			if ( !gl_texture_check(&texture_roadmap1) || !gl_texture_check(&texture_roadmap2) ) {
 				roadmap_destroy(roadmap);
 				error("Fail to create texture buffer for roadmap - road-domain data storage");
 				goto label_exit;
@@ -590,7 +596,6 @@ int main(int argc, char* argv[]) {
 
 			gl_texture_update(&texture_roadmap1, roadmap_getT1(roadmap), zeros, sizeRoadmap);
 			gl_texture_update(&texture_roadmap2, roadmap_getT2(roadmap), zeros, sizeRoadmap);
-//			gl_texture_update(&texture_roadmap3, roadmap_getT3(roadmap), zeros, sizeRoadmap);
 		}
 
 		roadmap_destroy(roadmap); //Free roadmap memory after data uploading finished
@@ -664,7 +669,7 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-		fb_speed.tex = gl_texture_create(INTERNAL_COLORFORMAT, gl_textype_2d, sizeData); //Data
+		fb_speed.tex = gl_texture_create(gl_texformat_RGBA32F, gl_textype_2d, sizeData); //Data, speed
 		if (!gl_texture_check(&fb_speed.tex)) {
 			error("Fail to create texture to store speed");
 			goto label_exit;
@@ -836,6 +841,13 @@ int main(int argc, char* argv[]) {
 		}
 
 		/* Create program: Object fix (2 stages) */ {
+			char cfg[200];
+			sprintf(cfg,
+				"#define STEP "SHADER_OBJECTFIX_STEP NL"#define EDGE vec4(%.4f, %.4f, %.4f, %.4f)"NL,
+				program_objectFix_param.left, program_objectFix_param.right,
+				program_objectFix_param.top, program_objectFix_param.bottom
+			);
+
 			char* horizontal =
 				"#define HORIZONTAL"NL
 				"#define SEARCH_DISTANCE "SHADER_OBJECTFIX_HDISTANCE NL
@@ -847,6 +859,7 @@ int main(int argc, char* argv[]) {
 
 			gl_programSrc src[] = {
 				{gl_programSrcType_vertex,	gl_programSrcLoc_file,	"shader/focusRegion.vs.glsl"},
+				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	cfg},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	NULL},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_file,	"shader/objectFix.fs.glsl"},
 				{.str = NULL}
@@ -854,11 +867,10 @@ int main(int argc, char* argv[]) {
 			gl_programArg arg[] = {
 				{gl_programArgType_normal,	"src"},
 				{gl_programArgType_normal,	"roadmapT1"},
-				{gl_programArgType_normal,	"roadmapT3"},
 				{.name = NULL}
 			};
 
-			src[1].str = horizontal;
+			src[2].str = horizontal;
 			if (!( program_objectFix[0].pid = gl_program_create(src, arg) )) {
 				error("Fail to create shader program: Object fix - Stage 1 horizontal");
 				goto label_exit;
@@ -866,7 +878,7 @@ int main(int argc, char* argv[]) {
 			program_objectFix[0].src = arg[0].id;
 			program_objectFix[0].roadmapT1 = arg[1].id;
 
-			src[1].str = vertical;
+			src[2].str = vertical;
 			if (!( program_objectFix[1].pid = gl_program_create(src, arg) )) {
 				error("Fail to create shader program: Object fix - Stage 2 vertical");
 				goto label_exit;
@@ -883,7 +895,6 @@ int main(int argc, char* argv[]) {
 
 			gl_programSrc src[] = {
 				{gl_programSrcType_vertex,	gl_programSrcLoc_file,	"shader/focusRegion.vs.glsl"},
-				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	"precision mediump float;"},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	cfg},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_file,	"shader/edgeRefine.fs.glsl"},
 				{.str = NULL}
@@ -907,7 +918,6 @@ int main(int argc, char* argv[]) {
 
 			gl_programSrc src[] = {
 				{gl_programSrcType_vertex,	gl_programSrcLoc_file,	"shader/focusRegion.vs.glsl"},
-				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	"precision mediump float;"},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	cfg},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_file,	"shader/measure.fs.glsl"},
 				{.str = NULL}
@@ -933,7 +943,6 @@ int main(int argc, char* argv[]) {
 		/* Create program: Sample */ {
 			gl_programSrc src[] = {
 				{gl_programSrcType_vertex,	gl_programSrcLoc_file,	"shader/focusRegion.vs.glsl"},
-				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	"precision mediump float;"},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_file,	"shader/sample.fs.glsl"},
 				{.str = NULL}
 			};
@@ -952,7 +961,6 @@ int main(int argc, char* argv[]) {
 		/* Create program: Display */ {
 			gl_programSrc src[] = {
 				{gl_programSrcType_vertex,	gl_programSrcLoc_file,	"shader/focusRegion.vs.glsl"},
-				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	"precision mediump float;"},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_file,	"shader/display.fs.glsl"},
 				{.str = NULL}
 			};
@@ -1045,7 +1053,7 @@ int main(int argc, char* argv[]) {
 
 				gl_setViewport(zeros, sizeData);
 
-//#define ROADMAP_CHECK program_roadmapCheck_modeShowT2 //program_roadmapCheck_modeshow*
+//#define ROADMAP_CHECK program_roadmapCheck_modeShowT3 //program_roadmapCheck_modeshow*
 #ifdef ROADMAP_CHECK
 				/* Debug use ONLY: Check roadmap */ {
 					gl_program_use(&program_roadmapCheck.pid);
@@ -1059,14 +1067,14 @@ int main(int argc, char* argv[]) {
 				#define RESULT fb_stageB
 #else
 
-				/* Blur the raw to remove noise */ {
+				/* Blur the raw to remove noise */ { /* RPI4 720p +8ms:28ms */
 					gl_program_use(&program_blurFilter.pid);
 					gl_texture_bind(&texture_orginalBuffer[robin2_idx[0] ], program_blurFilter.src, 0);
 					gl_frameBuffer_bind(&fb_raw[ fb_raw_idx[0] ].fbo, 0);
 					gl_mesh_draw(&mesh_persp);
 				}
 
-				/* Project from perspective to orthographic */ {
+				/* Project from perspective to orthographic */ { /* RPI4 720p +13ms:30ms */
 					gl_program_use(&program_projectP2O.pid);
 					gl_texture_bind(&fb_raw[ fb_raw_idx[0] ].tex, program_projectP2O.src, 0);
 					gl_texture_bind(&texture_roadmap2, program_projectP2O.roadmapT2, 1);
@@ -1074,7 +1082,7 @@ int main(int argc, char* argv[]) {
 					gl_mesh_draw(&mesh_ortho);
 				}
 
-				/* Finding changing to detect moving object*/ {
+				/* Finding changing to detect moving object*/ { /* RPI4 720p +17ms:34ms */
 					gl_program_use(&program_changingSensor.pid);
 					gl_texture_bind(&fb_raw[ fb_raw_idx[0] ].tex, program_changingSensor.current, 0);
 					gl_texture_bind(&fb_raw[ fb_raw_idx[1] ].tex, program_changingSensor.previous, 1);
@@ -1082,7 +1090,7 @@ int main(int argc, char* argv[]) {
 					gl_mesh_draw(&mesh_persp);
 				}
 
-				/* Fix object */ {
+				/* Fix object */ { /* PRI4 720p +45ms:60ms */
 					gl_program_use(&program_objectFix[0].pid);
 					gl_texture_bind(&fb_stageA.tex, program_objectFix[0].src, 0);
 					gl_texture_bind(&texture_roadmap1, program_objectFix[0].roadmapT1, 1);
@@ -1095,9 +1103,8 @@ int main(int argc, char* argv[]) {
 					gl_frameBuffer_bind(&fb_stageA.fbo, 1);
 					gl_mesh_draw(&mesh_persp);
 				}
-#if 1== 6
 
-				/* Project from perspective to orthographic */ {
+				/* Project from perspective to orthographic */ { /* PRI4 720p +50ms:65ms */
 					gl_program_use(&program_projectP2O.pid);
 					gl_texture_bind(&fb_stageA.tex, program_projectP2O.src, 0);
 					gl_texture_bind(&texture_roadmap2, program_projectP2O.roadmapT2, 1);
@@ -1137,6 +1144,15 @@ int main(int argc, char* argv[]) {
 					gl_mesh_draw(&mesh_persp);
 				}
 
+				//TODO: Download texture and process into mesh on CPU side
+				/* Note:
+				We need two texture to store speedmap: current and pervious
+				At this point, possing the speedmap of previous frame while the GPU processing current frame.
+				After creating the speedometer mesh of pervious frame, we are sure the mesh is ready, but not sure if the GPU has finish processing current frame.
+				First upload the previous mesh (register a DMA), with stream buffer; then wait for synch and download current speedmap.
+				*/
+#if 1 == 1
+
 				/* Print numbers for display */ {
 					gl_program_use(&program_display.pid);
 					gl_texture_bind(&fb_speed.tex, program_display.speedmap, 0);
@@ -1145,12 +1161,12 @@ int main(int argc, char* argv[]) {
 					gl_mesh_draw(&mesh_persp);
 				}
 #endif
-
-				#define RESULT fb_stageA
+//				#define RESULT fb_stageA
+//				#define RESULT fb_stageB
 //				#define RESULT fb_raw[ fb_raw_idx[0] ]
 //				#define RESULT fb_object[ fb_object_idx[0] ]
 //				#define RESULT fb_speed
-//				#define RESULT fb_display
+				#define RESULT fb_display
 #endif /* #ifdef ROADMAP_CHECK */
 
 				/* Draw final result on screen */ {
@@ -1200,7 +1216,7 @@ int main(int argc, char* argv[]) {
 				char title[200];
 				float color[4];
 				gl_frameBuffer_download(&RESULT.fbo, color, gl_texformat_RGBA32F, 0, cursorPosData, (const uint[2]){1,1});
-				sprintf(title, "Viewer - frame %u, Cursor=(%d,%d), result=(%.3f|%.3f|%.3f|%.3f)", frameCnt, cursorPosData[0], cursorPosData[1], color[0], color[1], color[2], color[3]);
+				sprintf(title, "Viewer - frame %u, Cursor=(%d,%d), result=(%.4f|%.4f|%.4f|%.4f)", frameCnt, cursorPosData[0], cursorPosData[1], color[0], color[1], color[2], color[3]);
 				gl_drawEnd(title);
 				usleep(25000);
 			}
