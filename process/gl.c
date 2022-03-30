@@ -534,7 +534,7 @@ void gl_program_delete(gl_program* program) {
 	*program = GL_INIT_DEFAULT_PROGRAM;
 }
 
-gl_ubo gl_uniformBuffer_create(unsigned int bindingPoint, size_t size, gl_usage usage) {
+gl_ubo gl_uniformBuffer_create(unsigned int bindingPoint, unsigned int size, gl_usage usage) {
 	const GLenum usageLookup[] = {GL_STREAM_DRAW, GL_STATIC_DRAW, GL_DYNAMIC_DRAW};
 	if (usage < 0 || usage >= gl_usage_placeholderEnd)
 		return GL_INIT_DEFAULT_UBO;
@@ -558,7 +558,7 @@ void gl_uniformBuffer_bindShader(unsigned int bindingPoint, gl_program* program,
 	glUniformBlockBinding(*program, paramId, bindingPoint);
 }
 
-void gl_uniformBuffer_update(gl_ubo* ubo, size_t start, size_t len, void* data) {
+void gl_uniformBuffer_update(gl_ubo* ubo, unsigned int start, unsigned int len, void* data) {
 	glBindBuffer(GL_UNIFORM_BUFFER, *ubo);
 	glBufferSubData(GL_UNIFORM_BUFFER, start, len, data);
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
@@ -659,6 +659,24 @@ gl_mesh gl_mesh_create(const unsigned int count[static 3], gl_index_t* elementsS
 
 int gl_mesh_check(gl_mesh* mesh) {
 	return mesh->vao != GL_INIT_DEFAULT_MESH.vao && mesh->vbo != GL_INIT_DEFAULT_MESH.vbo;
+}
+
+void gl_mesh_update(gl_mesh* mesh, gl_vertex_t* vertices, gl_index_t* indices, const unsigned int offCnt[static 4]) {
+	const unsigned int vOff = offCnt[0], vCnt = offCnt[1], iOff = offCnt[2], iCnt = offCnt[3];
+	glBindVertexArray(mesh->vao);
+	
+	if ( vCnt && vertices ) {
+		glBindBuffer(GL_ARRAY_BUFFER, mesh->vbo);
+		glBufferSubData(GL_ARRAY_BUFFER, vOff * sizeof(gl_vertex_t), vCnt * sizeof(gl_vertex_t), vertices);
+	}
+
+	if ( mesh->ebo != GL_INIT_DEFAULT_MESH.ebo && iCnt && indices ) {
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->ebo);
+		glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, iOff * sizeof(gl_index_t), iCnt * sizeof(gl_index_t), indices);
+	}
+	
+	glBindBuffer(GL_ARRAY_BUFFER, GL_INIT_DEFAULT_MESH.vbo);
+	glBindVertexArray(GL_INIT_DEFAULT_MESH.vao);
 }
 
 void gl_mesh_draw(gl_mesh* mesh) {
@@ -830,7 +848,7 @@ void gl_texture_delete(gl_tex* tex) {
 	tex->texture = GL_INIT_DEFAULT_TEX.texture;
 }
 
-gl_pbo gl_pixelBuffer_create(size_t size, gl_usage usage) {
+gl_pbo gl_pixelBuffer_create(unsigned int size, gl_usage usage) {
 	const GLenum usageLookup[] = {GL_STREAM_DRAW, GL_STATIC_DRAW, GL_DYNAMIC_DRAW};
 	if (usage < 0 || usage >= gl_usage_placeholderEnd)
 		return GL_INIT_DEFAULT_PBO;
@@ -847,7 +865,7 @@ int gl_pixelBuffer_check(gl_pbo* pbo) {
 	return *pbo != GL_INIT_DEFAULT_PBO;
 }
 
-void* gl_pixelBuffer_updateStart(gl_pbo* pbo, size_t size) {
+void* gl_pixelBuffer_updateStart(gl_pbo* pbo, unsigned int size) {
 	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, *pbo);
 	return glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, size, GL_MAP_WRITE_BIT/* | GL_MAP_INVALIDATE_BUFFER_BIT*/ | GL_MAP_UNSYNCHRONIZED_BIT);
 }

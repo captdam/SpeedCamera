@@ -270,7 +270,7 @@ void gl_program_delete(gl_program* program);
  * @param usage A hint to the driver about the frequency of usage, can be gl_usage_*
  * @return UBO
  */
-gl_ubo gl_uniformBuffer_create(unsigned int bindingPoint, size_t size, gl_usage usage);
+gl_ubo gl_uniformBuffer_create(unsigned int bindingPoint, unsigned int size, gl_usage usage);
 
 /** Check an UBO
  * @param ubo An UBO previously returned by gl_uniformBuffer_create()
@@ -291,7 +291,7 @@ void gl_uniformBuffer_bindShader(unsigned int bindingPoint, gl_program* program,
  * @param len Length of the update in bytes
  * @param data Pointer to the update data
  */
-void gl_uniformBuffer_update(gl_ubo* ubo, size_t start, size_t len, void* data);
+void gl_uniformBuffer_update(gl_ubo* ubo, unsigned int start, unsigned int len, void* data);
 
 /** Delete an UBO. 
  * @param ubo An UBO previously created by gl_uniformBuffer_create()
@@ -316,6 +316,15 @@ gl_mesh gl_mesh_create(const unsigned int count[static 3], gl_index_t* elementsS
  * @return 1 if good, 0 if not
  */
 int gl_mesh_check(gl_mesh* mesh);
+
+/** Update portion of a mesh. 
+ * This function update the VBO (if not NULL, and offCnt[1] is not 0) and EBO (if not NULL, and offCnt[3] is not 0, and used when created) of the mesh. 
+ * @param mesh  A mesh previously returned by gl_mesh_create()
+ * @param vertice A pointer to the new vertices
+ * @param indices A pointer to the new indices
+ * @param offCnt {Offset of the update in vertices array, Number of vertices in the array, Offset of the update in indices array, Number of indices in the array}
+ */
+void gl_mesh_update(gl_mesh* mesh, gl_vertex_t* vertices, gl_index_t* indices, const unsigned int offCnt[static 4]);
 
 /** Draw a mesh. 
  * @param mesh A mesh previously returned by gl_mesh_create()
@@ -367,7 +376,7 @@ void gl_texture_delete(gl_tex* tex);
  * @param size Size of the PBO/texture data in bytes (number _of_pixel * bytes_per_pixel)
  * @param usage A hint to the driver about the frequency of usage, can be gl_usage_*
  */
-gl_pbo gl_pixelBuffer_create(size_t size, gl_usage usage);
+gl_pbo gl_pixelBuffer_create(unsigned int size, gl_usage usage);
 
 /** Check a PBO. 
  * @param pbo A PBO previously returned by gl_pixelBuffer_create()
@@ -379,7 +388,7 @@ int gl_pixelBuffer_check(gl_pbo* pbo);
  * @param pbo A PBO previously returned by gl_pixelBuffer_create()
  * @param size Size of the PBO/texture data in bytes
  */
-void* gl_pixelBuffer_updateStart(gl_pbo* pbo, size_t size);
+void* gl_pixelBuffer_updateStart(gl_pbo* pbo, unsigned int size);
 
 /** Finish the data transfer started by gl_pixelBuffer_updateStart(). 
  */
