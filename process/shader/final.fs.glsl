@@ -9,6 +9,5 @@ uniform lowp sampler2D processedTexture;
 void main() {
 	lowp vec4 data = texture(processedTexture, pxPos); //Use texture instead of texelFetch because the window size may differ from data size
 	lowp vec4 raw = texture(orginalTexture, pxPos); //Therefore we need to use texture sampling function provided by GPU
-	result = mix(data, raw, RAW_LUMA);
-//	result.a = 1.0;
+	result = vec4(RAW_LUMA) * raw + vec4(data.a) * data;
 }

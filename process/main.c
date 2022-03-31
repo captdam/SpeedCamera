@@ -33,12 +33,12 @@
 #define SHADER_OBJECTFIX_STEP "2.0" //Search step, default (min) is 2.0, larger value skips some pixel but increase performance
 #define SHADER_OBJECTFIX_HDISTANCE "1.0" //Object fix gap distance in meter, larger value decrease performance
 #define SHADER_OBJECTFIX_VDISTANCE "1.0"
-#define SHADER_EDGEREFINE_BOTTOMDENOISE "0.007" //Bottom and side clerance of edge in NTC
-#define SHADER_EDGEREFINE_SIDEDNOISE "0.015"
+#define SHADER_EDGEREFINE_BOTTOMDENOISE "0.012" //Bottom and side clerance of edge in NTC
+#define SHADER_EDGEREFINE_SIDEDNOISE "0.035"
 #define SHADER_SPEEDOMETER_CNT 16 //Max number of speedometer
 #define SHADER_SPEEDOMETER_WIDTH 0.02 //Relative NDC
 #define SHADER_SPEEDOMETER_HEIGHT 0.015
-#define SHADER_FINAL_RAWLUMA "0.1" //Blend intensity of raw
+#define SHADER_FINAL_RAWLUMA "0.5" //Blend intensity of raw
 
 /* Speedometer */
 #define SPEEDOMETER_FILE "./textmap.data"
@@ -646,7 +646,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		for (unsigned int i = 0; i < sizeof(fb_object) / sizeof(fb_object[0]); i++) {
-			fb_object[i].tex = gl_texture_create(gl_texformat_RGBA8, gl_textype_2d, sizeData); //Enum < 256
+			fb_object[i].tex = gl_texture_create(gl_texformat_R8, gl_textype_2d, sizeData); //Enum < 256
 			if (!gl_texture_check(&fb_object[i].tex)) {
 				error("Fail to create texture to store object (%u)", i);
 				goto label_exit;
@@ -1221,7 +1221,7 @@ int main(int argc, char* argv[]) {
 				/* Draw final result on screen */ {
 					gl_setViewport(zeros, sizeFB);
 					gl_program_use(&program_final.pid);
-					gl_texture_bind(&texture_orginalBuffer[previous], program_final.orginal, 0);
+					gl_texture_bind(&texture_orginalBuffer[current], program_final.orginal, 0); //Do not use texture_orginalBuffer[previous], it is actural next frame, updated in background
 					gl_texture_bind(&RESULT.tex, program_final.result, 1);
 					gl_frameBuffer_bind(NULL, 0);
 					gl_mesh_draw(&mesh_final);
