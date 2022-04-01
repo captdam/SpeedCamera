@@ -4,17 +4,17 @@
 #include <errno.h>
 
 #define TEXT_FILE "./src.data"
-#define TEXT_WIDTH 12
+#define TEXT_WIDTH 12 //Each character is 12 px wide and 24 px high
 #define TEXT_HEIGHT 24
-#define TEXT_LENGTH 4
+#define TEXT_LENGTH 5 //Each glyph has 5 characters
 /*Source text bitmap order: 0 1 2 3 4 5 6 7 8 9 delimiter, format: RGBA8*/
 //Note: GIMP seems cannot export 8-bit gray image, hence we have to switch to the RGBA8 scheme
 
 #define OUTPUT_FILE "./textmap.data"
 
-#define COLOR_IGNORE 2
-#define COLOR_LOW 50
-#define COLOR_HIGH 120
+#define COLOR_IGNORE 2 //Lower than this will have transparent glyph
+#define COLOR_LOW 50 //Lower than this is green
+#define COLOR_HIGH 120 //Higher than this is red, in between is blended
 
 int main() {
 	int statue = EXIT_FAILURE;
@@ -83,27 +83,31 @@ int main() {
 		else {
 			float range = COLOR_HIGH - COLOR_LOW;
 			float offset = i - COLOR_LOW;
-			r = 255.0f * offset / range;
+			r = 255 * offset / range;
 			g = 255 - r;
 			b = 0;
 			a = 255;
 		}
 		uint32_t cy = (r << 0) | (g << 8) | (b << 16) | (a << 24); //Little endian: address 0 = alpha, address 3 = red
-		uint32_t cn = 0x80000000;
+		uint32_t cn = 0x00000000;
 
-		int  c0 = 10, c1 = i / 100, c2 = (i / 10) % 10, c3 = i % 10; //Characters: char 0 = deli(10), char 1-3 = value
+		int character[TEXT_LENGTH] = {
+			10,		//deli(10)
+			i / 100,	//100s
+			(i / 10) % 10,	//10s
+			i % 10,		//1s
+			10		//deli(10)
+		};
 		for (int y = 0; y < TEXT_HEIGHT; y++) {
 			for (int x = 0; x < TEXT_WIDTH; x++) {
-				buffer[y][3 * TEXT_WIDTH + x] = src[c3][y][x]? cy : cn;
-				buffer[y][2 * TEXT_WIDTH + x] = src[c2][y][x]? cy : cn;
-				buffer[y][1 * TEXT_WIDTH + x] = src[c1][y][x]? cy : cn;
-				buffer[y][0 * TEXT_WIDTH + x] = src[c0][y][x]? cy : cn;
+				for (int c = 0; c < TEXT_LENGTH; c++)
+					buffer[y][c * TEXT_WIDTH + x] = src[ character[c] ][y][x]? cy : cn;
 			}
 		}
 		
-		size_t offsetY = TEXT_HEIGHT * (i / 16), offsetX = 4 * TEXT_WIDTH * (i % 16);
+		size_t offsetY = TEXT_HEIGHT * (i / 16), offsetX = TEXT_LENGTH * TEXT_WIDTH * (i % 16);
 		for (size_t y = 0; y < TEXT_HEIGHT; y++) {
-			for (size_t x = 0; x < 4 * TEXT_WIDTH; x++) {
+			for (size_t x = 0; x < TEXT_LENGTH * TEXT_WIDTH; x++) {
 				dest[offsetY + y][offsetX + x] = buffer[y][x];
 			}
 		}
@@ -112,16 +116,13 @@ int main() {
 
 	uint8_t meta[] = {TEXT_WIDTH * TEXT_LENGTH, TEXT_HEIGHT};
 	fwrite(meta, 1, sizeof(meta), fp);
-
 	fwrite(dest, sizeof(uint32_t), 16 * TEXT_HEIGHT * 16 * TEXT_LENGTH * TEXT_WIDTH, fp);
-	fclose(fp);
-	fp = NULL;
 
 	statue = EXIT_SUCCESS;
 	label_exit:
-	if (src) free(src);
-	if (buffer) free(buffer);
-	if (dest) free(dest);
+	free(src);
+	free(buffer);
+	free(dest);
 	if (fp) fclose(fp);
 	return statue;
 }
