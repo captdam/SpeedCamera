@@ -9,17 +9,6 @@ uniform mediump sampler2D roadmapT1;
 /* Defined by client: HORIZONTAL ^ VERTICAL */
 /* Defined by client: SEARCH_DISTANCE float */
 
-mediump vec2 pixelPerspSize(sampler2D map, mediump vec2 pos) {
-	mediump vec4 self = texture(map, pos);
-	mediump vec4 hori = pos.x > 0.5 ?
-		textureLodOffset(map, pos, 0.0, ivec2(-1, 0)):
-		textureLodOffset(map, pos, 0.0, ivec2(+1, 0));
-	mediump vec4 vert = pos.y > 0.5 ?
-		textureLodOffset(map, pos, 0.0, ivec2(0, -1)):
-		textureLodOffset(map, pos, 0.0, ivec2(0, +1));
-	return abs(vec2( hori.x - self.x , vert.y - self.y ));
-}
-
 void main() {
 	lowp float det = 0.0;
 	if (texture(src, pxPos).r > 0.0)
@@ -28,10 +17,14 @@ void main() {
 		mediump ivec2 srcSize = textureSize(src, 0);
 		mediump vec2 srcSizeF = vec2(srcSize);
 
+		mediump vec4 pixelRoadPerspX = textureGather(roadmapT1, pxPos, 0);
+		mediump float pixelWidth = abs(pixelRoadPerspX[1] - pixelRoadPerspX[0]); //i1_j1 - i0_j1
+		mediump float searchDistancePx = SEARCH_DISTANCE / pixelWidth; //Search distance in absolute px. Use pixel width for both width and height, pixel height is actually close-far axis, object height is proportional to width
+
 		mediump vec2 pixelStep = vec2(STEP) / srcSizeF; //Search step, every step takes 2 pixels (textureGather takes 2*2 titles)
 		
 		#if defined(HORIZONTAL)
-			mediump float limit = (SEARCH_DISTANCE / pixelPerspSize(roadmapT1, pxPos).x) / srcSizeF.x; //limit in pixels to NTC
+			mediump float limit = searchDistancePx / srcSizeF.x; //limit in pixels to NTC
 			mediump float edgeLeft = max(EDGE[0], pxPos.x - limit), edgeRight = min(EDGE[1], pxPos.x + limit);
 			
 			lowp float foundLeft = 0.0, foundRight = 0.0; //Avoid using bool, stalls pipeline
@@ -50,7 +43,7 @@ void main() {
 			det = foundLeft * foundRight; //0.49 if both side found
 
 		#elif defined(VERTICAL)
-			mediump float limit = (SEARCH_DISTANCE / pixelPerspSize(roadmapT1, pxPos).y) / srcSizeF.y;
+			mediump float limit = searchDistancePx / srcSizeF.y;
 			mediump float edgeUp = max(EDGE[2], pxPos.y - limit), edgeDown = min(EDGE[3], pxPos.y + limit);
 
 			lowp float foundUp = 0.0, foundDown = 0.0;

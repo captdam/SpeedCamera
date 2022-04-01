@@ -2,19 +2,21 @@ in highp vec2 pxPos;
 out lowp vec4 result; //lowp for RGBA8 video
 
 uniform lowp sampler2D src; //lowp for enum
+uniform mediump sampler2D roadmapT1;
 
+/* Defined by client: STEP */
 /* Defined by client: DENOISE_BOTTOM */
 /* Defined by client: DENOISE_SIDE */
 
 #define RESULT_NOTOBJ 0.0
 #define RESULT_OBJECT 0.3
-#define RESULT_BOTTOM 0.7
+#define RESULT_BOTTOM 0.6
 #define RESULT_CBEDGE 1.0
 
 // Return true if found valid pixel in limit
-bool searchBottom(lowp sampler2D map, mediump vec2 pos, mediump float step, mediump float limit) {
-	for (mediump vec2 p = pos; pos.y < limit; pos.y += step) {
-		if (dot(textureGatherOffset(map, p, ivec2(0,2), 0), vec4(1.0)) > 0.0)
+bool searchBottom(lowp sampler2D map, mediump ivec2 idx, mediump int limit) {
+	for (mediump ivec2 i = idx; i.y < limit; i.y++) {
+		if (texelFetch(map, i, 0).r > 0.0)
 			return true;
 	}
 	return false;
@@ -72,14 +74,19 @@ void main() {
 		//Object, but maybe not edge
 		refined = RESULT_OBJECT;
 
-		//If bottom clerance not enough (object or inner bottom edge)
-		if (searchBottom(src, pxPos, 2.0 / srcSizeF.y, min(1.0, pxPos.y + DENOISE_BOTTOM))) //2.0: textureGather() takes 2*2 titles
+		mediump vec4 pixelRoadPerspX = textureGather(roadmapT1, pxPos, 0);
+		mediump float pixelWidth = abs(pixelRoadPerspX[1] - pixelRoadPerspX[0]); //i1_j1 - i0_j1. Use pixel width for both width and height, pixel height is actually close-far axis, object height is proportional to width
+		
+		mediump int bottomSearchLimit = int(DENOISE_BOTTOM / pixelWidth) + pxIdx.y + 1; //Atleast search 1, at far distance, pixelWidth is very large
+		if (searchBottom( src , pxIdx + ivec2(0,1) , min(srcSize.y, bottomSearchLimit) )) //Do not include self
 			break;
 
 		//Bottom edge, but maybe not centered bottom edge
 		refined = RESULT_BOTTOM;
 
-		bvec2 centerEdge = minPath(src, pxIdx, 0.5, int(DENOISE_SIDE * srcSizeF.x));
+		//If any side has space (edge not at center pertion)
+		mediump int sideSearchDistance = int(DENOISE_SIDE / pixelWidth);
+		bvec2 centerEdge = minPath(src, pxIdx, 0.5, int(sideSearchDistance));
 		if (!all(centerEdge))
 			break;
 		

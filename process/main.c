@@ -22,7 +22,7 @@
 #define GL_SYNCH_TIMEOUT 5000000000LLU //For gl sync timeout
 
 /* Debug time delay */
-#define FRAME_DELAY 0 //(50 * 1000)
+#define FRAME_DELAY (50 * 1000)
 #define FRAME_DEBUGSKIPSECOND 10
 
 /* GPU buffer memory format */
@@ -33,10 +33,11 @@
 #define SHADER_OBJECTFIX_STEP "2.0" //Search step, default (min) is 2.0, larger value skips some pixel but increase performance
 #define SHADER_OBJECTFIX_HDISTANCE "1.0" //Object fix gap distance in meter, larger value decrease performance
 #define SHADER_OBJECTFIX_VDISTANCE "1.0"
-#define SHADER_EDGEREFINE_BOTTOMDENOISE "0.012" //Bottom and side clerance of edge in NTC
-#define SHADER_EDGEREFINE_SIDEDNOISE "0.035"
-#define SHADER_SPEEDOMETER_CNT 16 //Max number of speedometer
-#define SHADER_SPEEDOMETER_WIDTH 0.02 //Relative NDC
+#define SHADER_EDGEREFINE_STEP "2.0" //Search step, default (min) is 2.0, larger value skips some pixel but increase performance
+#define SHADER_EDGEREFINE_BOTTOMDENOISE "0.2" //Bottom and side clerance of edge in meter
+#define SHADER_EDGEREFINE_SIDEDNOISE "0.6"
+#define SHADER_SPEEDOMETER_CNT 32 //Max number of speedometer
+#define SHADER_SPEEDOMETER_WIDTH 0.025 //Relative NDC
 #define SHADER_SPEEDOMETER_HEIGHT 0.015
 #define SHADER_FINAL_RAWLUMA "0.5" //Blend intensity of raw
 
@@ -397,7 +398,7 @@ int main(int argc, char* argv[]) {
 	#define DEFAULT_FB (fb){GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX}
 	fb fb_raw[2] = {DEFAULT_FB, DEFAULT_FB}; //Raw video data with minor pre-process
 	fb fb_object[2] = {DEFAULT_FB, DEFAULT_FB}; //Object detection of current and previous frames
-	fb fb_speed = DEFAULT_FB; //Displacement of two moving edge (speed of moving edge)
+	fb fb_speed = DEFAULT_FB; //Speed measure result, float range [0, 255]
 	fb fb_display = DEFAULT_FB; //Display human-readable text
 	fb fb_stageA = DEFAULT_FB;
 	fb fb_stageB = DEFAULT_FB;
@@ -459,6 +460,7 @@ int main(int argc, char* argv[]) {
 	struct {
 		gl_program pid;
 		gl_param src;
+		gl_param roadmapT1;
 	} program_edgeRefine = {.pid = GL_INIT_DEFAULT_PROGRAM};
 
 	//Program - Measure
@@ -658,7 +660,7 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-		fb_speed.tex = gl_texture_create(gl_texformat_R32F, gl_textype_2d, sizeData); //Data, speed
+		fb_speed.tex = gl_texture_create(gl_texformat_R32F, gl_textype_2d, sizeData); //Data, although mediump float is good enough, but we use 32F so it can be easily download
 		if (!gl_texture_check(&fb_speed.tex)) {
 			error("Fail to create texture to store speed");
 			goto label_exit;
@@ -899,6 +901,7 @@ int main(int argc, char* argv[]) {
 
 		/* Create program: Edge refine */ {
 			const char* cfg =
+				"#define STEP "SHADER_EDGEREFINE_STEP NL
 				"#define DENOISE_BOTTOM "SHADER_EDGEREFINE_BOTTOMDENOISE NL
 				"#define DENOISE_SIDE "SHADER_EDGEREFINE_SIDEDNOISE NL
 			;
@@ -911,6 +914,7 @@ int main(int argc, char* argv[]) {
 			};
 			gl_programArg arg[] = {
 				{gl_programArgType_normal,	"src"},
+				{gl_programArgType_normal,	"roadmapT1"},
 				{.name = NULL}
 			};
 
@@ -919,6 +923,7 @@ int main(int argc, char* argv[]) {
 				goto label_exit;
 			}
 			program_edgeRefine.src = arg[0].id;
+			program_edgeRefine.roadmapT1 = arg[1].id;
 		}
 
 		/* Create program: Measure */ {
@@ -1074,7 +1079,7 @@ int main(int argc, char* argv[]) {
 				#define RESULT fb_stageB
 #else
 
-				/* Blur the raw to remove noise */ { /* RPI4 720p +8ms:28ms */
+				/* Blur the raw to remove noise */ {
 					gl_program_use(&program_blurFilter.pid);
 					gl_texture_bind(&texture_orginalBuffer[current], program_blurFilter.src, 0);
 					gl_frameBuffer_bind(&fb_raw[current].fbo, 0);
@@ -1089,7 +1094,7 @@ int main(int argc, char* argv[]) {
 				//	gl_mesh_draw(&mesh_ortho);
 				}
 
-				/* Finding changing to detect moving object*/ { /* RPI4 720p +17ms:34ms */
+				/* Finding changing to detect moving object*/ {
 					gl_program_use(&program_changingSensor.pid);
 					gl_texture_bind(&fb_raw[current].tex, program_changingSensor.current, 0);
 					gl_texture_bind(&fb_raw[previous].tex, program_changingSensor.previous, 1);
@@ -1097,7 +1102,7 @@ int main(int argc, char* argv[]) {
 					gl_mesh_draw(&mesh_persp);
 				}
 
-				/* Fix object */ { /* PRI4 720p +45ms:60ms */
+				/* Fix object */ {
 					gl_program_use(&program_objectFix[0].pid);
 					gl_texture_bind(&fb_stageA.tex, program_objectFix[0].src, 0);
 					gl_texture_bind(&texture_roadmap1, program_objectFix[0].roadmapT1, 1);
@@ -1111,17 +1116,18 @@ int main(int argc, char* argv[]) {
 					gl_mesh_draw(&mesh_persp);
 				}
 
-				/* Project from perspective to orthographic */ { /* PRI4 720p +50ms:65ms */
-					gl_program_use(&program_projectP2O.pid);
-					gl_texture_bind(&fb_stageA.tex, program_projectP2O.src, 0);
-					gl_texture_bind(&texture_roadmap2, program_projectP2O.roadmapT2, 1);
-					gl_frameBuffer_bind(&fb_stageB.fbo, 1);
-					gl_mesh_draw(&mesh_ortho);
-				}
-
 				/* Refine edge, thinning the thick edge */ {
 					gl_program_use(&program_edgeRefine.pid);
-					gl_texture_bind(&fb_stageB.tex, program_edgeRefine.src, 0);
+					gl_texture_bind(&fb_stageA.tex, program_edgeRefine.src, 0);
+					gl_texture_bind(&texture_roadmap1, program_edgeRefine.roadmapT1, 1);
+					gl_frameBuffer_bind(&fb_stageB.fbo, 1);
+					gl_mesh_draw(&mesh_persp);
+				}
+
+				/* Project from perspective to orthographic */ {
+					gl_program_use(&program_projectP2O.pid);
+					gl_texture_bind(&fb_stageB.tex, program_projectP2O.src, 0);
+					gl_texture_bind(&texture_roadmap2, program_projectP2O.roadmapT2, 1);
 					gl_frameBuffer_bind(&fb_object[current].fbo, 1);
 					gl_mesh_draw(&mesh_ortho);
 				}
@@ -1143,6 +1149,7 @@ int main(int argc, char* argv[]) {
 					gl_frameBuffer_bind(&fb_stageB.fbo, 1);
 					gl_mesh_draw(&mesh_persp);
 				}
+#if 1 == 1
 
 				/* Sample measure result, get single point */ {
 					gl_program_use(&program_sample.pid);
@@ -1201,7 +1208,6 @@ int main(int argc, char* argv[]) {
 					gl_frameBuffer_download(&fb_speed.fbo, speedData[current], gl_texformat_R32F, 0, zeros, sizeData); //Blocking, wait the GPU prepare the data
 					gl_rsync(); //Request process immediately
 				}
-#if 1 == 1
 
 				/* Print numbers for display */ {
 					gl_program_use(&program_display.pid);
