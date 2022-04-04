@@ -134,13 +134,13 @@ typedef unsigned int gl_fbo;
 /** Set log and error log stream. 
  * @param stream Log stream
  */
-void gl_logStream(FILE* stream);
+void gl_logStream(FILE* const stream);
 
 /** Write to log or error log stream. 
  * @param format A C printf-style format string
  * @param ... A list of arguments
  */
-int gl_logWrite(const char* format, ...);
+int gl_logWrite(const char* const format, ...);
 
 /** Print log to log stream. 
  * @param format A C printf-style format string
@@ -175,14 +175,14 @@ void gl_setViewport(const unsigned int offset[static 2], const unsigned int size
 /** Call at the end of a render loop. 
  * @param title New window title (pass NULL to use old title)
  */
-void gl_drawEnd(const char* title);
+void gl_drawEnd(const char* const title);
 
 /** Set or check the window close flag. 
  * A close flag request the GL to terminate the window, but it may not be done right away. 
  * @param close Pass positive value to set the close flag, pass 0 to unset, nagative value will have no effect (only get the flag)
  * @return Close flag: 0 = close flag unset, non-zero = close falg set
  */
-int gl_close(int close);
+int gl_close(const int close);
 
 /** Destroy the GL class, kill the viewer window and release all the GL resource. 
  */
@@ -191,7 +191,7 @@ void gl_destroy();
 /** Switch to line mode
  * @param weight Set the line weight and turn on line mode; 0 to turn off line mode
  */
-void gl_lineMode(unsigned int weight);
+void gl_lineMode(const unsigned int weight);
 
 /** Force the GL driver to sync. 
  * Calling thread will be blocked until all previous GL calls executed completely. 
@@ -215,13 +215,13 @@ gl_synch (*gl_synchSet)();
  * @param timeout Timeout in nano seconds
  * @return Synch status
  */
-gl_synch_status (*gl_synchWait)(gl_synch s, uint64_t timeout);
+gl_synch_status (*gl_synchWait)(const gl_synch s, const uint64_t timeout);
 
 /** Delete a synch point if no longer need. 
  * No effect on platform that does not support synch barrier. 
  * @param s A synch point previously returned by gl_synchSet()
  */
-void (*gl_synchDelete)(gl_synch s);
+void (*gl_synchDelete)(const gl_synch s);
 
 /* == Shader and shader param data types, UBO =============================================== */
 
@@ -230,25 +230,25 @@ void (*gl_synchDelete)(gl_synch s);
  * This lib will not keep a copy of this string, so it is the application's resbonsibility to make sure this string is live when creating shader programs. 
  * @param header Pointer to the string
  */
-void gl_program_setCommonHeader(const char* header);
+void gl_program_setCommonHeader(const char* const header);
 
 /** Create a shader program. 
  * @param src A list of gl_programSrc indicates the source code. The last gl_programSrc should have a NULL .src to indicate the end of list
  * @param args A list of gl_programArg used to return the ID of each param. The last gl_programArg should have a NULL .name to indicate the end of list
  * @return Shader program
  */
-gl_program gl_program_create(const gl_programSrc* srcs, gl_programArg* args);
+gl_program gl_program_create(const gl_programSrc* const srcs, gl_programArg* const args);
 
 /** Check a shader program.
  * @param program A shader program previously returned by gl_program_create()
  * @return 1 if good, 0 if not
  */
-int gl_program_check(gl_program* program);
+int gl_program_check(const gl_program* const program);
 
 /** Use a shader program (bind a shader program to current)
  * @param program A shader program previously returned by gl_program_create()
  */
-void gl_program_use(gl_program* program);
+void gl_program_use(const gl_program* const program);
 
 /** Set parameter of the current shader program. 
  * Call gl_program_use() to bind the shader program before set the parameter. 
@@ -262,7 +262,7 @@ void gl_program_setParam(const gl_param paramId, const unsigned int length, cons
 /** Delete a shader program, the shader program will be reset to GL_INIT_DEFAULT_SHADER. 
  * @param program A shader program previously returned by gl_program_create()
  */
-void gl_program_delete(gl_program* program);
+void gl_program_delete(gl_program* const program);
 
 /** Create a uniform buffer object (UBO) and bind it to a binding point. 
  * @param bindingPoint Binding point to bind
@@ -270,20 +270,20 @@ void gl_program_delete(gl_program* program);
  * @param usage A hint to the driver about the frequency of usage, can be gl_usage_*
  * @return UBO
  */
-gl_ubo gl_uniformBuffer_create(unsigned int bindingPoint, unsigned int size, gl_usage usage);
+gl_ubo gl_uniformBuffer_create(const unsigned int bindingPoint, const unsigned int size, const gl_usage usage);
 
 /** Check an UBO
  * @param ubo An UBO previously returned by gl_uniformBuffer_create()
  * @return 1 if good, 0 if not
  */
-int gl_uniformBuffer_check(gl_ubo* ubo);
+int gl_uniformBuffer_check(const gl_ubo* const ubo);
 
 /** Bind a shader program's block param to a uniform buffer in the binding point. 
  * @param bindingPoint Binding point to bind, same as the one used with gl_uniformBuffer_create()
  * @param program A shader program previously returned by gl_program_create()
  * @param paramId ID of parameter previously returned by gl_program_create()
  */
-void gl_uniformBuffer_bindShader(unsigned int bindingPoint, gl_program* program, gl_param paramId);
+void gl_uniformBuffer_bindShader(const unsigned int bindingPoint, const gl_program* const program, const gl_param paramId);
 
 /** Update a portion of uniform buffer. 
  * @param ubo An UBO previously returned by gl_uniformBuffer_create()
@@ -291,12 +291,12 @@ void gl_uniformBuffer_bindShader(unsigned int bindingPoint, gl_program* program,
  * @param len Length of the update in bytes
  * @param data Pointer to the update data
  */
-void gl_uniformBuffer_update(gl_ubo* ubo, unsigned int start, unsigned int len, void* data);
+void gl_uniformBuffer_update(const gl_ubo* const ubo, const unsigned int start, const unsigned int len, const void* const data);
 
 /** Delete an UBO. 
  * @param ubo An UBO previously created by gl_uniformBuffer_create()
  */
-void gl_unifromBuffer_delete(gl_ubo* ubo);
+void gl_unifromBuffer_delete(gl_ubo* const ubo);
 
 /* == Mesh (vertices) ======================================================================= */
 
@@ -309,13 +309,13 @@ void gl_unifromBuffer_delete(gl_ubo* ubo);
  * @param usage A hint to the driver about the frequency of usage, can be gl_usage_*
  * @return Mesh
  */
-gl_mesh gl_mesh_create(const unsigned int count[static 3], gl_index_t* elementsSize, gl_vertex_t* vertices, gl_index_t* indices, gl_meshmode mode, gl_usage usage);
+gl_mesh gl_mesh_create(const unsigned int count[static 3], const gl_index_t* const elementsSize, const gl_vertex_t* const vertices, const gl_index_t* const indices, const gl_meshmode mode, const gl_usage usage);
 
 /** Check a mesh
  * @param mesh A mesh previously returned by gl_mesh_create()
  * @return 1 if good, 0 if not
  */
-int gl_mesh_check(gl_mesh* mesh);
+int gl_mesh_check(const gl_mesh* const mesh);
 
 /** Update portion of a mesh. 
  * This function update the VBO (if not NULL, and offCnt[1] is not 0) and EBO (if not NULL, and offCnt[3] is not 0, and used when created) of the mesh. 
@@ -324,17 +324,17 @@ int gl_mesh_check(gl_mesh* mesh);
  * @param indices A pointer to the new indices
  * @param offCnt {Offset of the update in vertices array, Number of vertices in the array, Offset of the update in indices array, Number of indices in the array}
  */
-void gl_mesh_update(gl_mesh* mesh, gl_vertex_t* vertices, gl_index_t* indices, const unsigned int offCnt[static 4]);
+void gl_mesh_update(const gl_mesh* const mesh, const gl_vertex_t* const vertices, const gl_index_t* const indices, const unsigned int offCnt[static 4]);
 
 /** Draw a mesh. 
  * @param mesh A mesh previously returned by gl_mesh_create()
  */
-void gl_mesh_draw(gl_mesh* mesh);
+void gl_mesh_draw(const gl_mesh* const mesh);
 
 /** Delete a mesh. 
  * @param mesh A mesh previously returned by gl_mesh_create()
  */
-void gl_mesh_delete(gl_mesh* mesh);
+void gl_mesh_delete(gl_mesh* const mesh);
 
 /* == Texture, PBO for texture transfer and FBO for off-screen rendering ==================== */
 
@@ -344,13 +344,13 @@ void gl_mesh_delete(gl_mesh* mesh);
  * @param size Width, height and depth of texture, depth is ignored for 2D texture
  * @return Texture
  */
-gl_tex gl_texture_create(gl_texformat format, gl_textype type, const unsigned int size[static 3]);
+gl_tex gl_texture_create(const gl_texformat format, const gl_textype type, const unsigned int size[static 3]);
 
 /** Check a texture. 
  * @param tex A texture previously returned by gl_texture_create()
  * @return 1 if good, 0 if not
  */
-int gl_texture_check(gl_tex* tex);
+int gl_texture_check(const gl_tex* const tex);
 
 /** Update a portion of a texture
  * @param tex A texture previously returned by gl_texture_create()
@@ -358,37 +358,37 @@ int gl_texture_check(gl_tex* tex);
  * @param offset Start point of texture to be update, z-coord is ignored if texture is 2D
  * @param size Size of update, z-coord is ignored if texture is 2D
  */
-void gl_texture_update(gl_tex* tex, void* data, const unsigned int offset[static 3], const unsigned int size[static 3]);
+void gl_texture_update(const gl_tex* const tex, const void* const data, const unsigned int offset[static 3], const unsigned int size[static 3]);
 
 /** Bind a texture to OpenGL engine texture unit 
  * @param tex A texture previously returned by gl_texture_create()
  * @param paramId ID of parameter previously returned by gl_program_create()
  * @param unit A OpenGL texture unit, a texture unit can only hold one textre at a time
  */
-void gl_texture_bind(gl_tex* tex, gl_param paramId, unsigned int unit);
+void gl_texture_bind(const gl_tex* const tex, const gl_param paramId, const unsigned int unit);
 
 /** Delete a texture
  * @param tex A texture previously returned by gl_texture_create()
  */
-void gl_texture_delete(gl_tex* tex);
+void gl_texture_delete(gl_tex* const tex);
 
 /** Create a pixel buffer object (PBO) that is used to manually transfer texture data. 
  * @param size Size of the PBO/texture data in bytes (number _of_pixel * bytes_per_pixel)
  * @param usage A hint to the driver about the frequency of usage, can be gl_usage_*
  */
-gl_pbo gl_pixelBuffer_create(unsigned int size, gl_usage usage);
+gl_pbo gl_pixelBuffer_create(const unsigned int size, const gl_usage usage);
 
 /** Check a PBO. 
  * @param pbo A PBO previously returned by gl_pixelBuffer_create()
  * @return 1 if good, 0 if not
  */
-int gl_pixelBuffer_check(gl_pbo* pbo);
+int gl_pixelBuffer_check(const gl_pbo* const pbo);
 
 /** Start a CPU-to-GPU transfer by obtain the pointer to the GPU memory. 
  * @param pbo A PBO previously returned by gl_pixelBuffer_create()
  * @param size Size of the PBO/texture data in bytes
  */
-void* gl_pixelBuffer_updateStart(gl_pbo* pbo, unsigned int size);
+void* gl_pixelBuffer_updateStart(const gl_pbo* const pbo, const unsigned int size);
 
 /** Finish the data transfer started by gl_pixelBuffer_updateStart(). 
  */
@@ -398,12 +398,12 @@ void gl_pixelBuffer_updateFinish();
  * @param pbo A PBO previously returned by gl_pixelBuffer_create()
  * @param tex Dest gl_tex object previously created by gl_texture_create()
  */
-void gl_pixelBuffer_updateToTexture(gl_pbo* pbo, gl_tex* tex);
+void gl_pixelBuffer_updateToTexture(const gl_pbo* const pbo, const gl_tex* const tex);
 
 /** Delete a PBO. 
  * @param pbo A PBO previously returned by gl_pixelBuffer_create()
  */
-void gl_pixelBuffer_delete(gl_pbo* pbo);
+void gl_pixelBuffer_delete(gl_pbo* const pbo);
 
 /** Create a framebuffe object (FBO) for off-screen rendering. 
  * Attach a list of texture to the frame buffer. 
@@ -411,20 +411,20 @@ void gl_pixelBuffer_delete(gl_pbo* pbo);
  * @param count Number of texture to attach
  * @return FBO
  */
-gl_fbo gl_frameBuffer_create(const gl_tex internalBuffer[static 1], unsigned int count);
+gl_fbo gl_frameBuffer_create(const gl_tex internalBuffer[static 1], const unsigned int count);
 
 /** Check a FBO
  * @param fb A FBO previously returned by gl_frameBuffer_create()
  * @return 1 if good, 0 if not
  */
-int gl_frameBuffer_check(gl_fbo* fbo);
+int gl_frameBuffer_check(const gl_fbo* const fbo);
 
 /** Bind a FBO to current for drawing. 
  * To bind the default buffer (display window), pass NULL. 
  * @param fbo A FBO previously returned by gl_frameBuffer_create(), or NULL for display window
  * @param clear Use non-zero value to erase the content before drawing, use 0 to draw on exist content
  */
-void gl_frameBuffer_bind(gl_fbo* fbo, int clear);
+void gl_frameBuffer_bind(const gl_fbo* const fbo, const int clear);
 
 /** Download a portion of fram buffer from GPU. 
  * @param fbo A FBO previously created by gl_frameBuffer_create()
@@ -434,11 +434,11 @@ void gl_frameBuffer_bind(gl_fbo* fbo, int clear);
  * @param offset Start point of framebuffer to be update {x,y}
  * @param size Size of framebuffer to be download {width,height}
  */
-void gl_frameBuffer_download(gl_fbo* fbo, void* dest, gl_texformat format, const unsigned int attachment, const unsigned int offset[static 2], const unsigned int size[static 2]);
+void gl_frameBuffer_download(const gl_fbo* const fbo, void* const dest, const gl_texformat format, const unsigned int attachment, const unsigned int offset[static 2], const unsigned int size[static 2]);
 
 /** Delete a FBO. 
  * @param fb A FBO previously returned by gl_frameBuffer_create()
  */
-void gl_frameBuffer_delete(gl_fbo* fbo);
+void gl_frameBuffer_delete(gl_fbo* const fbo);
 
 #endif /* #ifndef INCLUDE_GL_H */

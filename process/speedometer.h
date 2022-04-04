@@ -21,7 +21,7 @@ typedef struct Speedometer_ClassDataStructure* Speedometer;
  * @param statue If not NULL, return error message in case this function fail
  * @return $this(Opaque) speedometer class object upon success. If fail, free all resource and return NULL
  */
-Speedometer speedometer_init(const char* glyphs, char** statue);
+Speedometer speedometer_init(const char* const glyphs, char** const statue);
 
 /** Convert the glyph to array. 
  * By default, the glyph map layout is 16 * 16; in another word, a flat texture contains 256 small texture. This works for 2D texture. 
@@ -29,7 +29,7 @@ Speedometer speedometer_init(const char* glyphs, char** statue);
  * Each of the 256 glyph can be access by using index (z-axis). This works for 2D array texture. 
  * @param this This speedometer class object
  */
-void speedometer_convert(Speedometer this);
+void speedometer_convert(const Speedometer const this);
 
 
 /** Get a pointer to the glyph. 
@@ -37,12 +37,12 @@ void speedometer_convert(Speedometer this);
  * @param size Width and height of each glyph, pass-by-reference
  * @return Pointer to the bitmap glyph
  */
-uint32_t* speedometer_getGlyph(Speedometer this, unsigned int size[static 2]);
+uint32_t* speedometer_getGlyph(const Speedometer const this, unsigned int size[static 2]);
 
 /** Destroy this speedometer class object, frees resources. 
  * @param this This speedometer class object
  */
-void speedometer_destroy(Speedometer this);
+void speedometer_destroy(const Speedometer this);
 
 
 #endif /* #ifndef INCLUDE_SPEEDOMETER_H */

@@ -14,7 +14,7 @@ struct Speedometer_ClassDataStructure {
 	uint32_t* glyph;
 };
 
-Speedometer speedometer_init(const char* glyphs, char** statue) {
+Speedometer speedometer_init(const char* const glyphs, char** const statue) {
 	Speedometer this = malloc(sizeof(struct Speedometer_ClassDataStructure));
 	if (!this) {
 		if (statue)
@@ -60,7 +60,7 @@ Speedometer speedometer_init(const char* glyphs, char** statue) {
 	return this;
 }
 
-void speedometer_convert(Speedometer this) {
+void speedometer_convert(const Speedometer const this) {
 	unsigned int gWidth = this->size[0], gHeight = this->size[1];
 	uint32_t temp[16][gHeight][gWidth]; //For a row, 16 char
 
@@ -87,13 +87,13 @@ void speedometer_convert(Speedometer this) {
 	}
 }
 
-uint32_t* speedometer_getGlyph(Speedometer this, unsigned int size[static 2]) {
+uint32_t* speedometer_getGlyph(const Speedometer const this, unsigned int size[static 2]) {
 	size[0] = this->size[0];
 	size[1] = this->size[1];
 	return this->glyph;
 }
 
-void speedometer_destroy(Speedometer this) {
+void speedometer_destroy(const Speedometer this) {
 	if (!this)
 		return;
 

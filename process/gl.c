@@ -23,16 +23,16 @@ void GLAPIENTRY __gl_glErrorCallback(GLenum src, GLenum type, GLuint id, GLenum 
 
 gl_synch __gl_synchSet(); //Set a synch point
 gl_synch __gl_synchSetPH(); //Set a synch point placeholder
-gl_synch_status __gl_synchWait(gl_synch s, uint64_t timeout); //Wait for synch point
-gl_synch_status __gl_synchWaitPH(gl_synch s, uint64_t timeout); //Wait for synch point placeholder
-void __gl_synchDelete(gl_synch s); //Delete a synch point
-void __gl_synchDeletePH(gl_synch s); //Delete a synch point placeholder
+gl_synch_status __gl_synchWait(const gl_synch s, const uint64_t timeout); //Wait for synch point
+gl_synch_status __gl_synchWaitPH(const gl_synch s, const uint64_t timeout); //Wait for synch point placeholder
+void __gl_synchDelete(const gl_synch s); //Delete a synch point
+void __gl_synchDeletePH(const gl_synch s); //Delete a synch point placeholder
 
-void gl_logStream(FILE* stream) {
+void gl_logStream(FILE* const stream) {
 	logStream = stream;
 }
 
-int gl_logWrite(const char* format, ...) {
+int gl_logWrite(const char* const format, ...) {
 	va_list args;
 	va_start(args, format);
 	vfprintf(logStream, format, args);
@@ -60,7 +60,7 @@ int gl_init() {
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 //	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 	#ifdef VERBOSE
-//		glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
+		glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
 	#endif
 	window = glfwCreateWindow(1280, 720, "Viewer", NULL, NULL);
 	if (!window){
@@ -139,24 +139,25 @@ void gl_setViewport(const unsigned int offset[static 2], const unsigned int size
 	glViewport(offset[0], offset[1], size[0], size[1]);
 }
 
-void gl_drawEnd(const char* title) {
+void gl_drawEnd(const char* const title) {
 	if (title)
 		glfwSetWindowTitle(window, title);
 	
 	glfwSwapBuffers(window);
 }
 
-int gl_close(int close) {
-	if (!close) {
+int gl_close(const int close) {
+	int c = close;
+	if (!c) {
 		glfwSetWindowShouldClose(window, GLFW_FALSE);
-		close = GLFW_FALSE;
-	} else if (close > 0) {
+		c = GLFW_FALSE;
+	} else if (c > 0) {
 		glfwSetWindowShouldClose(window, GLFW_TRUE);
-		close = GLFW_TRUE;
+		c = GLFW_TRUE;
 	} else {
-		close = glfwWindowShouldClose(window);
+		c = glfwWindowShouldClose(window);
 	}
-	return close;
+	return c;
 }
 
 void gl_destroy() {
@@ -167,7 +168,7 @@ void gl_destroy() {
 	glfwTerminate();
 }
 
-void gl_lineMode(unsigned int weight) {
+void gl_lineMode(const unsigned int weight) {
 	if (weight) {
 		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 		glLineWidth(weight);
@@ -191,7 +192,7 @@ gl_synch __gl_synchSet() {
 gl_synch __gl_synchSetPH() {
 	return NULL;
 }
-gl_synch_status __gl_synchWait(gl_synch s, uint64_t timeout) {
+gl_synch_status __gl_synchWait(const gl_synch s, uint64_t const timeout) {
 	gl_synch_status statue;
 	switch (glClientWaitSync(s, GL_SYNC_FLUSH_COMMANDS_BIT, timeout)) {
 		case GL_ALREADY_SIGNALED:
@@ -209,14 +210,14 @@ gl_synch_status __gl_synchWait(gl_synch s, uint64_t timeout) {
 	}
 	return statue;
 }
-gl_synch_status __gl_synchWaitPH(gl_synch s, uint64_t timeout) {
+gl_synch_status __gl_synchWaitPH(const gl_synch s, const uint64_t timeout) {
 	gl_fsync();
 	return gl_synch_ok;
 }
-void __gl_synchDelete(gl_synch s) {
+void __gl_synchDelete(const gl_synch s) {
 	glDeleteSync(s);
 }
-void __gl_synchDeletePH(gl_synch s) {
+void __gl_synchDeletePH(const gl_synch s) {
 	return;
 }
 
@@ -248,18 +249,18 @@ char* shaderCommonHeader = ""; //Default is empty, with 0-terminator, NOT NULL
  * @param length Pass-by-reference, if not NULL, return the length of the file (without the appended null terminator). 
  * @return Address of content buffer. return NULL if fail
  */
-char* __gl_loadFileToMemory(const char* filename, long int* length);
+char* __gl_loadFileToMemory(const char* const filename, long int* const length);
 
 /** Free the buffer allocated by file reading.
  * @param buffer Buffer returned by __gl_loadFileToMemory()
  */
-void __gl_unloadFileFromMemory(char* buffer);
+void __gl_unloadFileFromMemory(char* const buffer);
 
-void gl_program_setCommonHeader(const char* header) {
+void gl_program_setCommonHeader(const char* const header) {
 	shaderCommonHeader = (char*)header;
 }
 
-gl_program gl_program_create(const gl_programSrc* srcs, gl_programArg* args) {
+gl_program gl_program_create(const gl_programSrc* const srcs, gl_programArg* const args) {
 	const int shaderTypeLookup[] = {GL_VERTEX_SHADER, GL_FRAGMENT_SHADER, GL_GEOMETRY_SHADER}; //Associated with enum GL_ProgramSourceCodeType
 	const char* shaderTypeDescription[] = {"vertex", "fragment", "geometry (optional)"};
 
@@ -481,15 +482,15 @@ gl_program gl_program_create(const gl_programSrc* srcs, gl_programArg* args) {
 	return program;
 }
 
-int gl_program_check(gl_program* program) {
+int gl_program_check(const gl_program* const program) {
 	return *program != GL_INIT_DEFAULT_PROGRAM;
 }
 
-void gl_program_use(gl_program* program) {
+void gl_program_use(const gl_program* const program) {
 	glUseProgram(*program);
 }
 
-void gl_program_setParam(const gl_param paramId, const unsigned int length, const gl_datatype type, const void* data) {
+void gl_program_setParam(const gl_param paramId, const unsigned int length, const gl_datatype type, const void* const data) {
 	if (length - 1 > 3) {
 		gl_elog("Param set fail: GL supports vector size 1 to 4 only");
 		return;
@@ -529,12 +530,12 @@ void gl_program_setParam(const gl_param paramId, const unsigned int length, cons
 		gl_elog("Param set fail: GL supports date type int, uint and float only");
 }
 
-void gl_program_delete(gl_program* program) {
+void gl_program_delete(gl_program* const program) {
 	glDeleteProgram(*program);
 	*program = GL_INIT_DEFAULT_PROGRAM;
 }
 
-gl_ubo gl_uniformBuffer_create(unsigned int bindingPoint, unsigned int size, gl_usage usage) {
+gl_ubo gl_uniformBuffer_create(const unsigned int bindingPoint, const unsigned int size, const gl_usage usage) {
 	const GLenum usageLookup[] = {GL_STREAM_DRAW, GL_STATIC_DRAW, GL_DYNAMIC_DRAW};
 	if (usage < 0 || usage >= gl_usage_placeholderEnd)
 		return GL_INIT_DEFAULT_UBO;
@@ -550,25 +551,25 @@ gl_ubo gl_uniformBuffer_create(unsigned int bindingPoint, unsigned int size, gl_
 	return ubo;
 }
 
-int gl_uniformBuffer_check(gl_ubo* ubo) {
+int gl_uniformBuffer_check(const gl_ubo* const ubo) {
 	return *ubo != GL_INIT_DEFAULT_UBO;
 }
 
-void gl_uniformBuffer_bindShader(unsigned int bindingPoint, gl_program* program, gl_param paramId) {
+void gl_uniformBuffer_bindShader(const unsigned int bindingPoint, const gl_program* const program, const gl_param paramId) {
 	glUniformBlockBinding(*program, paramId, bindingPoint);
 }
 
-void gl_uniformBuffer_update(gl_ubo* ubo, unsigned int start, unsigned int len, void* data) {
+void gl_uniformBuffer_update(const gl_ubo* const ubo, const unsigned int start, const unsigned int len, const void* const data) {
 	glBindBuffer(GL_UNIFORM_BUFFER, *ubo);
 	glBufferSubData(GL_UNIFORM_BUFFER, start, len, data);
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 }
 
-void gl_unifromBuffer_delete(gl_ubo* ubo) {
+void gl_unifromBuffer_delete(gl_ubo* const ubo) {
 	glDeleteBuffers(1, ubo);
 	*ubo = GL_INIT_DEFAULT_UBO;
 }
-char* __gl_loadFileToMemory(const char* filename, long int* length) {
+char* __gl_loadFileToMemory(const char* const filename, long int* const length) {
 	long int len = 0; //Default length = 0, fail to open file
 	if (length)
 		*length = len;
@@ -599,13 +600,13 @@ char* __gl_loadFileToMemory(const char* filename, long int* length) {
 	fclose(fp);
 	return content;
 }
-void __gl_unloadFileFromMemory(char* buffer) {
+void __gl_unloadFileFromMemory(char* const buffer) {
 	free(buffer);
 }
 
 /* == Mesh (vertices) ======================================================================= */
 
-gl_mesh gl_mesh_create(const unsigned int count[static 3], gl_index_t* elementsSize, gl_vertex_t* vertices, gl_index_t* indices, gl_meshmode mode, gl_usage usage) {
+gl_mesh gl_mesh_create(const unsigned int count[static 3], const gl_index_t* const elementsSize, const gl_vertex_t* const vertices, const gl_index_t* const indices, const gl_meshmode mode, const gl_usage usage) {
 	const GLenum usageLookup[] = {GL_STREAM_DRAW, GL_STATIC_DRAW, GL_DYNAMIC_DRAW};
 	if (usage < 0 || usage >= gl_usage_placeholderEnd)
 		return GL_INIT_DEFAULT_MESH;
@@ -645,10 +646,11 @@ gl_mesh gl_mesh_create(const unsigned int count[static 3], gl_index_t* elementsS
 	}
 	
 	GLuint elementIndex = 0, attrIndex = 0;
+	const gl_index_t* eSize = elementsSize;
 	while (elementIndex < vertexCount) {
-		glVertexAttribPointer(attrIndex, *elementsSize, GL_FLOAT, GL_FALSE, vertexCount * sizeof(float), (GLvoid*)(elementIndex * sizeof(float)));
+		glVertexAttribPointer(attrIndex, *eSize, GL_FLOAT, GL_FALSE, vertexCount * sizeof(float), (GLvoid*)(elementIndex * sizeof(float)));
 		glEnableVertexAttribArray(attrIndex);
-		elementIndex += *(elementsSize++);
+		elementIndex += *(eSize++);
 		attrIndex++;
 	}
 	
@@ -657,11 +659,11 @@ gl_mesh gl_mesh_create(const unsigned int count[static 3], gl_index_t* elementsS
 	return mesh;
 }
 
-int gl_mesh_check(gl_mesh* mesh) {
+int gl_mesh_check(const gl_mesh* const mesh) {
 	return mesh->vao != GL_INIT_DEFAULT_MESH.vao && mesh->vbo != GL_INIT_DEFAULT_MESH.vbo;
 }
 
-void gl_mesh_update(gl_mesh* mesh, gl_vertex_t* vertices, gl_index_t* indices, const unsigned int offCnt[static 4]) {
+void gl_mesh_update(const gl_mesh* const mesh, const gl_vertex_t* const vertices, const gl_index_t* const indices, const unsigned int offCnt[static 4]) {
 	const unsigned int vOff = offCnt[0], vCnt = offCnt[1], iOff = offCnt[2], iCnt = offCnt[3];
 	glBindVertexArray(mesh->vao);
 	
@@ -679,7 +681,7 @@ void gl_mesh_update(gl_mesh* mesh, gl_vertex_t* vertices, gl_index_t* indices, c
 	glBindVertexArray(GL_INIT_DEFAULT_MESH.vao);
 }
 
-void gl_mesh_draw(gl_mesh* mesh) {
+void gl_mesh_draw(const gl_mesh* const mesh) {
 	glBindVertexArray(mesh->vao);
 	if (mesh->ebo)
 		glDrawElements(mesh->mode, mesh->drawSize, GL_UNSIGNED_INT, 0);
@@ -688,7 +690,7 @@ void gl_mesh_draw(gl_mesh* mesh) {
 	glBindVertexArray(GL_INIT_DEFAULT_MESH.vao);
 }
 
-void gl_mesh_delete(gl_mesh* mesh) {
+void gl_mesh_delete(gl_mesh* const mesh) {
 	glDeleteVertexArrays(1, &mesh->vao);
 	glDeleteBuffers(1, &mesh->vbo);
 	glDeleteBuffers(1, &mesh->ebo);
@@ -742,7 +744,7 @@ const struct {
 	{gl_texformat_RGBA32UI,		GL_RGBA32UI,	GL_RGBA_INTEGER,	GL_UNSIGNED_INT		}
 };
 
-gl_tex gl_texture_create(gl_texformat format, gl_textype type, const unsigned int size[static 3]) {
+gl_tex gl_texture_create(const gl_texformat format, const gl_textype type, const unsigned int size[static 3]) {
 	if (format < 0 || format >= gl_texformat_placeholderEnd)
 		return GL_INIT_DEFAULT_TEX;
 	if (type < 0 || type > gl_textype_placeholderEnd)
@@ -766,7 +768,7 @@ gl_tex gl_texture_create(gl_texformat format, gl_textype type, const unsigned in
 			glBindTexture(GL_TEXTURE_2D, GL_INIT_DEFAULT_TEX.texture);
 			break;
 		case gl_textype_2dArray:
-			glBindTexture(GL_TEXTURE_2D, tex);
+			glBindTexture(GL_TEXTURE_2D_ARRAY, tex);
 			glTexImage3D(
 				GL_TEXTURE_2D_ARRAY, 0, __gl_texformat_lookup[format].internalFormat,
 				size[0], size[1], size[2],
@@ -797,11 +799,11 @@ gl_tex gl_texture_create(gl_texformat format, gl_textype type, const unsigned in
 	return (gl_tex){tex, size[0], size[1], size[2], format, type};
 }
 
-int gl_texture_check(gl_tex* tex) {
+int gl_texture_check(const gl_tex* const tex) {
 	return tex->texture != GL_INIT_DEFAULT_TEX.texture;
 }
 
-void gl_texture_update(gl_tex* tex, void* data, const unsigned int offset[static 3], const unsigned int size[static 3]) {
+void gl_texture_update(const gl_tex* const tex, const void* const data, const unsigned int offset[static 3], const unsigned int size[static 3]) {
 	switch (tex->type) {
 		case gl_textype_2d:
 			glBindTexture(GL_TEXTURE_2D, tex->texture);
@@ -836,19 +838,19 @@ void gl_texture_update(gl_tex* tex, void* data, const unsigned int offset[static
 	}
 }
 
-void gl_texture_bind(gl_tex* tex, gl_param paramId, unsigned int unit) {
+void gl_texture_bind(const gl_tex* const tex, const gl_param paramId, const unsigned int unit) {
 	const GLuint typeLookup[] = {GL_TEXTURE_2D, GL_TEXTURE_3D, GL_TEXTURE_2D_ARRAY};
 	glActiveTexture(GL_TEXTURE0 + unit);
 	glBindTexture(typeLookup[tex->type], tex->texture);
 	glUniform1i(paramId, unit);
 }
 
-void gl_texture_delete(gl_tex* tex) {
+void gl_texture_delete(gl_tex* const tex) {
 	glDeleteTextures(1, &tex->texture);
 	tex->texture = GL_INIT_DEFAULT_TEX.texture;
 }
 
-gl_pbo gl_pixelBuffer_create(unsigned int size, gl_usage usage) {
+gl_pbo gl_pixelBuffer_create(const unsigned int size, const gl_usage usage) {
 	const GLenum usageLookup[] = {GL_STREAM_DRAW, GL_STATIC_DRAW, GL_DYNAMIC_DRAW};
 	if (usage < 0 || usage >= gl_usage_placeholderEnd)
 		return GL_INIT_DEFAULT_PBO;
@@ -861,11 +863,11 @@ gl_pbo gl_pixelBuffer_create(unsigned int size, gl_usage usage) {
 	return pbo;
 }
 
-int gl_pixelBuffer_check(gl_pbo* pbo) {
+int gl_pixelBuffer_check(const gl_pbo* const pbo) {
 	return *pbo != GL_INIT_DEFAULT_PBO;
 }
 
-void* gl_pixelBuffer_updateStart(gl_pbo* pbo, unsigned int size) {
+void* gl_pixelBuffer_updateStart(const gl_pbo* const pbo, const unsigned int size) {
 	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, *pbo);
 	return glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, size, GL_MAP_WRITE_BIT/* | GL_MAP_INVALIDATE_BUFFER_BIT*/ | GL_MAP_UNSYNCHRONIZED_BIT);
 }
@@ -875,7 +877,7 @@ void gl_pixelBuffer_updateFinish() {
 	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, GL_INIT_DEFAULT_PBO);
 }
 
-void gl_pixelBuffer_updateToTexture(gl_pbo* pbo, gl_tex* tex) {
+void gl_pixelBuffer_updateToTexture(const gl_pbo* const pbo, const gl_tex* const tex) {
 	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, *pbo);
 	switch (tex->type) {
 		case gl_textype_2d:
@@ -897,12 +899,12 @@ void gl_pixelBuffer_updateToTexture(gl_pbo* pbo, gl_tex* tex) {
 	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, GL_INIT_DEFAULT_PBO);
 }
 
-void gl_pixelBuffer_delete(gl_pbo* pbo) {
+void gl_pixelBuffer_delete(gl_pbo* const pbo) {
 	glDeleteBuffers(1, pbo);
 	*pbo = GL_INIT_DEFAULT_PBO;
 }
 
-gl_fbo gl_frameBuffer_create(const gl_tex internalBuffer[static 1], unsigned int count) {
+gl_fbo gl_frameBuffer_create(const gl_tex internalBuffer[static 1], const unsigned int count) {
 	for (unsigned i = 0; i < count; i++) {
 		if (internalBuffer[i].type != gl_textype_2d)
 			return GL_INIT_DEFAULT_FBO;
@@ -918,11 +920,11 @@ gl_fbo gl_frameBuffer_create(const gl_tex internalBuffer[static 1], unsigned int
 	return fbo;
 }
 
-int gl_frameBuffer_check(gl_fbo* fbo) {
+int gl_frameBuffer_check(const gl_fbo* const fbo) {
 	return *fbo != GL_INIT_DEFAULT_FBO;
 }
 
-void gl_frameBuffer_bind(gl_fbo* fbo, int clear) {
+void gl_frameBuffer_bind(const gl_fbo* const fbo, const int clear) {
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo ? *fbo : 0);
 
 	if (clear) {
@@ -931,7 +933,7 @@ void gl_frameBuffer_bind(gl_fbo* fbo, int clear) {
 	}
 }
 
-void gl_frameBuffer_download(gl_fbo* fbo, void* dest, gl_texformat format, const unsigned int attachment, const unsigned int offset[static 2], const unsigned int size[static 2]) {
+void gl_frameBuffer_download(const gl_fbo* const fbo, void* const dest, const gl_texformat format, const unsigned int attachment, const unsigned int offset[static 2], const unsigned int size[static 2]) {
 	if (format < 0 || format >= gl_texformat_placeholderEnd)
 		return;
 	
@@ -941,7 +943,7 @@ void gl_frameBuffer_download(gl_fbo* fbo, void* dest, gl_texformat format, const
 	glReadPixels(offset[0], offset[1], size[0], size[1], __gl_texformat_lookup[format].format, __gl_texformat_lookup[format].type, dest);
 }
 
-void gl_frameBuffer_delete(gl_fbo* fbo) {
+void gl_frameBuffer_delete(gl_fbo* const fbo) {
 	glDeleteFramebuffers(1, fbo);
 	*fbo = GL_INIT_DEFAULT_FBO;
 }
