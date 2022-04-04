@@ -12,8 +12,8 @@
 
 /** Output file fomat:
  * Section I:	File header. 
- * Section II:	Table 1: Road-domain geographic data in prospective and orthographic views. 
- * Section III:	Table 2: Search distance, prospective and orthographic projection map. 
+ * Section II:	Table 1: Road-domain geographic data in perspective and orthographic views. 
+ * Section III:	Table 2: Search distance, perspective and orthographic projection map. 
  * Section IV:	Focus region points. 
  * Section V:	Meta data: ASCII meta data, for reference, ignored by program. 
  */
@@ -21,17 +21,18 @@
 // Section I: File header
 typedef struct FileHeader {
 	uint32_t width, height; //Frame size in pixel
-	uint32_t pCnt; //Number of road points
+	uint32_t pCnt; //Number of road points (perspective view)
 	uint32_t fileSize; //Size of roadmap file without meta data, in byte
 } header_t;
 
-// Section II: Table 1: Road-domain geographic data in prospective and orthographic views
+// Section II: Table 1: Road-domain geographic data in perspective and orthographic views
 typedef struct FileDataTable1 {
-	float px, py; //Road-domain geographic data in prospective view
-	float ox, oy; //Road-domain geographic data in orthographic view
+	float px, py; //Road-domain geographic data in perspective view
+	float ox; //Road-domain geographic data in orthographic view, y-coord of orthographic view is same as y-coord of perspective view
+	float pw; //Perspective pixel width
 } data1_t;
 
-// Section III: Table 2: Search distance, prospective and orthographic projection map
+// Section III: Table 2: Search distance, perspective and orthographic projection map
 typedef struct FileDataTable2 {
 	float searchLimitUp, searchLimitDown; //Up/down search limit y-coord
 	float lookupXp2o, lookupXo2p; //Projection lookup table. Y-crood in orthographic and perspective views are same
@@ -99,8 +100,6 @@ void destroy() {
 }
 
 int main(int argc, char* argv[]) {
-	unsigned pPairCnt = 0;
-
 	if (argc != 3) {
 		err("ERROR: Bad arg: Use this width height < info.txt > output.map\n");
 		err("\twidth and height is the size of frame in px\n");
@@ -141,7 +140,9 @@ int main(int argc, char* argv[]) {
 		char buffer[500];
 		int res; //Result of readline() 0 = token not match, 1 = ok, -1 = argument count mismatch
 		float sy, sxl, sxr, ry, rxl, rxr; //Screen/road point y/x-left/x-right coord
+		unsigned pPairCnt = 0;
 
+		/* Road points - read for persp*/
 		while (fgets(buffer, sizeof(buffer), stdin)) {
 			if (res = readline(buffer, "POINT", 6, DELI"%f"DELI"%f"DELI"%f"DELI"%f"DELI"%f"DELI"%f", &sy, &sxl, &sxr, &ry, &rxl, &rxr)) {
 				if (res == -1) {
@@ -185,7 +186,43 @@ int main(int argc, char* argv[]) {
 				err("Unknown info: %s", buffer);
 				return EXIT_FAILURE;
 			}
+
+			
 		}
+
+		/* Road points - gen for ortho */
+		float sol = p[0][0].sx, sor = p[0][0].sx, sot = p[0][0].sy, sob = p[0][0].sy, rol = p[0][0].rx, ror = p[0][0].rx, rot = p[0][0].ry, rob = p[0][0].ry;
+		for (unsigned int i = 0; i < pPairCnt; i++) {
+			if (p[i][0].sx < sol) {
+				sol = p[i][0].sx;
+				rol = p[i][0].rx;
+			}
+			if (p[i][1].sx > sor) {
+				sor = p[i][1].sx;
+				ror = p[i][1].rx;
+			}
+			if (p[i][1].sy < sot) {
+				sot = p[i][1].sy;
+				rot = p[i][1].ry;
+			}
+			if (p[i][1].sy > sob) {
+				sob = p[i][1].sy;
+				rob = p[i][1].ry;
+			}
+		}
+		if (!( p = realloc(p, (pPairCnt+2) * sizeof(point_t) * 2) )) {
+			err("Cannot allocate memory for points storage when generting outer box (errno=%d)\n", errno);
+			return EXIT_FAILURE;
+		}
+		p[pPairCnt+0][0] = (point_t){.sx = sol, .sy = sot, .rx = rol, .ry = rot};
+		p[pPairCnt+0][1] = (point_t){.sx = sor, .sy = sot, .rx = ror, .ry = rot};
+		p[pPairCnt+1][0] = (point_t){.sx = sol, .sy = sob, .rx = rol, .ry = rob};
+		p[pPairCnt+1][1] = (point_t){.sx = sor, .sy = sob, .rx = ror, .ry = rob};
+		info("POINT: TL pos (%.4f,%.4f) @ loc (%.4f,%.4f)\n", p[pPairCnt+0][0].sx, p[pPairCnt+0][0].sy, p[pPairCnt+0][0].rx, p[pPairCnt+0][0].ry);
+		info("POINT: TR pos (%.4f,%.4f) @ loc (%.4f,%.4f)\n", p[pPairCnt+0][1].sx, p[pPairCnt+0][1].sy, p[pPairCnt+0][1].rx, p[pPairCnt+0][1].ry);
+		info("POINT: BL pos (%.4f,%.4f) @ loc (%.4f,%.4f)\n", p[pPairCnt+1][0].sx, p[pPairCnt+1][0].sy, p[pPairCnt+1][0].rx, p[pPairCnt+1][0].ry);
+		info("POINT: BR pos (%.4f,%.4f) @ loc (%.4f,%.4f)\n", p[pPairCnt+1][1].sx, p[pPairCnt+1][1].sy, p[pPairCnt+1][1].rx, p[pPairCnt+1][1].ry);
+		pPairCnt += 2;
 
 		header.pCnt = pPairCnt * 2;
 		header.fileSize = sizeof(header_t) + header.width * header.height * (sizeof(data1_t) + sizeof(data2_t)) + header.pCnt * sizeof(point_t);
@@ -202,10 +239,10 @@ int main(int argc, char* argv[]) {
 				unsigned int requestPointIndex;
 				if (yNorm < p[0][0].sy) {
 					requestPointIndex = 0;
-				} else if (yNorm > p[pPairCnt-1][0].sy) {
-					requestPointIndex = pPairCnt - 2;
+				} else if (yNorm > p[header.pCnt/2-3][0].sy) {
+					requestPointIndex = header.pCnt/2 - 4;
 				} else {
-					for (unsigned int i = 0; i < pPairCnt - 2; i++) {
+					for (unsigned int i = 0; i < header.pCnt/2 - 4; i++) {
 						if (isBetween(yNorm, p[i][0].sy, p[i+1][0].sy) >= 0) {
 							requestPointIndex = i;
 							break;
@@ -244,13 +281,26 @@ int main(int argc, char* argv[]) {
 		/* Orthographic */ {
 			info("Generate orthographic view roadmap\n");
 			float cx[2];
-			float baselineLeft = t1[ (header.height-1) * header.width + 0 ].px, baselineRight = t1[ header.height * header.width - 1 ].px;
+			unsigned int baselineY = p[header.pCnt/2-1][1].sy * header.height;
+			float baselineLeft = t1[ baselineY * header.width + 0 ].px, baselineRight = t1[ baselineY * header.width + header.width - 1 ].px;
 			polyFit2(0, header.width - 1, baselineLeft, baselineRight, cx);
 			for (unsigned int y = 0; y < header.height; y++) {
 				for (unsigned int x = 0; x < header.width; x++) {
 					unsigned int i = y * header.width + x;
 					t1[i].ox = x * cx[1] + cx[0];
-					t1[i].oy = t1[i].py; //Y-axis in orthographic view is same as in perspective view (we project in x-axis only)
+					/* Y-axis in orthographic view is same as in perspective view (we project in x-axis only) */
+				}
+			}
+		}
+
+		/* Perspective pixel width */ {
+			for (unsigned int y = 0; y < header.height; y++) {
+				unsigned int i = y * header.width;
+				unsigned int j = i + 1;
+				t1[i].pw = t1[i+1].px - t1[i].px;
+				for (unsigned int k = header.width - 1; k; k--) {
+					t1[i].pw = t1[i+1].px - t1[i].px;
+					i++;
 				}
 			}
 		}
@@ -273,11 +323,11 @@ int main(int argc, char* argv[]) {
 		 * Since the input video FPS is not known, it doesn't make sense defining the limit now. However, what we 
 		 * know now is the up and down edge of the focus region. 
 		 */
-		float limitUp = p[0][0].sy, limitDown = p[pPairCnt-1][0].sy;
+		float limitLeft = p[header.pCnt/2-2][0].sx, limitRight = p[header.pCnt/2-2][1].sx, limitUp = p[header.pCnt/2-2][1].sy, limitDown = p[header.pCnt/2-1][1].sy;
+		data2_t* ptr = t2;
 		for (unsigned int y = 0; y < header.height; y++) {
 			float yNorm = (float)y / header.height;
-			data2_t* ptr = t2 + y * header.width;
-			if (yNorm < limitUp || yNorm > limitDown) {
+			if ( yNorm < limitUp || yNorm > limitDown ) {
 				for (unsigned int x = header.width; x; x--) {
 					ptr->searchLimitUp = yNorm;
 					ptr->searchLimitDown = yNorm;
@@ -285,8 +335,14 @@ int main(int argc, char* argv[]) {
 				}
 			} else {
 				for (unsigned int x = header.width; x; x--) {
-					ptr->searchLimitUp = limitUp;
-					ptr->searchLimitDown = limitDown;
+					float xNorm = (float)x / header.width;
+					if ( xNorm < limitLeft || xNorm > limitRight ) {
+						ptr->searchLimitUp = yNorm;
+						ptr->searchLimitDown = yNorm;
+					} else {
+						ptr->searchLimitUp = limitUp;
+						ptr->searchLimitDown = limitDown;
+					}
 					ptr++;
 				}
 			}
@@ -346,7 +402,7 @@ int main(int argc, char* argv[]) {
 
 		fputs("\n\n== Metadata: ===================================================================\n", stdout);
 		fprintf(stdout, "Camera resolution: %upx x %upx (%usqpx)\n", header.width, header.height, header.width * header.height);
-		for (size_t i = 0; i < pPairCnt; i++) {
+		for (size_t i = 0; i < header.pCnt / 2; i++) {
 			point_t left = p[i][0];
 			point_t right = p[i][1];
 			unsigned int sxl = left.sx * header.width, sxr = right.sx * header.width, sy = left.sy * header.height;

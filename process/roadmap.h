@@ -12,7 +12,7 @@
 
 /** Roadmap class object data structure
  */
-typedef struct Roadmap_ClassDataStructure* Roadmap;
+typedef struct Roadmap_ClassDataStructure* const Roadmap;
 
 /** Header from roadmap file
  */
@@ -26,7 +26,8 @@ typedef struct Roadmap_Header {
  */
 typedef struct Roadmap_Table1 {
 	float px, py; //Road-domain geographic data in perspective view
-	float ox, oy; //Road-domain geographic data in orthographic view
+	float ox; //Road-domain geographic data in orthographic view, y-coord of orthographic view is same as y-coord of perspective view
+	float pw; //Perspective pixel width
 } roadmap_t1;
 
 /** Data format from roadmap: Table2: Search limit, perspective and orthographic projection map
@@ -48,43 +49,44 @@ typedef struct Roadmap_Point_t {
  * @param statue If not NULL, return error message in case this function fail
  * @return $this(Opaque) roadmap class object upon success. If fail, free all resource and return NULL
  */
-Roadmap roadmap_init(const char* roadmapFile, char** statue);
+Roadmap roadmap_init(const char* const roadmapFile, char** const statue);
 
 /** Get the header of the roadmap file. 
  * Header contains roadmap size (width nad height) in px, and number of road points that enclose focus region. 
  * @param this This roadmap class object
  * @return Roadmap file header
  */
-roadmap_header roadmap_getHeader(Roadmap this);
+roadmap_header roadmap_getHeader(const Roadmap this);
 
 /** Get the roadmap table 1, a 2-D array of float[4]. 
  * Data from roadmap (table1): Road-domain geographic data in perspective view and orthographic view. 
  * @param this This roadmap class object
  * @return Pointer to the data
  */
-roadmap_t1* roadmap_getT1(Roadmap this);
+roadmap_t1* roadmap_getT1(const Roadmap this);
 
 /** Get the roadmap table 2, a 2-D array of float[4]. 
  * Data from roadmap (table2): Search distance, prospective and orthographic projection map. 
  * @param this This roadmap class object
  * @return Pointer to the data
  */
-roadmap_t2* roadmap_getT2(Roadmap this);
+roadmap_t2* roadmap_getT2(const Roadmap this);
 
 /** Get the road points array (focus region). 
  * Road points defines the boundary of the road. 
  * For the purpose of this program, only data encircled by the road points (which means objects on the road) should be processed. 
  * Anything outside of the boundary should be ignored. 
- * Each road points contains 2 float (x and y coord on the screen, normalized to [0,1])
+ * Each road points contains 2 float (x and y coord on the screen, normalized to [0,1]). 
+ * First header.pCnt - 4 road points are for perspective view, last 4 are for orthographic view. 
  * @param this This roadmap class object
  * @return Pointer to road points array
  */
-float* roadmap_getRoadPoints(Roadmap this);
+float* roadmap_getRoadPoints(const Roadmap this);
 
 /** Destroy this roadmap class object, frees resources (all tables). 
  * @param this This roadmap class object
  */
-void roadmap_destroy(Roadmap this);
+void roadmap_destroy(const Roadmap this);
 
 
 #endif /* #ifndef INCLUDE_ROADMAP_H */

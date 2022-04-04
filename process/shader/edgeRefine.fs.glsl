@@ -1,10 +1,9 @@
 in highp vec2 pxPos;
-out lowp vec4 result; //lowp for RGBA8 video
+out lowp float result; //lowp for enum
 
 uniform lowp sampler2D src; //lowp for enum
 uniform mediump sampler2D roadmapT1;
 
-/* Defined by client: STEP */
 /* Defined by client: DENOISE_BOTTOM */
 /* Defined by client: DENOISE_SIDE */
 
@@ -74,8 +73,7 @@ void main() {
 		//Object, but maybe not edge
 		refined = RESULT_OBJECT;
 
-		mediump vec4 pixelRoadPerspX = textureGather(roadmapT1, pxPos, 0);
-		mediump float pixelWidth = abs(pixelRoadPerspX[1] - pixelRoadPerspX[0]); //i1_j1 - i0_j1. Use pixel width for both width and height, pixel height is actually close-far axis, object height is proportional to width
+		mediump float pixelWidth = texture(roadmapT1, pxPos).w; //Use pixel width for both width and height, pixel height is actually close-far axis, object height is proportional to width
 		
 		mediump int bottomSearchLimit = int(DENOISE_BOTTOM / pixelWidth) + pxIdx.y + 1; //Atleast search 1, at far distance, pixelWidth is very large
 		if (searchBottom( src , pxIdx + ivec2(0,1) , min(srcSize.y, bottomSearchLimit) )) //Do not include self
@@ -94,5 +92,5 @@ void main() {
 		refined = RESULT_CBEDGE;
 	} while (false);
 
-	result = vec4(refined);
+	result = refined;
 }

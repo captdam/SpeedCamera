@@ -1,7 +1,7 @@
 in highp vec2 pxPos;
-out lowp vec4 result; //lowp for RGBA8 video
+out lowp float result; //lowp for enum
 
-uniform lowp sampler2D src; //lowp for RGBA8 video
+uniform lowp sampler2D src; //lowp for enum
 uniform mediump sampler2D roadmapT1;
 
 /* Defined by client: STEP float */
@@ -17,8 +17,7 @@ void main() {
 		mediump ivec2 srcSize = textureSize(src, 0);
 		mediump vec2 srcSizeF = vec2(srcSize);
 
-		mediump vec4 pixelRoadPerspX = textureGather(roadmapT1, pxPos, 0);
-		mediump float pixelWidth = abs(pixelRoadPerspX[1] - pixelRoadPerspX[0]); //i1_j1 - i0_j1
+		mediump float pixelWidth = texture(roadmapT1, pxPos).w;
 		mediump float searchDistancePx = SEARCH_DISTANCE / pixelWidth; //Search distance in absolute px. Use pixel width for both width and height, pixel height is actually close-far axis, object height is proportional to width
 
 		mediump vec2 pixelStep = vec2(STEP) / srcSizeF; //Search step, every step takes 2 pixels (textureGather takes 2*2 titles)
@@ -66,5 +65,5 @@ void main() {
 		#endif
 	}
 
-	result = vec4(det);
+	result = det;
 }

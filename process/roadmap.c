@@ -10,7 +10,7 @@ struct Roadmap_ClassDataStructure {
 	float* roadPoints; //Focus region vertices {screen-x, screen-y}[frVCnt]
 };
 
-Roadmap roadmap_init(const char* roadmapFile, char** statue) {
+Roadmap roadmap_init(const char* const roadmapFile, char** const statue) {
 	Roadmap this = malloc(sizeof(struct Roadmap_ClassDataStructure));
 	if (!this) {
 		if (statue)
@@ -93,19 +93,19 @@ Roadmap roadmap_init(const char* roadmapFile, char** statue) {
 	return this;
 }
 
-roadmap_header roadmap_getHeader(Roadmap this) {
+roadmap_header roadmap_getHeader(const Roadmap this) {
 	return this->header;
 }
 
-roadmap_t1* roadmap_getT1(Roadmap this) {
+roadmap_t1* roadmap_getT1(const Roadmap this) {
 	return this->t1;
 }
 
-roadmap_t2* roadmap_getT2(Roadmap this) {
+roadmap_t2* roadmap_getT2(const Roadmap this) {
 	return this->t2;
 }
 
-float* roadmap_getRoadPoints(Roadmap this) {
+float* roadmap_getRoadPoints(const Roadmap this) {
 	return this->roadPoints;
 }
 
