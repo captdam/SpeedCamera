@@ -1,13 +1,13 @@
 in highp vec2 pxPos;
-out highp vec4 result; //Data, speed
+out mediump float result; //Data, speed
 
-uniform sampler2D src; //Data, speed
+uniform mediump sampler2D src; //Data, speed
 
 #define SEARCH_TOTAL x
 #define SEARCH_COUNT y
 
 highp vec2 search(highp sampler2D map, highp float threshold, mediump ivec2 start, lowp int dir) {
-	highp vec2 res = vec2(0.0);
+	highp vec2 res = vec2(0.0); //Accumulation, use highp
 	mediump ivec2 idx = start;
 	while (true) {
 		mediump ivec2 dest;
@@ -61,5 +61,5 @@ void main() {
 		}
 	}
 
-	result = vec4(res);
+	result = res;
 }
