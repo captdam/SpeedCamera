@@ -25,7 +25,7 @@
 #define FRAME_DELAY (50 * 1000)
 #define FRAME_DEBUGSKIPSECOND 10
 
-#define INTERLACE 3
+#define INTERLACE 10
 
 /* Shader config */
 #define SHADER_CHANGINGSENSOR_THRESHOLD "0.05" //minimum changing in RGB to pass test
@@ -392,17 +392,15 @@ int main(int argc, char* argv[]) {
 	} fb;
 	#define DEFAULT_FB (fb){GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX, gl_texformat_RGBA32F}
 	fb fb_raw[2] = {DEFAULT_FB, DEFAULT_FB}; //Raw video data with minor pre-process
-	fb fb_object[4] = {DEFAULT_FB, DEFAULT_FB, DEFAULT_FB, DEFAULT_FB}; //Object detection of current and previous frames
+	fb fb_object[INTERLACE + 1]; //Object detection of current and previous frames
+	for (unsigned int i = 0; i < arrayLength(fb_object); i++)
+		fb_object[i] = DEFAULT_FB;
 	fb fb_speed = DEFAULT_FB; //Speed measure result, float range [0, 255]
 	fb fb_display = DEFAULT_FB; //Display human-readable text
 	fb fb_stageA = DEFAULT_FB;
 	fb fb_stageB = DEFAULT_FB;
 	gl_mesh mesh_display = GL_INIT_DEFAULT_MESH;
 	float* speedData[2] = {NULL, NULL}; //Process speed on CPU side
-
-	#if INTERLACE + 1 > 4
-		#error INTERLACE should be smaller than object framebuffer depth
-	#endif
 
 	//Program - Roadmap check
 	struct {
@@ -1116,6 +1114,7 @@ int main(int argc, char* argv[]) {
 					gl_frameBuffer_bind(&fb_stageB.fbo, 1);
 					gl_mesh_draw(&mesh_persp);
 				}
+#if 1 == 1
 
 				/* Project from perspective to orthographic */ {
 					gl_program_use(&program_projectP2O.pid);
@@ -1134,7 +1133,6 @@ int main(int argc, char* argv[]) {
 					gl_frameBuffer_bind(&fb_stageA.fbo, 1);
 					gl_mesh_draw(&mesh_ortho);
 				}
-
 
 				/* Project from orthographic to perspective */ {
 					gl_program_use(&program_projectO2P.pid);
@@ -1208,7 +1206,6 @@ int main(int argc, char* argv[]) {
 					gl_frameBuffer_bind(&fb_display.fbo, 1);
 					gl_mesh_draw(&mesh_display);
 				}
-#if 1 == 1
 #endif
 //				#define RESULT fb_stageA
 //				#define RESULT fb_stageB
@@ -1292,8 +1289,6 @@ label_exit:
 	gl_program_delete(&program_projectP2O.pid);
 	gl_program_delete(&program_roadmapCheck.pid);
 
-	free(speedData[1]);
-	free(speedData[0]);
 	for (unsigned int i = arrayLength(speedData); i; i--)
 		free(speedData[i-1]);
 	gl_mesh_delete(&mesh_display);
