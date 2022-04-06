@@ -22,7 +22,7 @@
 #define GL_SYNCH_TIMEOUT 5000000000LLU //For gl sync timeout
 
 /* Debug time delay */
-#define FRAME_DELAY (50 * 1000)
+#define FRAME_DELAY 0 //(50 * 1000)
 #define FRAME_DEBUGSKIPSECOND 10
 
 #define INTERLACE 10
@@ -1164,39 +1164,67 @@ int main(int argc, char* argv[]) {
 					 * The size of speedometer mesh, the result of CPU processing, is not large. We do not need to add another stage of pipeline for the uploaidng. 
 					 */
 
-					gl_vertex_t vertices[6 * SHADER_SPEEDOMETER_CNT][4];
-					unsigned int idx = 0;
-					float* data = speedData[previous]; //While CPU process current frame, CPU process speed data from previous frame
+					float speedTable[SHADER_SPEEDOMETER_CNT][3]; //{speed, x, y}
+					memset(speedTable, 0, sizeof(speedTable)); //IEEE754 +0.0 is 0x00000000
+
+					float* data = speedData[previous];
+					unsigned int speedIdx = 0;
 					unsigned int edgeTop = road_focusRegionBox.top * sizeData[1], edgeBottom = road_focusRegionBox.bottom * sizeData[1];
 					unsigned int edgeLeft = road_focusRegionBox.left * sizeData[0], edgeRight = road_focusRegionBox.right * sizeData[0];
-					for (unsigned int y = edgeTop; y <= edgeBottom; y++) {
+					for (unsigned int y = edgeTop; y <= edgeBottom; y++) { //Get speed data from downloaded framebuffer
 						for (unsigned int x = edgeLeft; x <= edgeRight; x++) {
 							float speed = data[ y * sizeData[0] + x ];
-							if (speed >= 1.0 && idx < 6 * SHADER_SPEEDOMETER_CNT) {
-								float xNorm = (float)x / sizeData[0], yNorm = (float)y / sizeData[1];
-								float left = xNorm - SHADER_SPEEDOMETER_WIDTH, right = xNorm + SHADER_SPEEDOMETER_WIDTH;
-								float top = yNorm - SHADER_SPEEDOMETER_HEIGHT, bottom = yNorm + SHADER_SPEEDOMETER_HEIGHT;
-
-								//Write vertices: v[x][4] => 0.0(invalid), -1.0(top-left), -2.0(left-bottom), +1.0(right-top), +2.0(right-bottom)
-								vertices[idx][0] = left; vertices[idx][1] = top; vertices[idx][2] = speed; vertices[idx][3] = -1.0; idx++; //LT
-								vertices[idx][0] = left; vertices[idx][1] = bottom; vertices[idx][2] = speed; vertices[idx][3] = -2.0; idx++; //LB
-								vertices[idx][0] = right; vertices[idx][1] = top; vertices[idx][2] = speed; vertices[idx][3] = +1.0; idx++; //RT
-								vertices[idx][0] = left; vertices[idx][1] = bottom; vertices[idx][2] = speed; vertices[idx][3] = -2.0; idx++; //LB
-								vertices[idx][0] = right; vertices[idx][1] = bottom; vertices[idx][2] = speed; vertices[idx][3] = +2.0; idx++; //RB
-								vertices[idx][0] = right; vertices[idx][1] = top; vertices[idx][2] = speed; vertices[idx][3] = +1.0; idx++; //RT
+							if (speed >= 1.0) {
+								float xPos = (float)x / sizeData[0], yPos = (float)y / sizeData[1];
+								fprintf(stdout, "Frame %u, obj @ (%f, %f), speed = %f\n", frameCnt, xPos, yPos, speed); //Export result to stdout
+								if (speedIdx < SHADER_SPEEDOMETER_CNT) { //Do not excess buffer size, ignor if excess
+									speedTable[speedIdx][0] = speed;
+									speedTable[speedIdx][1] = xPos;
+									speedTable[speedIdx][2] = yPos;
+								}
+								speedIdx++;
 							}
 						}
 					}
-					while (idx < 6 * SHADER_SPEEDOMETER_CNT) {
-						vertices[idx][0] = 0.5;
-						vertices[idx][1] = 0.5;
-						vertices[idx][2] = 0.0;
-						vertices[idx][3] = 0.0;
-						idx++;
+
+					for (unsigned int i = 0; i < SHADER_SPEEDOMETER_CNT - 1; i++) { //Remove overlap
+						for (unsigned int j = i + 1; j < SHADER_SPEEDOMETER_CNT; j++) {
+							if (
+								speedTable[i][0] >= 1.0 && speedTable[j][0] >= 1.0 &&
+								fabsf( speedTable[i][1] - speedTable[j][1] ) <= 2 * SHADER_SPEEDOMETER_WIDTH &&
+								fabsf( speedTable[i][2] - speedTable[j][2] ) <= 2 * SHADER_SPEEDOMETER_HEIGHT
+							) {
+								speedTable[i][0] = 0.5 * (speedTable[i][0] + speedTable[j][0]);
+								speedTable[i][1] = 0.5 * (speedTable[i][1] + speedTable[j][1]);
+								speedTable[i][2] = 0.5 * (speedTable[i][2] + speedTable[j][2]);
+								memset(speedTable[j], 0, sizeof(speedTable[j]));
+							}
+						}
+					}
+
+					gl_vertex_t vertices[6 * SHADER_SPEEDOMETER_CNT][4];
+					memset(vertices, 0, sizeof(vertices)); //IEEE754 +0.0 is 0x00000000
+
+					unsigned int idx = 0;
+					for (unsigned int i = 0; i < SHADER_SPEEDOMETER_CNT; i++) {
+						float speed = speedTable[i][0];
+						if (speed < 1.0)
+							continue;
+						
+						float xNorm = speedTable[i][1], yNorm = speedTable[i][2];
+						float left = xNorm - SHADER_SPEEDOMETER_WIDTH, right = xNorm + SHADER_SPEEDOMETER_WIDTH;
+						float top = yNorm - SHADER_SPEEDOMETER_HEIGHT, bottom = yNorm + SHADER_SPEEDOMETER_HEIGHT;
+
+						//Write vertices: v[x][4] => 0.0(invalid), -1.0(top-left), -2.0(left-bottom), +1.0(right-top), +2.0(right-bottom)
+						vertices[idx][0] = left; vertices[idx][1] = top; vertices[idx][2] = speed; vertices[idx][3] = -1.0; idx++; //LT
+						vertices[idx][0] = left; vertices[idx][1] = bottom; vertices[idx][2] = speed; vertices[idx][3] = -2.0; idx++; //LB
+						vertices[idx][0] = right; vertices[idx][1] = top; vertices[idx][2] = speed; vertices[idx][3] = +1.0; idx++; //RT
+						vertices[idx][0] = left; vertices[idx][1] = bottom; vertices[idx][2] = speed; vertices[idx][3] = -2.0; idx++; //LB
+						vertices[idx][0] = right; vertices[idx][1] = bottom; vertices[idx][2] = speed; vertices[idx][3] = +2.0; idx++; //RB
+						vertices[idx][0] = right; vertices[idx][1] = top; vertices[idx][2] = speed; vertices[idx][3] = +1.0; idx++; //RT
 					}
 
 					gl_mesh_update(&mesh_display, (gl_vertex_t*)vertices, NULL, (const unsigned int[4]){0, 6 * SHADER_SPEEDOMETER_CNT, 0, 0}); //register DMA, non-blocking
-					gl_frameBuffer_download(&fb_speed.fbo, speedData[current], fb_speed.format, 0, zeros, sizeData); //Blocking, wait the GPU prepare the data
 					gl_rsync(); //Request process immediately
 				}
 
@@ -1223,16 +1251,13 @@ int main(int argc, char* argv[]) {
 					gl_frameBuffer_bind(NULL, 0);
 					gl_mesh_draw(&mesh_final);
 				}
-			
-				gl_synch barrier = gl_synchSet();
-				if (gl_synchWait(barrier, GL_SYNCH_TIMEOUT) == gl_synch_timeout) { //timeout = 5e9 ns = 5s
-					error("Render loop fatal stall");
-					goto label_exit;
-				}
+				
+				gl_frameBuffer_download(&fb_speed.fbo, speedData[current], fb_speed.format, 0, zeros, sizeData); //Blocking, wait the GPU prepare the speed data of current frame
+				/* This blocking cmd is also a synch point */
+
 				#ifdef DEBUG_THREADSPEED
 					debug_threadSpeed = 'M'; //Not critical, no need to use mutex
 				#endif
-				gl_synchDelete(barrier);
 
 				char title[100];
 				#ifdef VERBOSE_TIME

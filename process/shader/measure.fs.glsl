@@ -10,6 +10,8 @@ uniform mediump sampler2D roadmapT2;
 
 /* Defined by client: BIAS float */
 
+#define DEST_THRESHOLD 0.0 //0.5 for edge (0.6 from last stage), 0.0 for object (0.3 from last stage)
+
 void main() {
 	mediump ivec2 videoSizeI = textureSize(current, 0);
 	mediump vec2 videoSizeF = vec2(videoSizeI);
@@ -27,7 +29,7 @@ void main() {
 		mediump int limitDown = limitUpDownAbs.y;
 
 		for (mediump ivec2 idx = pxIdx; idx.y > limitUp; idx.y--) {
-			if (texelFetch(previous, idx, 0).r > 0.0) { //>0.0 means object
+			if (texelFetch(previous, idx, 0).r > DEST_THRESHOLD) {
 				mediump float roadPos = texture( roadmapT1 , vec2(idx)/videoSizeF ).y;
 				#ifdef GET_PIXEL_SPEED
 					distanceUp = float(pxIdx.y - idx.y) + 0.001 * (roadPos - currentPos);
@@ -39,7 +41,7 @@ void main() {
 		}
 
 		for (mediump ivec2 idx = pxIdx; idx.y < limitDown; idx.y++) {
-			if (texelFetch(previous, idx, 0).r > 0.0) {
+			if (texelFetch(previous, idx, 0).r > DEST_THRESHOLD) {
 				mediump float roadPos = texture( roadmapT1 , vec2(idx)/videoSizeF ).y;
 				#ifdef GET_PIXEL_SPEED
 					distanceDown = float(idx.y - pxIdx.y) + 0.001 * (currentPos - roadPos);
