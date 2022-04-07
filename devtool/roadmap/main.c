@@ -324,6 +324,7 @@ int main(int argc, char* argv[]) {
 		 * know now is the up and down edge of the focus region. 
 		 */
 		float limitLeft = p[header.pCnt/2-2][0].sx, limitRight = p[header.pCnt/2-2][1].sx, limitUp = p[header.pCnt/2-2][1].sy, limitDown = p[header.pCnt/2-1][1].sy;
+		info("Limit: left %.4f right %.4f; top %.4f bottom %.4f\n", limitLeft, limitRight, limitUp, limitDown);
 		data2_t* ptr = t2;
 		for (unsigned int y = 0; y < header.height; y++) {
 			float yNorm = (float)y / header.height;
@@ -334,7 +335,7 @@ int main(int argc, char* argv[]) {
 					ptr++;
 				}
 			} else {
-				for (unsigned int x = header.width; x; x--) {
+				for (unsigned int x = 0; x < header.width; x++) {
 					float xNorm = (float)x / header.width;
 					if ( xNorm < limitLeft || xNorm > limitRight ) {
 						ptr->searchLimitUp = yNorm;
