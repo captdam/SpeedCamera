@@ -8,9 +8,16 @@ uniform mediump sampler2D roadmapT2;
 
 //#define GET_PIXEL_SPEED //For debug
 
+/* Defined by client: DEST_OBJ ^ DEST_EDGE */
 /* Defined by client: BIAS float */
 
-#define DEST_THRESHOLD 0.0 //0.5 for edge (0.6 from last stage), 0.0 for object (0.3 from last stage)
+#if defined(DEST_OBJ)
+	#define DEST_THRESHOLD 0.0 //0.0 for object (0.3 from last stage)
+#elif defined(DEST_EDGE)
+	#define DEST_THRESHOLD 0.5 //0.5 for edge (0.6 from last stage)
+#elif
+	#error Must define "DEST_OBJ" xor "DEST_EDGE"
+#endif
 
 void main() {
 	mediump ivec2 videoSizeI = textureSize(current, 0);
@@ -30,10 +37,10 @@ void main() {
 
 		for (mediump ivec2 idx = pxIdx; idx.y > limitUp; idx.y--) {
 			if (texelFetch(previous, idx, 0).r > DEST_THRESHOLD) {
-				mediump float roadPos = texture( roadmapT1 , vec2(idx)/videoSizeF ).y;
 				#ifdef GET_PIXEL_SPEED
-					distanceUp = float(pxIdx.y - idx.y) + 0.001 * (roadPos - currentPos);
+					distanceUp = float(pxIdx.y - idx.y);
 				#else
+					mediump float roadPos = texture( roadmapT1 , vec2(idx)/videoSizeF ).y;
 					distanceUp = roadPos - currentPos;
 				#endif
 				break;
@@ -42,10 +49,10 @@ void main() {
 
 		for (mediump ivec2 idx = pxIdx; idx.y < limitDown; idx.y++) {
 			if (texelFetch(previous, idx, 0).r > DEST_THRESHOLD) {
-				mediump float roadPos = texture( roadmapT1 , vec2(idx)/videoSizeF ).y;
 				#ifdef GET_PIXEL_SPEED
-					distanceDown = float(idx.y - pxIdx.y) + 0.001 * (currentPos - roadPos);
+					distanceDown = float(idx.y - pxIdx.y);
 				#else
+					mediump float roadPos = texture( roadmapT1 , vec2(idx)/videoSizeF ).y;
 					distanceDown = currentPos - roadPos;
 				#endif
 				break;
@@ -54,14 +61,15 @@ void main() {
 
 		if (distanceUp >= 0.0 && distanceDown >= 0.0) //Search success on both directions
 			dis = min(distanceUp, distanceDown);
-		else if (distanceUp >= -1.0) //Search success on only one direction
+		else if (distanceUp >= 0.0) //Search success on only one direction
 			dis = distanceUp;
-		else if (distanceDown >= -1.0)
+		else if (distanceDown >= 0.0)
 			dis = distanceDown;
 	}
 
 	#ifdef GET_PIXEL_SPEED
-		result = dis;
+		result = max(0.05, dis);
+		result += min(0.0, texture(roadmapT1, vec2(0.0)).y); //Prevent the compiler optimize away this argument, roadmapT1.y is always greater than 0
 	#else
 		result = min(dis * BIAS, 255.0); //distanceUp, distanceDown
 	#endif
