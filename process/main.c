@@ -22,10 +22,10 @@
 #define GL_SYNCH_TIMEOUT 5000000000LLU //For gl sync timeout
 
 /* Debug time delay */
-#define FRAME_DELAY 0 //(50 * 1000)
+#define FRAME_DELAY (50 * 1000)
 #define FRAME_DEBUGSKIPSECOND 10
 
-#define INTERLACE 10
+#define INTERLACE 4
 
 /* Shader config */
 #define SHADER_CHANGINGSENSOR_THRESHOLD "0.05" //minimum changing in RGB to pass test
@@ -400,7 +400,7 @@ int main(int argc, char* argv[]) {
 	fb fb_stageA = DEFAULT_FB;
 	fb fb_stageB = DEFAULT_FB;
 	gl_mesh mesh_display = GL_INIT_DEFAULT_MESH;
-	float* speedData[2] = {NULL, NULL}; //Process speed on CPU side
+	float* speedData = NULL; //Process speed on CPU side
 
 	//Program - Roadmap check
 	struct {
@@ -699,12 +699,10 @@ int main(int argc, char* argv[]) {
 			error("Fail to create mesh to store speedometer");
 			goto label_exit;
 		}
-		for (unsigned int i = 0; i < arrayLength(speedData); i++) {
-			speedData[i] = malloc(sizeData[0] * sizeData[1] * sizeof(float));
-			if (!speedData[i]) {
-				error("Fail to create buffer to store speed data (%u)", i);
-				goto label_exit;
-			}
+		speedData = malloc(sizeData[0] * sizeData[1] * sizeof(float));
+		if (!speedData) {
+			error("Fail to create buffer to store speed data");
+			goto label_exit;
 		}
 	}
 
@@ -919,6 +917,7 @@ int main(int argc, char* argv[]) {
 			char cfg[100];
 			float cfgBias = fps * 3.6f / INTERLACE;
 			sprintf(cfg, "#define BIAS %.10f"NL, cfgBias);
+			strcat(cfg, "#define DEST_EDGE"NL);
 
 			gl_programSrc src[] = {
 				{gl_programSrcType_vertex,	gl_programSrcLoc_file,	"shader/focusRegion.vs.glsl"},
@@ -981,7 +980,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		/* Create program: Final display */ {
-			char cfg[] = "#define RAW_LUMA "SHADER_FINAL_RAWLUMA NL;
+			const char* cfg = "#define RAW_LUMA "SHADER_FINAL_RAWLUMA NL;
 
 			gl_programSrc src[] = {
 				{gl_programSrcType_vertex,	gl_programSrcLoc_file,	"shader/final.vs.glsl"},
@@ -1056,7 +1055,7 @@ int main(int argc, char* argv[]) {
 
 				gl_setViewport(zeros, sizeData);
 
-//#define ROADMAP_CHECK program_roadmapCheck_modeShowT1 //program_roadmapCheck_modeshow*
+//#define ROADMAP_CHECK program_roadmapCheck_modeShowT2 //program_roadmapCheck_modeshow*
 #ifdef ROADMAP_CHECK
 				/* Debug use ONLY: Check roadmap */ {
 					gl_program_use(&program_roadmapCheck.pid);
@@ -1064,10 +1063,10 @@ int main(int argc, char* argv[]) {
 					gl_texture_bind(&texture_roadmap2, program_roadmapCheck.roadmapT2, 1);
 					gl_program_setParam(program_roadmapCheck.cfgI1, 4, gl_datatype_int, (const int[4]){ROADMAP_CHECK, 0, 0, 0});
 					gl_program_setParam(program_roadmapCheck.cfgF1, 4, gl_datatype_float, (const float[4]){1.0, 2.0, 1.0, 1.0});
-					gl_frameBuffer_bind(&fb_stageB.fbo, 1);
+					gl_frameBuffer_bind(&fb_stageA.fbo, 1);
 					gl_mesh_draw(&mesh_final);
 				}
-				#define RESULT fb_stageB
+				#define RESULT fb_stageA
 #else
 
 				/* Blur the raw to remove noise */ {
@@ -1114,7 +1113,6 @@ int main(int argc, char* argv[]) {
 					gl_frameBuffer_bind(&fb_stageB.fbo, 1);
 					gl_mesh_draw(&mesh_persp);
 				}
-#if 1 == 1
 
 				/* Project from perspective to orthographic */ {
 					gl_program_use(&program_projectP2O.pid);
@@ -1141,6 +1139,7 @@ int main(int argc, char* argv[]) {
 					gl_frameBuffer_bind(&fb_stageB.fbo, 1);
 					gl_mesh_draw(&mesh_persp);
 				}
+#if 1 == 1
 
 				/* Sample measure result, get single point */ {
 					gl_program_use(&program_sample.pid);
@@ -1167,13 +1166,12 @@ int main(int argc, char* argv[]) {
 					float speedTable[SHADER_SPEEDOMETER_CNT][3]; //{speed, x, y}
 					memset(speedTable, 0, sizeof(speedTable)); //IEEE754 +0.0 is 0x00000000
 
-					float* data = speedData[previous];
 					unsigned int speedIdx = 0;
 					unsigned int edgeTop = road_focusRegionBox.top * sizeData[1], edgeBottom = road_focusRegionBox.bottom * sizeData[1];
 					unsigned int edgeLeft = road_focusRegionBox.left * sizeData[0], edgeRight = road_focusRegionBox.right * sizeData[0];
 					for (unsigned int y = edgeTop; y <= edgeBottom; y++) { //Get speed data from downloaded framebuffer
 						for (unsigned int x = edgeLeft; x <= edgeRight; x++) {
-							float speed = data[ y * sizeData[0] + x ];
+							float speed = speedData[ y * sizeData[0] + x ];
 							if (speed >= 1.0) {
 								float xPos = (float)x / sizeData[0], yPos = (float)y / sizeData[1];
 								fprintf(stdout, "Frame %u, obj @ (%f, %f), speed = %f\n", frameCnt, xPos, yPos, speed); //Export result to stdout
@@ -1252,7 +1250,7 @@ int main(int argc, char* argv[]) {
 					gl_mesh_draw(&mesh_final);
 				}
 				
-				gl_frameBuffer_download(&fb_speed.fbo, speedData[current], fb_speed.format, 0, zeros, sizeData); //Blocking, wait the GPU prepare the speed data of current frame
+				gl_frameBuffer_download(&fb_speed.fbo, speedData, fb_speed.format, 0, zeros, sizeData); //Blocking, wait the GPU prepare the speed data of current frame
 				/* This blocking cmd is also a synch point */
 
 				#ifdef DEBUG_THREADSPEED
@@ -1314,8 +1312,7 @@ label_exit:
 	gl_program_delete(&program_projectP2O.pid);
 	gl_program_delete(&program_roadmapCheck.pid);
 
-	for (unsigned int i = arrayLength(speedData); i; i--)
-		free(speedData[i-1]);
+	free(speedData);
 	gl_mesh_delete(&mesh_display);
 	gl_texture_delete(&fb_stageB.tex);
 	gl_frameBuffer_delete(&fb_stageB.fbo);
