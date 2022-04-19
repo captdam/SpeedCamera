@@ -88,7 +88,7 @@ typedef unsigned int gl_index_t; //Mesh index
 
 /** Mesh geometry type */
 typedef enum GL_MeshMode {
-	gl_meshmode_points, gl_meshmode_triangles, gl_meshmode_triangleFan, gl_meshmode_triangleStrip,
+	gl_meshmode_points, gl_meshmode_lines, gl_meshmode_triangles, gl_meshmode_triangleFan, gl_meshmode_triangleStrip,
 gl_meshmode_placeholderEnd} gl_meshmode;
 
 /* == Texture, PBO for texture transfer and FBO for off-screen rendering ==================== */
@@ -303,8 +303,8 @@ void gl_unifromBuffer_delete(gl_ubo* const ubo);
 /** Create and bind gl_mesh object (geometry). 
  * @param count {number of points in one vertex, number of vertices, number of indices for indexed draw or 0 for direct draw}
  * @param elementsSize Array, size of each elements (attribute, GLSL location) in a vertex. Add all attributes should equal to points in vertex
- * @param vertices The vertice array
- * @param indices For indexed draw: the indices array; for direct draw, use NULL
+ * @param vertices The vertice array, leave NULL if no actual data is ready
+ * @param indices For indexed draw: the indices array, leave NULL if no actual data is ready
  * @param mode The mode of the mesh, can be gl_meshmode_*, this affects how the GPU draw the mesh
  * @param usage A hint to the driver about the frequency of usage, can be gl_usage_*
  * @return Mesh
@@ -328,8 +328,9 @@ void gl_mesh_update(const gl_mesh* const mesh, const gl_vertex_t* const vertices
 
 /** Draw a mesh. 
  * @param mesh A mesh previously returned by gl_mesh_create()
+ * @param size Number of vertices/indices used to draw, pass 0 to draw all (size when create)
  */
-void gl_mesh_draw(const gl_mesh* const mesh);
+void gl_mesh_draw(const gl_mesh* const mesh, const unsigned int size);
 
 /** Delete a mesh. 
  * @param mesh A mesh previously returned by gl_mesh_create()

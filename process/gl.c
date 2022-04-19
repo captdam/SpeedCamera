@@ -121,7 +121,7 @@ int gl_init() {
 
 	/* OpenGL config */
 //	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-	glEnable(GL_PROGRAM_POINT_SIZE); glPointSize(10.0f);
+//	glEnable(GL_PROGRAM_POINT_SIZE); glPointSize(10.0f);
 	glfwSetCursor(window, glfwCreateStandardCursor(GLFW_CROSSHAIR_CURSOR));
 
 	return 1;
@@ -464,7 +464,7 @@ gl_program gl_program_create(const gl_programSrc* const srcs, gl_programArg* con
 					break;
 			}
 			if (a->id == -1) {
-				gl_elog("Shader program argument bind fail: Argument %s is not in shader code\n", a->name);
+				gl_elog("Shader program argument bind fail: Argument %s is not in shader code", a->name);
 				glDeleteProgram(program);
 				return GL_INIT_DEFAULT_PROGRAM;
 			}
@@ -614,13 +614,16 @@ gl_mesh gl_mesh_create(const unsigned int count[static 3], const gl_index_t* con
 	const unsigned int vertexCount = count[0], verticesCount = count[1], indicesCount = count[2];
 	
 	gl_mesh mesh = GL_INIT_DEFAULT_MESH;
-	mesh.drawSize = indices ? indicesCount :verticesCount;
+	mesh.drawSize = indicesCount ? indicesCount : verticesCount;
 	switch(mode) {
-		case gl_meshmode_triangles:
-			mesh.mode = GL_TRIANGLES;
-			break;
 		case gl_meshmode_points:
 			mesh.mode = GL_POINTS;
+			break;
+		case gl_meshmode_lines:
+			mesh.mode = GL_LINES;
+			break;
+		case gl_meshmode_triangles:
+			mesh.mode = GL_TRIANGLES;
 			break;
 		case gl_meshmode_triangleFan:
 			mesh.mode = GL_TRIANGLE_FAN;
@@ -634,13 +637,13 @@ gl_mesh gl_mesh_create(const unsigned int count[static 3], const gl_index_t* con
 
 	glGenVertexArrays(1, &mesh.vao);
 	glGenBuffers(1, &mesh.vbo);
-	if (indices)
+	if (indicesCount)
 		glGenBuffers(1, &mesh.ebo);
 	
 	glBindVertexArray(mesh.vao);
 	glBindBuffer(GL_ARRAY_BUFFER, mesh.vbo);
 	glBufferData(GL_ARRAY_BUFFER, verticesCount * vertexCount * sizeof(gl_vertex_t), vertices, usageLookup[usage]);
-	if (indices) {
+	if (indicesCount) {
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh.ebo);
 		glBufferData(GL_ELEMENT_ARRAY_BUFFER, indicesCount * sizeof(gl_index_t), indices, usageLookup[usage]);
 	}
@@ -681,12 +684,12 @@ void gl_mesh_update(const gl_mesh* const mesh, const gl_vertex_t* const vertices
 	glBindVertexArray(GL_INIT_DEFAULT_MESH.vao);
 }
 
-void gl_mesh_draw(const gl_mesh* const mesh) {
+void gl_mesh_draw(const gl_mesh* const mesh, const unsigned int size) {
 	glBindVertexArray(mesh->vao);
 	if (mesh->ebo)
-		glDrawElements(mesh->mode, mesh->drawSize, GL_UNSIGNED_INT, 0);
+		glDrawElements(mesh->mode, size ? size : mesh->drawSize, GL_UNSIGNED_INT, 0);
 	else
-		glDrawArrays(mesh->mode, 0, mesh->drawSize);
+		glDrawArrays(mesh->mode, 0, size ? size : mesh->drawSize);
 	glBindVertexArray(GL_INIT_DEFAULT_MESH.vao);
 }
 
