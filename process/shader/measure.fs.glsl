@@ -22,53 +22,67 @@ void main() {
 
 	mediump ivec2 pxIdx = ivec2(videoSizeF * pxPos);
 
-//	mediump vec2 dis = vec2(0.0, pxIdx);
-	mediump vec2 dis = vec2(0.0, 0.0);
+	mediump float dis = 0.0;
+	mediump int targetY = pxIdx.y;
 
 	if (texelFetch(current, pxIdx, 0).r == DEST_THRESHOLD_CENEDGEJ) {
 		mediump float currentPos = texture(roadmapT1, pxPos).y; //Roadmap may have different size, use NTC; roadmap is linear, interpolation sample is OK
 
-		mediump float hintUp = 0.0, hintDown = 0.0;
+		mediump float hintUpRoad = 0.0, hintDownRoad = 0.0;
+		mediump int hintUpScreen = pxIdx.y, hintDownScreen = pxIdx.y;
 		if (texelFetch(hint, pxIdx, 0).r < DEST_THRESHOLD_EDGE) { //Check if the object has move (current pixel in hint frame is not edge, but can be object)
 			mediump ivec2 limitUpDown = ivec2( texture(roadmapT2, pxPos).xy * videoSizeF.y );
 			for (mediump ivec2 idx = pxIdx; idx.y > limitUpDown[0]; idx.y--) {
 				if (texelFetch(hint, idx, 0).r >= DEST_THRESHOLD_EDGE) {
 					mediump float roadPos = texture( roadmapT1 , vec2(idx)/videoSizeF ).y;
-					hintUp = roadPos - currentPos;
+					hintUpRoad = roadPos - currentPos;
+					hintUpScreen = idx.y;
 					break;
 				}
 			}
 			for (mediump ivec2 idx = pxIdx; idx.y < limitUpDown[1]; idx.y++) {
 				if (texelFetch(hint, idx, 0).r >= DEST_THRESHOLD_EDGE) {
 					mediump float roadPos = texture( roadmapT1 , vec2(idx)/videoSizeF ).y;
-					hintDown = currentPos - roadPos;
+					hintDownRoad = currentPos - roadPos;
+					hintDownScreen = idx.y;
 					break;
 				}
 			}
 		}
 
 		bool searchUp, searchDown;
-		if ( hintUp != 0.0 && hintDown != 0.0 ) { //If both direction can reach object, use cloest direction
-			if (hintUp < hintDown)
+		mediump int hintTargetY;
+		if ( hintUpRoad != 0.0 && hintDownRoad != 0.0 ) { //If both direction can reach object, use cloest direction
+			if (hintUpRoad < hintDownRoad) {
 				searchUp = true;
-			else
+				searchDown = false;
+				hintTargetY = hintUpScreen;
+			} else {
 				searchDown = true;
-		} else if (hintUp != 0.0) { //If only one direction can reach object, go that direction
+				searchUp = false;
+				hintTargetY = hintDownScreen;
+			}
+		} else if (hintUpRoad != 0.0) { //If only one direction can reach object, go that direction
 			searchUp = true;
 			searchDown = false;
-		} else if (hintDown != 0.0) {
+			hintTargetY = hintUpScreen;
+		} else if (hintDownRoad != 0.0) {
 			searchUp = false;
 			searchDown = true;
+			hintTargetY = hintDownScreen;
 		} else { //None direction can reach object, no search
 			searchUp = false;
 			searchDown = false;
+			hintTargetY = pxIdx.y;
 		}
 
+		mediump int searchTargetY;
 		if (searchUp) {
 			for (mediump ivec2 idx = pxIdx; idx.y > LIMIT_UP; idx.y--) {
 				if (texelFetch(previous, idx, 0).r >= DEST_THRESHOLD_EDGE) {
 					mediump float roadPos = texture( roadmapT1 , vec2(idx)/videoSizeF ).y;
-					dis = vec2(roadPos - currentPos, idx.y);
+					dis = roadPos - currentPos;
+					searchTargetY = idx.y;
 					break;
 				}
 			}
@@ -76,15 +90,17 @@ void main() {
 			for (mediump ivec2 idx = pxIdx; idx.y < LIMIT_DOWN; idx.y++) {
 				if (texelFetch(previous, idx, 0).r >= DEST_THRESHOLD_EDGE) {
 					mediump float roadPos = texture( roadmapT1 , vec2(idx)/videoSizeF ).y;
-					dis = vec2(currentPos - roadPos, idx.y);
+					dis = currentPos - roadPos;
+					searchTargetY = idx.y;
 					break;
 				}
 			}
-		} else {
-			dis = vec2(0.0, pxIdx);
 		}
+
+		targetY = hintTargetY;
+//		targetY = searchTargetY;
 	}
 
-	dis.CH_ROADDISTANCE = min(255.0, dis.CH_ROADDISTANCE * BIAS);
-	result = dis;
+	dis = min(255.0, dis * BIAS);
+	result = vec2(dis, targetY);
 }
