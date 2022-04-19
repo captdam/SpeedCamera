@@ -1,23 +1,20 @@
 in highp vec2 pxPos;
-out mediump float result; //Data, speed
+out mediump vec2 result; //Data: vec2(speed, target_yCoord_abs)
+#define CH_ROADDISTANCE x
+#define CH_TARGETYCOORD y
 
 uniform lowp sampler2D current; //lowp for enum
+uniform lowp sampler2D hint; //lowp for enum
 uniform lowp sampler2D previous; //lowp for enum
 uniform mediump sampler2D roadmapT1;
 uniform mediump sampler2D roadmapT2;
 
-//#define GET_PIXEL_SPEED //For debug
-
-/* Defined by client: DEST_OBJ ^ DEST_EDGE */
 /* Defined by client: BIAS float */
+/* Defined by client: LIMIT_UP int && LIMIT_DOWN int*/
 
-#if defined(DEST_OBJ)
-	#define DEST_THRESHOLD 0.0 //0.0 for object (0.3 from last stage)
-#elif defined(DEST_EDGE)
-	#define DEST_THRESHOLD 0.5 //0.5 for edge (0.6 from last stage)
-#elif
-	#error Must define "DEST_OBJ" xor "DEST_EDGE"
-#endif
+#define DEST_THRESHOLD_OBJ 0.3
+#define DEST_THRESHOLD_EDGE 0.6
+#define DEST_THRESHOLD_CENEDGEJ 1.0
 
 void main() {
 	mediump ivec2 videoSizeI = textureSize(current, 0);
@@ -25,52 +22,69 @@ void main() {
 
 	mediump ivec2 pxIdx = ivec2(videoSizeF * pxPos);
 
-	mediump float dis = 0.0;
-	mediump float distanceUp = -1.0, distanceDown = -1.0; //Exported for debug
+//	mediump vec2 dis = vec2(0.0, pxIdx);
+	mediump vec2 dis = vec2(0.0, 0.0);
 
-	if (texelFetch(current, pxIdx, 0).r == 1.0) { //==1.0 means edge
-		highp float currentPos = texture(roadmapT1, pxPos).y; //Roadmap may have different size, roadmap is linear, interpolation is OK
-		mediump vec2 limitUpDown = texture(roadmapT2, pxPos).xy; //NTC
-		mediump ivec2 limitUpDownAbs = ivec2( limitUpDown * videoSizeF.y );
-		mediump int limitUp = limitUpDownAbs.x;
-		mediump int limitDown = limitUpDownAbs.y;
+	if (texelFetch(current, pxIdx, 0).r == DEST_THRESHOLD_CENEDGEJ) {
+		mediump float currentPos = texture(roadmapT1, pxPos).y; //Roadmap may have different size, use NTC; roadmap is linear, interpolation sample is OK
 
-		for (mediump ivec2 idx = pxIdx; idx.y > limitUp; idx.y--) {
-			if (texelFetch(previous, idx, 0).r > DEST_THRESHOLD) {
-				#ifdef GET_PIXEL_SPEED
-					distanceUp = float(pxIdx.y - idx.y);
-				#else
+		mediump float hintUp = 0.0, hintDown = 0.0;
+		if (texelFetch(hint, pxIdx, 0).r < DEST_THRESHOLD_EDGE) { //Check if the object has move (current pixel in hint frame is not edge, but can be object)
+			mediump ivec2 limitUpDown = ivec2( texture(roadmapT2, pxPos).xy * videoSizeF.y );
+			for (mediump ivec2 idx = pxIdx; idx.y > limitUpDown[0]; idx.y--) {
+				if (texelFetch(hint, idx, 0).r >= DEST_THRESHOLD_EDGE) {
 					mediump float roadPos = texture( roadmapT1 , vec2(idx)/videoSizeF ).y;
-					distanceUp = roadPos - currentPos;
-				#endif
-				break;
+					hintUp = roadPos - currentPos;
+					break;
+				}
+			}
+			for (mediump ivec2 idx = pxIdx; idx.y < limitUpDown[1]; idx.y++) {
+				if (texelFetch(hint, idx, 0).r >= DEST_THRESHOLD_EDGE) {
+					mediump float roadPos = texture( roadmapT1 , vec2(idx)/videoSizeF ).y;
+					hintDown = currentPos - roadPos;
+					break;
+				}
 			}
 		}
 
-		for (mediump ivec2 idx = pxIdx; idx.y < limitDown; idx.y++) {
-			if (texelFetch(previous, idx, 0).r > DEST_THRESHOLD) {
-				#ifdef GET_PIXEL_SPEED
-					distanceDown = float(idx.y - pxIdx.y);
-				#else
-					mediump float roadPos = texture( roadmapT1 , vec2(idx)/videoSizeF ).y;
-					distanceDown = currentPos - roadPos;
-				#endif
-				break;
-			}
+		bool searchUp, searchDown;
+		if ( hintUp != 0.0 && hintDown != 0.0 ) { //If both direction can reach object, use cloest direction
+			if (hintUp < hintDown)
+				searchUp = true;
+			else
+				searchDown = true;
+		} else if (hintUp != 0.0) { //If only one direction can reach object, go that direction
+			searchUp = true;
+			searchDown = false;
+		} else if (hintDown != 0.0) {
+			searchUp = false;
+			searchDown = true;
+		} else { //None direction can reach object, no search
+			searchUp = false;
+			searchDown = false;
 		}
 
-		if (distanceUp >= 0.0 && distanceDown >= 0.0) //Search success on both directions
-			dis = min(distanceUp, distanceDown);
-		else if (distanceUp >= 0.0) //Search success on only one direction
-			dis = distanceUp;
-		else if (distanceDown >= 0.0)
-			dis = distanceDown;
+		if (searchUp) {
+			for (mediump ivec2 idx = pxIdx; idx.y > LIMIT_UP; idx.y--) {
+				if (texelFetch(previous, idx, 0).r >= DEST_THRESHOLD_EDGE) {
+					mediump float roadPos = texture( roadmapT1 , vec2(idx)/videoSizeF ).y;
+					dis = vec2(roadPos - currentPos, idx.y);
+					break;
+				}
+			}
+		} else if (searchDown) {
+			for (mediump ivec2 idx = pxIdx; idx.y < LIMIT_DOWN; idx.y++) {
+				if (texelFetch(previous, idx, 0).r >= DEST_THRESHOLD_EDGE) {
+					mediump float roadPos = texture( roadmapT1 , vec2(idx)/videoSizeF ).y;
+					dis = vec2(currentPos - roadPos, idx.y);
+					break;
+				}
+			}
+		} else {
+			dis = vec2(0.0, pxIdx);
+		}
 	}
 
-	#ifdef GET_PIXEL_SPEED
-		result = max(0.05, dis);
-		result += min(0.0, texture(roadmapT1, vec2(0.0)).y); //Prevent the compiler optimize away this argument, roadmapT1.y is always greater than 0
-	#else
-		result = min(dis * BIAS, 255.0); //distanceUp, distanceDown
-	#endif
+	dis.CH_ROADDISTANCE = min(255.0, dis.CH_ROADDISTANCE * BIAS);
+	result = dis;
 }
