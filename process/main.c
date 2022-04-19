@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <inttypes.h>
+#include <float.h>
 #include <string.h>
 #include <math.h>
 #include <unistd.h>
@@ -25,7 +26,8 @@
 #define FRAME_DELAY (50 * 1000)
 #define FRAME_DEBUGSKIPSECOND 10
 
-#define INTERLACE 4
+/* Speed avg */
+#define INTERLACE 3
 
 /* Shader config */
 #define SHADER_CHANGINGSENSOR_THRESHOLD "0.05" //minimum changing in RGB to pass test
@@ -35,8 +37,8 @@
 #define SHADER_EDGEREFINE_BOTTOMDENOISE "0.2" //Bottom and side clerance of edge in meter
 #define SHADER_EDGEREFINE_SIDEDNOISE "0.6"
 #define SHADER_SPEEDOMETER_CNT 32 //Max number of speedometer
-#define SHADER_SPEEDOMETER_WIDTH 0.025 //Relative NDC
-#define SHADER_SPEEDOMETER_HEIGHT 0.015
+#define SHADER_SPEEDOMETER_WIDTH 0.04 //Relative NTC
+#define SHADER_SPEEDOMETER_HEIGHT 0.025
 #define SHADER_FINAL_RAWLUMA "0.5" //Blend intensity of raw
 
 /* Speedometer */
@@ -376,9 +378,12 @@ int main(int argc, char* argv[]) {
 	struct {
 		float left, right, top, bottom;
 	} road_focusRegionBox;
+	struct {
+		unsigned int width, height;
+		roadmap_t1* map;
+	} road_geoMap = {.map = NULL};
 
 	//To display human readable text on screen
-	const char* speedometer_filename = SPEEDOMETER_FILE;
 	gl_tex texture_speedometer = GL_INIT_DEFAULT_TEX;
 
 	//Final display on screen
@@ -392,15 +397,21 @@ int main(int argc, char* argv[]) {
 	} fb;
 	#define DEFAULT_FB (fb){GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX, gl_texformat_RGBA32F}
 	fb fb_raw[2] = {DEFAULT_FB, DEFAULT_FB}; //Raw video data with minor pre-process
-	fb fb_object[INTERLACE + 1]; //Object detection of current and previous frames
-	for (unsigned int i = 0; i < arrayLength(fb_object); i++)
-		fb_object[i] = DEFAULT_FB;
+	fb fb_object[INTERLACE + 1] = {[0 ... INTERLACE] = DEFAULT_FB}; //Object detection of current and previous frames
 	fb fb_speed = DEFAULT_FB; //Speed measure result, float range [0, 255]
 	fb fb_display = DEFAULT_FB; //Display human-readable text
 	fb fb_stageA = DEFAULT_FB;
 	fb fb_stageB = DEFAULT_FB;
 	gl_mesh mesh_display = GL_INIT_DEFAULT_MESH;
-	float* speedData = NULL; //Process speed on CPU side
+
+	//Analysis and export data (CPU side)
+	float (* speedData)[sizeData[0]][2] = NULL; //FBO download, height(sizeData[1]) * width(sizeData[0]) * Channel(2)
+	typedef struct AnalysisObject {
+		float rx, ry; //Road- and screen-domain coord of current frame
+		unsigned int sx, sy;
+		float speed; //Speed (avged by shader)
+		unsigned int osy; //Old screen y-coord 
+	} analysisObj;
 
 	//Program - Roadmap check
 	struct {
@@ -464,6 +475,7 @@ int main(int argc, char* argv[]) {
 	struct {
 		gl_program pid;
 		gl_param current;
+		gl_param hint;
 		gl_param previous;
 		gl_param roadmapT1;
 		gl_param roadmapT2;
@@ -570,6 +582,15 @@ int main(int argc, char* argv[]) {
 				goto label_exit;
 			}
 
+			road_geoMap.width = roadinfo.width;
+			road_geoMap.height = roadinfo.height;
+			if (!( road_geoMap.map = malloc(road_geoMap.width * road_geoMap.height * sizeof(roadmap_t1)) )) {
+				roadmap_destroy(roadmap);
+				error("Fail to allocate memory for roadmap storage for analysis");
+				goto label_exit;
+			}
+			memcpy(road_geoMap.map, roadmap_getT1(roadmap), road_geoMap.width * road_geoMap.height * sizeof(roadmap_t1));
+
 			gl_texture_update(&texture_roadmap1, roadmap_getT1(roadmap), zeros, sizeRoadmap);
 			gl_texture_update(&texture_roadmap2, roadmap_getT2(roadmap), zeros, sizeRoadmap);
 		}
@@ -578,9 +599,9 @@ int main(int argc, char* argv[]) {
 	}
 
 	/* Speedometer: speedometer glphy texture */ {
-		info("Load resource - speedometer \"%s\"...", speedometer_filename);
+		info("Load resource - speedometer \"%s\"...", SPEEDOMETER_FILE);
 		char* statue;
-		Speedometer speedometer = speedometer_init(speedometer_filename, &statue);
+		Speedometer speedometer = speedometer_init(SPEEDOMETER_FILE, &statue);
 		if (!speedometer) {
 			error("Cannot load speedometer: %s", statue);
 			goto label_exit;
@@ -647,7 +668,7 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-		fb_speed.format = gl_texformat_R32F; //Data, although mediump float (16F) is good enough, but we use 32F so it can be easily download
+		fb_speed.format = gl_texformat_RG32F; //Data, although mediump float (16F) is good enough, but we use 32F so it can be easily download
 		fb_speed.tex = gl_texture_create(fb_speed.format, gl_textype_2d, sizeData);
 		if (!gl_texture_check(&fb_speed.tex)) {
 			error("Fail to create texture to store speed");
@@ -686,20 +707,12 @@ int main(int argc, char* argv[]) {
 			goto label_exit;
 		}
 
-		gl_vertex_t speedometer_meshEmpetVertices[6 * SHADER_SPEEDOMETER_CNT][4]; //layout: {posX, posY, speed, oritiation}
-		for (unsigned int i = 0; i < 6 * SHADER_SPEEDOMETER_CNT; i++) {
-			speedometer_meshEmpetVertices[i][0] = 0.0;
-			speedometer_meshEmpetVertices[i][1] = 0.0;
-			speedometer_meshEmpetVertices[i][2] = 0.0;
-			speedometer_meshEmpetVertices[i][2] = 0.0; //0.0(invalid), -1.0(top-left), -2.0(left-bottom), +1.0(right-top), +2.0(right-bottom)
-		}
-		
-		mesh_display = gl_mesh_create((const unsigned int[3]){4, 6 * SHADER_SPEEDOMETER_CNT, 0}, (gl_index_t[1]){4}, (gl_vertex_t*)speedometer_meshEmpetVertices, NULL, gl_meshmode_triangles, gl_usage_stream); //Stream, updata every two frames
+		mesh_display = gl_mesh_create((const unsigned int[3]){4, SHADER_SPEEDOMETER_CNT * 6, 0}, (gl_index_t[1]){4}, NULL, NULL, gl_meshmode_triangles, gl_usage_stream); //Stream, updata every frames
 		if (!gl_mesh_check(&mesh_display)) {
 			error("Fail to create mesh to store speedometer");
 			goto label_exit;
 		}
-		speedData = malloc(sizeData[0] * sizeData[1] * sizeof(float));
+		speedData = malloc(sizeData[0] * sizeData[1] * 2 * sizeof(float));
 		if (!speedData) {
 			error("Fail to create buffer to store speed data");
 			goto label_exit;
@@ -776,6 +789,11 @@ int main(int argc, char* argv[]) {
 				"	Mask(2.0 / 16.0, ivec2(-1,  0)),	Mask(4.0 / 16.0, ivec2( 0,  0)),	Mask(2.0 / 16.0, ivec2(+1,  0)),"NL
 				"	Mask(1.0 / 16.0, ivec2(-1, +1)),	Mask(2.0 / 16.0, ivec2( 0, +1)),	Mask(1.0 / 16.0, ivec2(+1, +1))"NL
 				");"NL
+				/*"const struct Mask {mediump float v; mediump ivec2 idx;} mask[] = Mask[]("NL
+				"	Mask(1.0 / 9.0, ivec2(-1, -1)),	Mask(1.0 / 9.0, ivec2( 0, -1)),	Mask(1.0 / 9.0, ivec2(+1, -1)),"NL
+				"	Mask(1.0 / 9.0, ivec2(-1,  0)),	Mask(1.0 / 9.0, ivec2( 0,  0)),	Mask(1.0 / 9.0, ivec2(+1,  0)),"NL
+				"	Mask(1.0 / 9.0, ivec2(-1, +1)),	Mask(1.0 / 9.0, ivec2( 0, +1)),	Mask(1.0 / 9.0, ivec2(+1, +1))"NL
+				");"NL*/
 			;
 			const char* edge =
 				"#define CLAMP vec4[2](vec4(vec3(0.0), 1.0), vec4(vec3(1.0), 1.0))"NL
@@ -914,10 +932,9 @@ int main(int argc, char* argv[]) {
 		}
 
 		/* Create program: Measure */ {
-			char cfg[100];
+			char cfg[200];
 			float cfgBias = fps * 3.6f / INTERLACE;
-			sprintf(cfg, "#define BIAS %.10f"NL, cfgBias);
-			strcat(cfg, "#define DEST_EDGE"NL);
+			sprintf(cfg, "#define BIAS %.4f"NL"#define LIMIT_UP %d"NL"#define LIMIT_DOWN %d"NL, cfgBias, (int)(road_focusRegionBox.top * sizeData[1]), (int)(road_focusRegionBox.bottom * sizeData[1]));
 
 			gl_programSrc src[] = {
 				{gl_programSrcType_vertex,	gl_programSrcLoc_file,	"shader/focusRegion.vs.glsl"},
@@ -927,6 +944,7 @@ int main(int argc, char* argv[]) {
 			};
 			gl_programArg arg[] = {
 				{gl_programArgType_normal,	"current"},
+				{gl_programArgType_normal,	"hint"},
 				{gl_programArgType_normal,	"previous"},
 				{gl_programArgType_normal,	"roadmapT1"},
 				{gl_programArgType_normal,	"roadmapT2"},
@@ -938,14 +956,18 @@ int main(int argc, char* argv[]) {
 				goto label_exit;
 			}
 			program_measure.current = arg[0].id;
-			program_measure.previous = arg[1].id;
-			program_measure.roadmapT1 = arg[2].id;
-			program_measure.roadmapT2 = arg[3].id;
+			program_measure.hint = arg[1].id;
+			program_measure.previous = arg[2].id;
+			program_measure.roadmapT1 = arg[3].id;
+			program_measure.roadmapT2 = arg[4].id;
 		}
 
 		/* Create program: Sample */ {
+			const char* cfg = "#define MIN_SAMPLE_SIZE 2.0";
+
 			gl_programSrc src[] = {
 				{gl_programSrcType_vertex,	gl_programSrcLoc_file,	"shader/focusRegion.vs.glsl"},
+				{gl_programSrcType_fragment,	gl_programSrcLoc_mem,	cfg},
 				{gl_programSrcType_fragment,	gl_programSrcLoc_file,	"shader/sample.fs.glsl"},
 				{.str = NULL}
 			};
@@ -1007,290 +1029,290 @@ int main(int argc, char* argv[]) {
 		gl_close(1);
 	}
 	signal(SIGINT, ISR_SIGINT);
+	
+	#ifdef VERBOSE_TIME
+		uint64_t timestamp = 0;
+	#endif
+	info("Program ready!");
+	fprintf(stdout, "R %u*%u : I %u\n", sizeData[0], sizeData[1], INTERLACE);
+	
+	/* Main process loop here */
+	while(!gl_close(-1)) {
+		const unsigned int current = (unsigned int)frameCnt & (unsigned int)0b1 ? 1 : 0; //Front
+		const unsigned int previous = 1 - current; //Back
+		const unsigned int current_obj = frameCnt % arrayLength(fb_object);
+		const unsigned int hint_obj = (frameCnt + arrayLength(fb_object) - 1) % arrayLength(fb_object);
+		const unsigned int previous_obj = (frameCnt + arrayLength(fb_object) - INTERLACE) % arrayLength(fb_object);
 
-	/* Main process loop here */ {
-		#ifdef VERBOSE_TIME
-			uint64_t timestamp = 0;
-		#endif
+		int sizeWin[2], sizeFB[2];
+		double cursorPosWin[2];
+		int cursorPosFB[2]; //Window size and framebuffer size may differ if DPI is not 1, data
+		int cursorPosData[2]; //Cursor position relative to data may differ from it to framebuffer if window is not displayed in data size
+		gl_drawStart(cursorPosWin, sizeWin, sizeFB);
+		cursorPosFB[0] = cursorPosWin[0] * sizeFB[0] / sizeWin[0];
+		cursorPosFB[1] = cursorPosWin[1] * sizeFB[1] / sizeWin[1];
+		cursorPosData[0] = cursorPosFB[0] * sizeData[0] / sizeFB[0];
+		cursorPosData[1] = cursorPosFB[1] * sizeData[1] / sizeFB[1];
 
-		info("Program ready!");
-		while(!gl_close(-1)) {
-			const unsigned int current = (unsigned int)frameCnt & (unsigned int)0b1 ? 1 : 0; //Front
-			const unsigned int previous = 1 - current; //Back
-			const unsigned int current_obj = frameCnt % arrayLength(fb_object);
-			const unsigned int previous_obj = (frameCnt + arrayLength(fb_object) - INTERLACE) % arrayLength(fb_object);
-
-			int sizeWin[2], sizeFB[2];
-			double cursorPosWin[2];
-			int cursorPosFB[2]; //Window size and framebuffer size may differ if DPI is not 1, data
-			int cursorPosData[2]; //Cursor position relative to data may differ from it to framebuffer if window is not displayed in data size
-			gl_drawStart(cursorPosWin, sizeWin, sizeFB);
-			cursorPosFB[0] = cursorPosWin[0] * sizeFB[0] / sizeWin[0];
-			cursorPosFB[1] = cursorPosWin[1] * sizeFB[1] / sizeWin[1];
-			cursorPosData[0] = cursorPosFB[0] * sizeData[0] / sizeFB[0];
-			cursorPosData[1] = cursorPosFB[1] * sizeData[1] / sizeFB[1];
-
-			if (!inBox(cursorPosData[0], cursorPosData[1], 0, sizeData[0], 0, sizeData[1], -1)) {
-			
-				/* Asking the read thread to upload next frame while the main thread processing current frame */ {
-					void* addr;
-					#ifdef USE_PBO_UPLOAD
-						gl_pixelBuffer_updateToTexture(&pbo[current], &texture_orginalBuffer[previous]);
-						addr = gl_pixelBuffer_updateStart(&pbo[previous], sizeData[0] * sizeData[1] * 4);
-					#else
-						gl_texture_update(&texture_orginalBuffer[previous], rawData[current], zeros, sizeData);
-						addr = rawData[previous];
-					#endif
-					gl_rsync(); //Request the GL driver start the queue
-					th_reader_start(addr);
-					/* Note: 3-stage uploading scheme. 
-					 * Process front texture while OpenGL DMA front buffer to back texture. 
-					 * OpenGL DMA front buffer while read thread read video into back buffer. 
-					 */
-				}
-
-				#ifdef VERBOSE_TIME
-					uint64_t timestampRenderStart = nanotime();
+		if (!inBox(cursorPosData[0], cursorPosData[1], 0, sizeData[0], 0, sizeData[1], -1)) {
+		
+			/* Asking the read thread to upload next frame while the main thread processing current frame */ {
+				void* addr;
+				#ifdef USE_PBO_UPLOAD
+					gl_pixelBuffer_updateToTexture(&pbo[current], &texture_orginalBuffer[previous]);
+					addr = gl_pixelBuffer_updateStart(&pbo[previous], sizeData[0] * sizeData[1] * 4);
+				#else
+					gl_texture_update(&texture_orginalBuffer[previous], rawData[current], zeros, sizeData);
+					addr = rawData[previous];
 				#endif
+				gl_rsync(); //Request the GL driver start the queue
+				th_reader_start(addr);
+				/* Note: 3-stage uploading scheme. 
+					* Process front texture while OpenGL DMA front buffer to back texture. 
+					* OpenGL DMA front buffer while read thread read video into back buffer. 
+					*/
+			}
 
-				gl_setViewport(zeros, sizeData);
+			#ifdef VERBOSE_TIME
+				uint64_t timestampRenderStart = nanotime();
+			#endif
+
+			gl_setViewport(zeros, sizeData);
 
 //#define ROADMAP_CHECK program_roadmapCheck_modeShowT2 //program_roadmapCheck_modeshow*
 #ifdef ROADMAP_CHECK
-				/* Debug use ONLY: Check roadmap */ {
-					gl_program_use(&program_roadmapCheck.pid);
-					gl_texture_bind(&texture_roadmap1, program_roadmapCheck.roadmapT1, 0);
-					gl_texture_bind(&texture_roadmap2, program_roadmapCheck.roadmapT2, 1);
-					gl_program_setParam(program_roadmapCheck.cfgI1, 4, gl_datatype_int, (const int[4]){ROADMAP_CHECK, 0, 0, 0});
-					gl_program_setParam(program_roadmapCheck.cfgF1, 4, gl_datatype_float, (const float[4]){1.0, 2.0, 1.0, 1.0});
-					gl_frameBuffer_bind(&fb_stageA.fbo, 1);
-					gl_mesh_draw(&mesh_final);
-				}
-				#define RESULT fb_stageA
+			/* Debug use ONLY: Check roadmap */ {
+				gl_program_use(&program_roadmapCheck.pid);
+				gl_texture_bind(&texture_roadmap1, program_roadmapCheck.roadmapT1, 0);
+				gl_texture_bind(&texture_roadmap2, program_roadmapCheck.roadmapT2, 1);
+				gl_program_setParam(program_roadmapCheck.cfgI1, 4, gl_datatype_int, (const int[4]){ROADMAP_CHECK, 0, 0, 0});
+				gl_program_setParam(program_roadmapCheck.cfgF1, 4, gl_datatype_float, (const float[4]){1.0, 2.0, 1.0, 1.0});
+				gl_frameBuffer_bind(&fb_stageA.fbo, 1);
+				gl_mesh_draw(&mesh_final, 0);
+			}
+			#define RESULT fb_stageA
 #else
 
-				/* Blur the raw to remove noise */ {
-					gl_program_use(&program_blurFilter.pid);
-					gl_texture_bind(&texture_orginalBuffer[current], program_blurFilter.src, 0);
-					gl_frameBuffer_bind(&fb_raw[current].fbo, 0);
-					gl_mesh_draw(&mesh_persp);
+			/* Blur the raw to remove noise */ {
+				gl_program_use(&program_blurFilter.pid);
+				gl_texture_bind(&texture_orginalBuffer[current], program_blurFilter.src, 0);
+				gl_frameBuffer_bind(&fb_raw[current].fbo, 0);
+				gl_mesh_draw(&mesh_final, 0);
+				//Although we only need mesh_persp, we use mesh_final here to store the whole scene. So we can use previous frame when display speedometer (speedometer has one frame latency)
+				//Do not use texture_orginalBuffer[previous], it is actural next frame, updated in background
+			}
+
+			/* Project from perspective to orthographic */ /*{
+				gl_program_use(&program_projectP2O.pid);
+				gl_texture_bind(&fb_raw[current].tex, program_projectP2O.src, 0);
+				gl_texture_bind(&texture_roadmap2, program_projectP2O.roadmapT2, 1);
+				gl_frameBuffer_bind(&fb_stageB.fbo, 1);
+				gl_mesh_draw(&mesh_ortho, 0);
+			}*/
+
+			/* Finding changing to detect moving object*/ {
+				gl_program_use(&program_changingSensor.pid);
+				gl_texture_bind(&fb_raw[current].tex, program_changingSensor.current, 0);
+				gl_texture_bind(&fb_raw[previous].tex, program_changingSensor.previous, 1);
+				gl_frameBuffer_bind(&fb_stageA.fbo, 1);
+				gl_mesh_draw(&mesh_persp, 0);
+			}
+
+			/* Fix object */ {
+				gl_program_use(&program_objectFix[0].pid);
+				gl_texture_bind(&fb_stageA.tex, program_objectFix[0].src, 0);
+				gl_texture_bind(&texture_roadmap1, program_objectFix[0].roadmapT1, 1);
+				gl_frameBuffer_bind(&fb_stageB.fbo, 1);
+				gl_mesh_draw(&mesh_persp, 0);
+
+				gl_program_use(&program_objectFix[1].pid);
+				gl_texture_bind(&fb_stageB.tex, program_objectFix[1].src, 0);
+				gl_texture_bind(&texture_roadmap1, program_objectFix[1].roadmapT1, 1);
+				gl_frameBuffer_bind(&fb_stageA.fbo, 1);
+				gl_mesh_draw(&mesh_persp, 0);
+			}
+
+			/* Refine edge, thinning the thick edge */ {
+				gl_program_use(&program_edgeRefine.pid);
+				gl_texture_bind(&fb_stageA.tex, program_edgeRefine.src, 0);
+				gl_texture_bind(&texture_roadmap1, program_edgeRefine.roadmapT1, 1);
+				gl_frameBuffer_bind(&fb_stageB.fbo, 1);
+				gl_mesh_draw(&mesh_persp, 0);
+			}
+
+			/* Project from perspective to orthographic */ {
+				gl_program_use(&program_projectP2O.pid);
+				gl_texture_bind(&fb_stageB.tex, program_projectP2O.src, 0);
+				gl_texture_bind(&texture_roadmap2, program_projectP2O.roadmapT2, 1);
+				gl_frameBuffer_bind(&fb_object[current_obj].fbo, 1);
+				gl_mesh_draw(&mesh_ortho, 0);
+			}
+
+			/* Measure the distance of edge moving between current frame and previous frame */ {
+				gl_program_use(&program_measure.pid);
+				gl_texture_bind(&fb_object[current_obj].tex, program_measure.current, 0);
+				gl_texture_bind(&fb_object[hint_obj].tex, program_measure.hint, 1);
+				gl_texture_bind(&fb_object[previous_obj].tex, program_measure.previous, 2);
+				gl_texture_bind(&texture_roadmap1, program_measure.roadmapT1, 3);
+				gl_texture_bind(&texture_roadmap2, program_measure.roadmapT2, 4);
+				gl_frameBuffer_bind(&fb_stageA.fbo, 1);
+				gl_mesh_draw(&mesh_ortho, 0);
+			}
+
+			/* Project from orthographic to perspective */ {
+				gl_program_use(&program_projectO2P.pid);
+				gl_texture_bind(&fb_stageA.tex, program_projectO2P.src, 0);
+				gl_texture_bind(&texture_roadmap2, program_projectO2P.roadmapT2, 1);
+				gl_frameBuffer_bind(&fb_stageB.fbo, 1);
+				gl_mesh_draw(&mesh_persp, 0);
+			}
+
+			/* Sample measure result, get single point */ {
+				gl_program_use(&program_sample.pid);
+				gl_texture_bind(&fb_stageB.tex, program_sample.src, 0);
+				gl_frameBuffer_bind(&fb_speed.fbo, 1);
+				gl_mesh_draw(&mesh_persp, 0);
+			}
+
+			/* Process speed data of previous frame on CPU side and draw speedometer display */ {
+
+				/* Note:
+				* Tile-based rendering speedometer base on speedmap is expensive, for every pixel in the video, requires process speedometer size neighbor pixels (O() = videoSize * speedometerSize). 
+				* Therefore, we need to download the speedmap, construct a VAO then upload it to GPU. This takes videoSize iterations (O() = videoSize). 
+				* 
+				* At this moment, all the render cmds are queued, but may not fully processed. Instead of waiting the GPU finishing processing current frame, 
+				* we can have the CPU processing last frame while GPU processing current frame.
+				* While GPU processing the video, CPU finished the speedmap analysis. CPU then upload the processed data using VAO. Notces that, this VAO is associated to previous frame. 
+				* Now, we are sure the CPU has the VAO ready, but not sure if the GPU is still precessing. Therefore, we need to upload VAO before download current speedmap. 
+				* Upload VAO just register the DMA, non-blocking; but download FBO needs the FBO ready on GPU side, which is blocking. 
+				* 
+				* The size of speedometer mesh, the result of CPU processing, is not large. We do not need to add another stage of pipeline for the uploaidng. 
+				*/
+
+				unsigned int objectCnt = 0;
+				analysisObj* objects = NULL;
+				gl_vertex_t (* vDisplay)[6][4] = NULL;
+
+				unsigned int edgeTop = road_focusRegionBox.top * sizeData[1], edgeBottom = road_focusRegionBox.bottom * sizeData[1];
+				unsigned int edgeLeft = road_focusRegionBox.left * sizeData[0], edgeRight = road_focusRegionBox.right * sizeData[0];
+				for (unsigned int y = edgeTop; y <= edgeBottom; y++) { //Get number speed data from downloaded framebuffer
+					for (unsigned int x = edgeLeft; x <= edgeRight; x++) {
+						float speed = speedData[y][x][0];
+						if (speed >= 1.0 && speed <= 255.0)
+							objectCnt++;
+					}
 				}
-
-				/* Project from perspective to orthographic */ /*{
-					gl_program_use(&program_projectP2O.pid);
-					gl_texture_bind(&fb_raw[current].tex, program_projectP2O.src, 0);
-					gl_texture_bind(&texture_roadmap2, program_projectP2O.roadmapT2, 1);
-					gl_frameBuffer_bind(&fb_stageB.fbo, 1);
-					gl_mesh_draw(&mesh_ortho);
-				}*/
-
-				/* Finding changing to detect moving object*/ {
-					gl_program_use(&program_changingSensor.pid);
-					gl_texture_bind(&fb_raw[current].tex, program_changingSensor.current, 0);
-					gl_texture_bind(&fb_raw[previous].tex, program_changingSensor.previous, 1);
-					gl_frameBuffer_bind(&fb_stageA.fbo, 1);
-					gl_mesh_draw(&mesh_persp);
+				if ( !( objects = malloc(sizeof(analysisObj) * objectCnt) ) || !( vDisplay = malloc(sizeof(gl_vertex_t) * objectCnt * 6 * 4) ) ) {
+					free(objects);
+					free(vDisplay);
+					error("Fail to alloc memory for analysis and display rendering");
+					goto label_exit;
 				}
+				
+				analysisObj* objPtr = objects;
+				gl_vertex_t* vdPtr = (gl_vertex_t*)vDisplay;
+				for (unsigned int y = edgeTop; y <= edgeBottom; y++) { //Get actual speed data from downloaded framebuffer
+					for (unsigned int x = edgeLeft; x <= edgeRight; x++) {
+						float speed = speedData[y][x][0];
+						if (speed >= 1.0 && speed <= 255.0) {
+							vec2 coordNorm = { (float)x / sizeData[0] , (float)y / sizeData[1] };
+							ivec2 coordScreen = {x,y};
+							ivec2 coordRoadmap = { x * road_geoMap.width / sizeData[0] , y * road_geoMap.height / sizeData[1] };
+							roadmap_t1 geoData = road_geoMap.map[ coordRoadmap.y * road_geoMap.width + coordRoadmap.x ];
+							*objPtr++ = (analysisObj){
+								.rx = geoData.px,
+								.ry = geoData.py,
+								.sx = coordScreen.x,
+								.sy = coordScreen.y,
+								.speed = speed,
+								.osy = speedData[y][x][1]
+							};
 
-				/* Fix object */ {
-					gl_program_use(&program_objectFix[0].pid);
-					gl_texture_bind(&fb_stageA.tex, program_objectFix[0].src, 0);
-					gl_texture_bind(&texture_roadmap1, program_objectFix[0].roadmapT1, 1);
-					gl_frameBuffer_bind(&fb_stageB.fbo, 1);
-					gl_mesh_draw(&mesh_persp);
-
-					gl_program_use(&program_objectFix[1].pid);
-					gl_texture_bind(&fb_stageB.tex, program_objectFix[1].src, 0);
-					gl_texture_bind(&texture_roadmap1, program_objectFix[1].roadmapT1, 1);
-					gl_frameBuffer_bind(&fb_stageA.fbo, 1);
-					gl_mesh_draw(&mesh_persp);
-				}
-
-				/* Refine edge, thinning the thick edge */ {
-					gl_program_use(&program_edgeRefine.pid);
-					gl_texture_bind(&fb_stageA.tex, program_edgeRefine.src, 0);
-					gl_texture_bind(&texture_roadmap1, program_edgeRefine.roadmapT1, 1);
-					gl_frameBuffer_bind(&fb_stageB.fbo, 1);
-					gl_mesh_draw(&mesh_persp);
-				}
-
-				/* Project from perspective to orthographic */ {
-					gl_program_use(&program_projectP2O.pid);
-					gl_texture_bind(&fb_stageB.tex, program_projectP2O.src, 0);
-					gl_texture_bind(&texture_roadmap2, program_projectP2O.roadmapT2, 1);
-					gl_frameBuffer_bind(&fb_object[current_obj].fbo, 1);
-					gl_mesh_draw(&mesh_ortho);
-				}
-
-				/* Measure the distance of edge moving between current frame and previous frame */ {
-					gl_program_use(&program_measure.pid);
-					gl_texture_bind(&fb_object[current_obj].tex, program_measure.current, 0);
-					gl_texture_bind(&fb_object[previous_obj].tex, program_measure.previous, 1);
-					gl_texture_bind(&texture_roadmap1, program_measure.roadmapT1, 2);
-					gl_texture_bind(&texture_roadmap2, program_measure.roadmapT2, 3);
-					gl_frameBuffer_bind(&fb_stageA.fbo, 1);
-					gl_mesh_draw(&mesh_ortho);
-				}
-
-				/* Project from orthographic to perspective */ {
-					gl_program_use(&program_projectO2P.pid);
-					gl_texture_bind(&fb_stageA.tex, program_projectO2P.src, 0);
-					gl_texture_bind(&texture_roadmap2, program_projectO2P.roadmapT2, 1);
-					gl_frameBuffer_bind(&fb_stageB.fbo, 1);
-					gl_mesh_draw(&mesh_persp);
-				}
-#if 1 == 1
-
-				/* Sample measure result, get single point */ {
-					gl_program_use(&program_sample.pid);
-					gl_texture_bind(&fb_stageB.tex, program_sample.src, 0);
-					gl_frameBuffer_bind(&fb_speed.fbo, 1);
-					gl_mesh_draw(&mesh_persp);
-				}
-
-				/* Process speed data on CPU side */ {
-
-					/* Note:
-					 * Tile-based rendering speedometer base on speedmap is expensive, for every pixel in the video, requires process speedometer size neighbor pixels (O() = videoSize * speedometerSize). 
-					 * Therefore, we need to download the speedmap, construct a VAO then upload it to GPU. This takes videoSize iterations (O() = videoSize). 
-					 * 
-					 * At this moment, all the render cmds are queued, but may not fully processed. Instead of waiting the GPU finishing processing current frame, 
-					 * we can have the CPU processing last frame while GPU processing current frame. So, we need two buffer: GPU->buffer[current] while CPU<-buffer[previous]
-					 * While GPU processing the video, CPU finished the speedmap analysis. CPU then upload the processed data using VAO. This VAO is associated to previous frame. 
-					 * Now, we are sure the CPU has the VAO ready, but not sure if the GPU is still precessing. Therefore, we need to upload VAO before download current speedmap. 
-					 * Upload VAO just register the DMA, non-blocking; but download FBO needs the FBO ready on GPU side, which is blocking. 
-					 * 
-					 * The size of speedometer mesh, the result of CPU processing, is not large. We do not need to add another stage of pipeline for the uploaidng. 
-					 */
-
-					float speedTable[SHADER_SPEEDOMETER_CNT][3]; //{speed, x, y}
-					memset(speedTable, 0, sizeof(speedTable)); //IEEE754 +0.0 is 0x00000000
-
-					unsigned int speedIdx = 0;
-					unsigned int edgeTop = road_focusRegionBox.top * sizeData[1], edgeBottom = road_focusRegionBox.bottom * sizeData[1];
-					unsigned int edgeLeft = road_focusRegionBox.left * sizeData[0], edgeRight = road_focusRegionBox.right * sizeData[0];
-					for (unsigned int y = edgeTop; y <= edgeBottom; y++) { //Get speed data from downloaded framebuffer
-						for (unsigned int x = edgeLeft; x <= edgeRight; x++) {
-							float speed = speedData[ y * sizeData[0] + x ];
-							if (speed >= 1.0) {
-								float xPos = (float)x / sizeData[0], yPos = (float)y / sizeData[1];
-								fprintf(stdout, "Frame %u, obj @ (%f, %f), speed = %f\n", frameCnt, xPos, yPos, speed); //Export result to stdout
-								if (speedIdx < SHADER_SPEEDOMETER_CNT) { //Do not excess buffer size, ignor if excess
-									speedTable[speedIdx][0] = speed;
-									speedTable[speedIdx][1] = xPos;
-									speedTable[speedIdx][2] = yPos;
-								}
-								speedIdx++;
-							}
+							float left = coordNorm.x - SHADER_SPEEDOMETER_WIDTH / 2, right = coordNorm.x + SHADER_SPEEDOMETER_WIDTH / 2;
+							float top = coordNorm.y - SHADER_SPEEDOMETER_HEIGHT / 2, bottom = coordNorm.y + SHADER_SPEEDOMETER_HEIGHT / 2;
+							*vdPtr++ = left;	*vdPtr++ = top;		*vdPtr++ = speed;	vdPtr++; //Top-left
+							*vdPtr++ = left;	*vdPtr++ = bottom;	*vdPtr++ = speed;	vdPtr++; //Bottom-left
+							*vdPtr++ = right;	*vdPtr++ = top;		*vdPtr++ = speed;	vdPtr++; //Top-right
+							*vdPtr++ = left;	*vdPtr++ = bottom;	*vdPtr++ = speed;	vdPtr++; //Bottom-left
+							*vdPtr++ = right;	*vdPtr++ = bottom;	*vdPtr++ = speed;	vdPtr++; //Bottom-right
+							*vdPtr++ = right;	*vdPtr++ = top;		*vdPtr++ = speed;	vdPtr++; //Top-right
 						}
 					}
-
-					for (unsigned int i = 0; i < SHADER_SPEEDOMETER_CNT - 1; i++) { //Remove overlap
-						for (unsigned int j = i + 1; j < SHADER_SPEEDOMETER_CNT; j++) {
-							if (
-								speedTable[i][0] >= 1.0 && speedTable[j][0] >= 1.0 &&
-								fabsf( speedTable[i][1] - speedTable[j][1] ) <= 2 * SHADER_SPEEDOMETER_WIDTH &&
-								fabsf( speedTable[i][2] - speedTable[j][2] ) <= 2 * SHADER_SPEEDOMETER_HEIGHT
-							) {
-								speedTable[i][0] = 0.5 * (speedTable[i][0] + speedTable[j][0]);
-								speedTable[i][1] = 0.5 * (speedTable[i][1] + speedTable[j][1]);
-								speedTable[i][2] = 0.5 * (speedTable[i][2] + speedTable[j][2]);
-								memset(speedTable[j], 0, sizeof(speedTable[j]));
-							}
-						}
-					}
-
-					gl_vertex_t vertices[6 * SHADER_SPEEDOMETER_CNT][4];
-					memset(vertices, 0, sizeof(vertices)); //IEEE754 +0.0 is 0x00000000
-
-					unsigned int idx = 0;
-					for (unsigned int i = 0; i < SHADER_SPEEDOMETER_CNT; i++) {
-						float speed = speedTable[i][0];
-						if (speed < 1.0)
-							continue;
-						
-						float xNorm = speedTable[i][1], yNorm = speedTable[i][2];
-						float left = xNorm - SHADER_SPEEDOMETER_WIDTH, right = xNorm + SHADER_SPEEDOMETER_WIDTH;
-						float top = yNorm - SHADER_SPEEDOMETER_HEIGHT, bottom = yNorm + SHADER_SPEEDOMETER_HEIGHT;
-
-						//Write vertices: v[x][4] => 0.0(invalid), -1.0(top-left), -2.0(left-bottom), +1.0(right-top), +2.0(right-bottom)
-						vertices[idx][0] = left; vertices[idx][1] = top; vertices[idx][2] = speed; vertices[idx][3] = -1.0; idx++; //LT
-						vertices[idx][0] = left; vertices[idx][1] = bottom; vertices[idx][2] = speed; vertices[idx][3] = -2.0; idx++; //LB
-						vertices[idx][0] = right; vertices[idx][1] = top; vertices[idx][2] = speed; vertices[idx][3] = +1.0; idx++; //RT
-						vertices[idx][0] = left; vertices[idx][1] = bottom; vertices[idx][2] = speed; vertices[idx][3] = -2.0; idx++; //LB
-						vertices[idx][0] = right; vertices[idx][1] = bottom; vertices[idx][2] = speed; vertices[idx][3] = +2.0; idx++; //RB
-						vertices[idx][0] = right; vertices[idx][1] = top; vertices[idx][2] = speed; vertices[idx][3] = +1.0; idx++; //RT
-					}
-
-					gl_mesh_update(&mesh_display, (gl_vertex_t*)vertices, NULL, (const unsigned int[4]){0, 6 * SHADER_SPEEDOMETER_CNT, 0, 0}); //register DMA, non-blocking
-					gl_rsync(); //Request process immediately
 				}
 
-				/* Print numbers for display */ {
+				unsigned int displayLimit = objectCnt < SHADER_SPEEDOMETER_CNT ? objectCnt : SHADER_SPEEDOMETER_CNT;
+				gl_mesh_update(&mesh_display, (gl_vertex_t*)vDisplay, NULL, (const unsigned int[4]){0, displayLimit * 6 * 4, 0, 0}); //register DMA, non-blocking
+				gl_rsync(); //Request process immediately
+				gl_frameBuffer_bind(&fb_display.fbo, 1); //If no object detected, clean the framebuffer without draw anything
+				if (displayLimit) {
 					gl_program_use(&program_display.pid);
 					gl_texture_bind(&texture_speedometer, program_display.glyphmap, 0);
-					gl_frameBuffer_bind(&fb_display.fbo, 1);
-					gl_mesh_draw(&mesh_display);
+					gl_mesh_draw(&mesh_display, displayLimit * 6); //4/vertex, 6/box
 				}
-#endif
-//				#define RESULT fb_stageA
-//				#define RESULT fb_stageB
-//				#define RESULT fb_raw[current]
-//				#define RESULT fb_object[current_obj]
-//				#define RESULT fb_speed
-				#define RESULT fb_display
+				if (objectCnt) {
+					fprintf(stdout, "F %u : %u\n", frameCnt-1, objectCnt);
+					for (analysisObj* ptr = objects; ptr < objects + objectCnt; ptr++)
+						fprintf(stdout, "O S %.2f : R %.2f,%.2f : S %u,%u : dy %d\n", ptr->speed, ptr->rx, ptr->ry, ptr->sx, ptr->sy, ptr->sy - ptr->osy);
+				}
+				free(objects);
+				free(vDisplay);
+			}
+
+//			#define RESULT fb_stageA
+//			#define RESULT fb_stageB
+//			#define RESULT fb_raw[current]
+//			#define RESULT fb_object[current_obj]
+//			#define RESULT fb_speed
+			#define RESULT fb_display
 #endif /* #ifdef ROADMAP_CHECK */
 
-				/* Draw final result on screen */ {
-					gl_setViewport(zeros, sizeFB);
-					gl_program_use(&program_final.pid);
-					gl_texture_bind(&texture_orginalBuffer[current], program_final.orginal, 0); //Do not use texture_orginalBuffer[previous], it is actural next frame, updated in background
-					gl_texture_bind(&RESULT.tex, program_final.result, 1);
-					gl_frameBuffer_bind(NULL, 0);
-					gl_mesh_draw(&mesh_final);
-				}
-				
-				gl_frameBuffer_download(&fb_speed.fbo, speedData, fb_speed.format, 0, zeros, sizeData); //Blocking, wait the GPU prepare the speed data of current frame
-				/* This blocking cmd is also a synch point */
-
-				#ifdef DEBUG_THREADSPEED
-					debug_threadSpeed = 'M'; //Not critical, no need to use mutex
-				#endif
-
-				char title[100];
-				#ifdef VERBOSE_TIME
-					uint64_t timestampRenderEnd = nanotime();
-					#ifdef DEBUG_THREADSPEED
-						snprintf(title, sizeof(title), "Viewer - frame %u - %c - %.3lf/%.3lf", frameCnt, debug_threadSpeed, (timestampRenderEnd - timestampRenderStart) / (double)1e6, (timestampRenderEnd - timestamp) / (double)1e6);
-					#else
-						snprintf(title, sizeof(title), "Viewer - frame %u - %.3lf/%.3lf", frameCnt, (timestampRenderEnd - timestampRenderStart) / (double)1e6, (timestampRenderEnd - timestamp) / (double)1e6);
-					#endif
-					timestamp = timestampRenderEnd;
-				#else
-					snprintf(title, sizeof(title), "Viewer - frame %u", frameCnt);
-				#endif
-				gl_drawEnd(title);
-				
-				th_reader_wait(); //Wait reader thread finish uploading frame data
-				#ifdef USE_PBO_UPLOAD
-					gl_pixelBuffer_updateFinish();
-				#endif
-
-				#if FRAME_DELAY
-					if (frameCnt > FRAME_DEBUGSKIPSECOND * fps) usleep(FRAME_DELAY);
-				#endif
-
-				frameCnt++;
-			} else {
-				char title[200];
-				float color[4];
-				gl_frameBuffer_download(&RESULT.fbo, color, RESULT.format, 0, cursorPosData, (const uint[2]){1,1});
-				sprintf(title, "Viewer - frame %u, Cursor=(%d,%d), result=(%.4f|%.4f|%.4f|%.4f)", frameCnt, cursorPosData[0], cursorPosData[1], color[0], color[1], color[2], color[3]);
-				gl_drawEnd(title);
-				usleep(25000);
+			/* Draw final result on screen */ {
+				gl_setViewport(zeros, sizeFB);
+				gl_program_use(&program_final.pid);
+				gl_texture_bind(&fb_raw[previous].tex, program_final.orginal, 0);
+				gl_texture_bind(&RESULT.tex, program_final.result, 1);
+				gl_frameBuffer_bind(NULL, 0);
+				gl_mesh_draw(&mesh_final, 0);
 			}
 			
+			gl_frameBuffer_download(&fb_speed.fbo, speedData, fb_speed.format, 0, zeros, sizeData); //Blocking, wait the GPU prepare the speed data of current frame
+			/* This blocking cmd is also a synch point */
+
+			#ifdef DEBUG_THREADSPEED
+				debug_threadSpeed = 'M'; //Not critical, no need to use mutex
+			#endif
+
+			char title[100];
+			#ifdef VERBOSE_TIME
+				uint64_t timestampRenderEnd = nanotime();
+				#ifdef DEBUG_THREADSPEED
+					snprintf(title, sizeof(title), "Viewer - frame %u - %c - %.3lf/%.3lf", frameCnt, debug_threadSpeed, (timestampRenderEnd - timestampRenderStart) / (double)1e6, (timestampRenderEnd - timestamp) / (double)1e6);
+				#else
+					snprintf(title, sizeof(title), "Viewer - frame %u - %.3lf/%.3lf", frameCnt, (timestampRenderEnd - timestampRenderStart) / (double)1e6, (timestampRenderEnd - timestamp) / (double)1e6);
+				#endif
+				timestamp = timestampRenderEnd;
+			#else
+				snprintf(title, sizeof(title), "Viewer - frame %u", frameCnt);
+			#endif
+			gl_drawEnd(title);
 			
+			th_reader_wait(); //Wait reader thread finish uploading frame data
+			#ifdef USE_PBO_UPLOAD
+				gl_pixelBuffer_updateFinish();
+			#endif
+
+			#if FRAME_DELAY
+				if (frameCnt > FRAME_DEBUGSKIPSECOND * fps) usleep(FRAME_DELAY);
+			#endif
+
+			frameCnt++;
+		} else {
+			char title[200];
+			float color[4];
+			gl_frameBuffer_download(&RESULT.fbo, color, RESULT.format, 0, cursorPosData, (const uint[2]){1,1});
+			sprintf(title, "Viewer - frame %u, Cursor=(%d,%d), result=(%.4f|%.4f|%.4f|%.4f)", frameCnt, cursorPosData[0], cursorPosData[1], color[0], color[1], color[2], color[3]);
+			gl_drawEnd(title);
+			usleep(25000);
 		}
 	}
 
@@ -1313,6 +1335,7 @@ label_exit:
 	gl_program_delete(&program_roadmapCheck.pid);
 
 	free(speedData);
+
 	gl_mesh_delete(&mesh_display);
 	gl_texture_delete(&fb_stageB.tex);
 	gl_frameBuffer_delete(&fb_stageB.fbo);
@@ -1339,6 +1362,8 @@ label_exit:
 	gl_texture_delete(&texture_roadmap1);
 	gl_mesh_delete(&mesh_ortho);
 	gl_mesh_delete(&mesh_persp);
+
+	free(road_geoMap.map);
 
 	th_reader_destroy();
 	gl_texture_delete(&texture_orginalBuffer[1]);
