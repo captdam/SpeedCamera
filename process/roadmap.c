@@ -93,6 +93,42 @@ Roadmap roadmap_init(const char* const roadmapFile, char** const statue) {
 	return this;
 }
 
+void roadmap_genLimit(const Roadmap this, float limit) {
+	unsigned int width = this->header.width, height = this->header.height;
+	for (unsigned int y = 0; y < height; y++) {
+		for (unsigned int x = 0; x < width; x++) {
+			unsigned int idx = y * width + x;
+			float self = this->t1[idx].py;
+			int limitUp = y, limitDown = y;
+			float limitUpNorm = (float)y / height, limitDownNorm = (float)y / height;
+			while(1) {
+				if (limitUp <= 0) //Not exceed table size
+					break;
+				if (limitUpNorm <= this->t2[idx].searchLimitUp) //Not excess max distance provided by roadmap
+					break;
+				float dest = this->t1[ limitUp * width + x ].py;
+				if (dest - self > limit) //Not excess distance limit
+					break;
+				limitUp--;
+				limitUpNorm = (float)limitUp / height;
+			}
+			while(1) {
+				if (limitDown >= height - 1)
+					break;
+				if (limitDownNorm >= this->t2[idx].searchLimitDown)
+					break;
+				float dest = this->t1[ limitDown * width + x ].py;
+				if (self - dest > limit)
+					break;
+				limitDown++;
+				limitDownNorm = (float)limitDown / height;
+			}
+			this->t2[ y * width + x ].searchLimitUp = limitUpNorm;
+			this->t2[ y * width + x ].searchLimitDown = limitDownNorm;
+		}
+	}
+}
+
 roadmap_header roadmap_getHeader(const Roadmap this) {
 	return this->header;
 }

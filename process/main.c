@@ -19,6 +19,7 @@
 #include "speedometer.h"
 
 /* Program config */
+#define MAX_SPEED 200 //km/h
 #define FIFONAME "tmpframefifo.data" //Video input stream
 #define GL_SYNCH_TIMEOUT 5000000000LLU //For gl sync timeout
 
@@ -552,6 +553,7 @@ int main(int argc, char* argv[]) {
 			goto label_exit;
 		}
 		
+		roadmap_genLimit(roadmap, MAX_SPEED / 3.6 / fps); //km/h to m/s to m/frame
 		roadmap_header roadinfo = roadmap_getHeader(roadmap);
 		const unsigned int sizeRoadmap[3] = {roadinfo.width, roadinfo.height, 0};
 

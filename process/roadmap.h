@@ -51,6 +51,12 @@ typedef struct Roadmap_Point_t {
  */
 Roadmap roadmap_init(const char* const roadmapFile, char** const statue);
 
+/** Generate the search limit in roadmap table 2. 
+ * @param this This roadmap class object
+ * @param limit Limit in road-domain in meter
+ */
+void roadmap_genLimit(const Roadmap this, float limit);
+
 /** Get the header of the roadmap file. 
  * Header contains roadmap size (width nad height) in px, and number of road points that enclose focus region. 
  * @param this This roadmap class object
