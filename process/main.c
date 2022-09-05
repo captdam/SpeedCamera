@@ -1,7 +1,5 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <inttypes.h>
-#include <float.h>
 #include <string.h>
 #include <math.h>
 #include <unistd.h>
@@ -11,7 +9,6 @@
 #include <signal.h>
 #include <pthread.h>
 #include <semaphore.h>
-#include <fcntl.h>
 
 #include "common.h"
 #include "gl.h"
@@ -21,11 +18,12 @@
 /* Program config */
 #define MAX_SPEED 200 //km/h
 #define FIFONAME "tmpframefifo.data" //Video input stream
+#define DBNAME "result.db" //Output database
 #define GL_SYNCH_TIMEOUT 5000000000LLU //For gl sync timeout
 
 /* Debug time delay */
 #define FRAME_DELAY (50 * 1000)
-#define FRAME_DEBUGSKIPSECOND 10
+#define FRAME_DEBUGSKIPSECOND 0
 
 /* Speed avg */
 #define INTERLACE 3
@@ -40,7 +38,7 @@
 #define SHADER_SPEEDOMETER_CNT 32 //Max number of speedometer
 #define SHADER_SPEEDOMETER_WIDTH 0.04 //Relative NTC
 #define SHADER_SPEEDOMETER_HEIGHT 0.025
-#define SHADER_FINAL_RAWLUMA "0.5" //Blend intensity of raw
+#define SHADER_FINAL_RAWLUMA "0.3" //Blend intensity of raw
 
 /* Speedometer */
 #define SPEEDOMETER_FILE "./textmap.data"
@@ -1081,20 +1079,6 @@ int main(int argc, char* argv[]) {
 
 			gl_setViewport(zeros, sizeData);
 
-//#define ROADMAP_CHECK program_roadmapCheck_modeShowT2 //program_roadmapCheck_modeshow*
-#ifdef ROADMAP_CHECK
-			/* Debug use ONLY: Check roadmap */ {
-				gl_program_use(&program_roadmapCheck.pid);
-				gl_texture_bind(&texture_roadmap1, program_roadmapCheck.roadmapT1, 0);
-				gl_texture_bind(&texture_roadmap2, program_roadmapCheck.roadmapT2, 1);
-				gl_program_setParam(program_roadmapCheck.cfgI1, 4, gl_datatype_int, (const int[4]){ROADMAP_CHECK, 0, 0, 0});
-				gl_program_setParam(program_roadmapCheck.cfgF1, 4, gl_datatype_float, (const float[4]){1.0, 2.0, 1.0, 1.0});
-				gl_frameBuffer_bind(&fb_stageA.fbo, 1);
-				gl_mesh_draw(&mesh_final, 0);
-			}
-			#define RESULT fb_stageA
-#else
-
 			/* Blur the raw to remove noise */ {
 				gl_program_use(&program_blurFilter.pid);
 				gl_texture_bind(&texture_orginalBuffer[current], program_blurFilter.src, 0);
@@ -1103,6 +1087,20 @@ int main(int argc, char* argv[]) {
 				//Although we only need mesh_persp, we use mesh_final here to store the whole scene. So we can use previous frame when display speedometer (speedometer has one frame latency)
 				//Do not use texture_orginalBuffer[previous], it is actural next frame, updated in background
 			}
+
+//#define ROADMAP_CHECK program_roadmapCheck_modeShowPerspGrid //program_roadmapCheck_modeshow*
+#ifdef ROADMAP_CHECK
+			/* Debug use ONLY: Check roadmap */ {
+				gl_program_use(&program_roadmapCheck.pid);
+				gl_texture_bind(&texture_roadmap1, program_roadmapCheck.roadmapT1, 0);
+				gl_texture_bind(&texture_roadmap2, program_roadmapCheck.roadmapT2, 1);
+				gl_program_setParam(program_roadmapCheck.cfgI1, 4, gl_datatype_int, (const int[4]){ROADMAP_CHECK, 0, 0, 0});
+				gl_program_setParam(program_roadmapCheck.cfgF1, 4, gl_datatype_float, (const float[4]){5.0, 5.0, 1.0, 1.0});
+				gl_frameBuffer_bind(&fb_stageA.fbo, 1);
+				gl_mesh_draw(&mesh_final, 0);
+			}
+			#define RESULT fb_stageA
+#else
 
 			/* Project from perspective to orthographic */ /*{
 				gl_program_use(&program_projectP2O.pid);

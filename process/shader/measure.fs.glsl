@@ -102,5 +102,5 @@ void main() {
 	}
 
 	dis = min(255.0, dis * BIAS);
-	result = vec2(dis, targetY);
+	result = vec2(dis, abs(pxIdx.y-targetY));
 }
