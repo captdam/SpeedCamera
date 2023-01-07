@@ -1,6 +1,6 @@
-/** Class - GL.class. 
+/** Class - GL.class. Captdam's OpenGL helper class. 
  * Start, load, config, manage and destroy OpenGL engine. 
- * OpenGL 3.1 ES is used (to support embedded device). 
+ * GLFW and GLEW are used as backend of this class. 
  * Only one GL class and one window is allowed. 
  * Use this class to access OpenGL engine. 
  */
@@ -10,6 +10,15 @@
 
 /* == Common ================================================================================ */
 
+/** Init config */
+typedef struct GL_Config {
+	unsigned int vMajor : 3;	//OpenGl version major
+	unsigned int vMinor : 3;	//OpenGL version minor
+	unsigned int gles : 1;		//OpenGL-ES (1) or OpenGL (0)
+	uint16_t winWidth, winHeight;	//Window size
+	char* winName;			//Window name
+} gl_config;
+
 /** Usage frequency hint for driver */
 typedef enum GL_Usage {
 	gl_usage_stream = 0,	//Set once then use for a few times
@@ -18,6 +27,15 @@ typedef enum GL_Usage {
 gl_usage_placeholderEnd} gl_usage;
 
 /* == Window and driver management ========================================================== */
+
+/** Cursor and window & framebuffer size */
+typedef struct GL_WinsizeCursor {
+	int winsize[2];		//Window size
+	int framesize[2];	//Framebuffer size
+	double curPos[2];	//Cursor pos in NTC
+	int curPosWin[2];	//Cursor pos in px respect to window
+	int curPosFrame[2];	//Cursor pos in px respect to framebuffer
+} gl_winsizeNcursor;
 
 typedef void* gl_synch; //Synch point
 /** Synch status */
@@ -31,7 +49,7 @@ typedef enum GL_Synch_Status {
 /* == Shader and shader param data types, UBO =============================================== */
 
 typedef unsigned int gl_program; //Shader program
-#define GL_INIT_DEFAULT_PROGRAM (gl_program) 0
+#define GL_INIT_DEFAULT_PROGRAM (gl_program)0
 
 typedef int gl_param; //Shader program argument handler
 /** Shader program argument data type*/
@@ -77,11 +95,11 @@ typedef struct GL_ProgramArg {
 
 /** Geometry objects (mesh) */
 typedef struct GL_Mesh {
-	unsigned int vao, vbo, ebo;
+	unsigned int vao, vbo, ebo, ibo;
 	unsigned int drawSize;
 	unsigned int mode;
 } gl_mesh;
-#define GL_INIT_DEFAULT_MESH (gl_mesh){0, 0, 0, 0, 0}
+#define GL_INIT_DEFAULT_MESH (gl_mesh){0, 0, 0, 0, 0, 0}
 
 typedef float gl_vertex_t; //Mesh vertices
 typedef unsigned int gl_index_t; //Mesh index
@@ -90,6 +108,9 @@ typedef unsigned int gl_index_t; //Mesh index
 typedef enum GL_MeshMode {
 	gl_meshmode_points, gl_meshmode_lines, gl_meshmode_triangles, gl_meshmode_triangleFan, gl_meshmode_triangleStrip,
 gl_meshmode_placeholderEnd} gl_meshmode;
+
+typedef unsigned int gl_instance; //Draw instance buffer
+#define GL_INIT_DEFAULT_INSTANCE (gl_instance)0
 
 /* == Texture, PBO for texture transfer and FBO for off-screen rendering ==================== */
 
@@ -104,6 +125,8 @@ typedef enum GL_TexFormat {
 	gl_texformat_R32F, gl_texformat_RG32F, gl_texformat_RGB32F, gl_texformat_RGBA32F,
 	gl_texformat_R32I, gl_texformat_RG32I, gl_texformat_RGB32I, gl_texformat_RGBA32I,
 	gl_texformat_R32UI, gl_texformat_RG32UI, gl_texformat_RGB32UI, gl_texformat_RGBA32UI,
+	gl_texformat_d16, gl_texformat_d24, gl_texformat_d32f,
+	gl_texformat_d24s8, gl_texformat_d32fs8, gl_texformat_s8,
 gl_texformat_placeholderEnd} gl_texformat;
 
 /** Texture type */
@@ -129,44 +152,40 @@ typedef unsigned int gl_pbo;
 typedef unsigned int gl_fbo;
 #define GL_INIT_DEFAULT_FBO (gl_fbo)0
 
+/** Framebuffer attachment types */
+typedef enum GL_FramebufferAttachment {
+	gl_fboattach_depth = -3, gl_fboattach_stencil = -2, gl_fboattach_depth_stencil = -1,
+	gl_fboattach_color0 = 0
+} gl_fboattach;
+
+/** Framebuffer clear mask */
+#define gl_frameBuffer_clearColor (1<<0)
+#define gl_frameBuffer_clearDepth (1<<1)
+#define gl_frameBuffer_clearStencil (1<<2)
+
 /* == Window and driver management ========================================================== */
-
-/** Set log and error log stream. 
- * @param stream Log stream
- */
-void gl_logStream(FILE* const stream);
-
-/** Write to log or error log stream. 
- * @param format A C printf-style format string
- * @param ... A list of arguments
- */
-int gl_logWrite(const char* const format, ...);
-
-/** Print log to log stream. 
- * @param format A C printf-style format string
- * @param ... A list of arguments
- */
-#define gl_log(format, ...) gl_logWrite("[GL] Log:\t"format"\n" __VA_OPT__(,) __VA_ARGS__)
-
-/** Print error log to error log stream. 
- * @param format A C printf-style format string
- * @param ... A list of arguments
- */
-#define gl_elog(format, ...) gl_logWrite("[GL] Err:\t"format"\n" __VA_OPT__(,) __VA_ARGS__)
 
 /** Init the GL class. 
  * @return 1 if success, 0 if fail
  */
-int gl_init() __attribute__((cold));
+int gl_init(gl_config config) __attribute__((cold));
 
-/** Call to start a render loop, this process all GLFW window events. 
- * @param cursorPos Pointer to 2 double, used to return cursor position relative to the window {x,y}
- * @param windowSize Pointer to 2 int, used to return size of the window (width,height)
- * @param cursorPos Pointer to 2 double, used to return size of the GPU framebuffer {width,height}
+/** Get the GLFW window object so user program can use GLFW lib to access the window. 
+ * @return GLFW window object
  */
-void gl_drawStart(double cursorPos[static 2], int windowSize[static 2], int framebufferSize[static 2]);
+void* gl_getWindow();
 
-/** Set the drawing viewport
+/** Call to start a render loop.
+ * Process all GLFW window events. 
+ */
+void gl_drawStart();
+
+/** Get window and framebuffer size, get cursor position respect to window and framebuffer size respectively. 
+ * @return Window and framebuffer size, cursor position
+ */
+gl_winsizeNcursor gl_getWinsizeCursor();
+
+/** Set the drawing viewport. 
  * @param offset Offset in px {x,y}
  * @param size Size in px {width,height}
  */
@@ -207,7 +226,7 @@ void gl_rsync();
  * No effect on platform that does not support synch barrier. 
  * @return A synch point
  */
-gl_synch (*gl_synchSet)();
+gl_synch gl_synchSet();
 
 /** Wait GPU command queue. 
  * Equivalent to gl_fsynch() on platform that does not support synch barrier. 
@@ -215,13 +234,13 @@ gl_synch (*gl_synchSet)();
  * @param timeout Timeout in nano seconds
  * @return Synch status
  */
-gl_synch_status (*gl_synchWait)(const gl_synch s, const uint64_t timeout);
+gl_synch_status gl_synchWait(const gl_synch s, const uint64_t timeout);
 
 /** Delete a synch point if no longer need. 
  * No effect on platform that does not support synch barrier. 
  * @param s A synch point previously returned by gl_synchSet()
  */
-void (*gl_synchDelete)(const gl_synch s);
+void gl_synchDelete(const gl_synch s);
 
 /* == Shader and shader param data types, UBO =============================================== */
 
@@ -300,16 +319,52 @@ void gl_unifromBuffer_delete(gl_ubo* const ubo);
 
 /* == Mesh (vertices) ======================================================================= */
 
+/** Create an instance buffer for mesh instanced draw. 
+ * @param size Size of the buffer in byte
+ * @return An instance buffer
+ */
+gl_instance gl_instance_create(const unsigned int size);
+
+/** Check an instance buffer. 
+ * @param instance An instance buffer previously returned by gl_instance_create()
+ * @return 1 if good, 0 if not
+ */
+int gl_instance_check(const gl_instance* const instance);
+
+/** Update a portion of instance buffer. 
+ * Since in most case the instance array is updated and used immediately, this function will keep the instance binded. Use gl_instance_bind() to rebind or unbind. 
+ * @param instance An instance buffer previously returned by gl_instance_create()
+ * @param start Starting offset of the update in bytes
+ * @param len Length of the update in bytes
+ * @param data Pointer to the update data
+ */
+void gl_instance_update(const gl_instance* const instance, const unsigned int start, const unsigned int len, const void* const data);
+
+/** Delete an instance buffer. 
+ * @param mesh instance An instance buffer previously returned by gl_instance_create()
+ */
+void gl_instance_delete(gl_instance* const instance);
+
 /** Create and bind gl_mesh object (geometry). 
- * @param count {number of points in one vertex, number of vertices, number of indices for indexed draw or 0 for direct draw}
- * @param elementsSize Array, size of each elements (attribute, GLSL location) in a vertex. Add all attributes should equal to points in vertex
+ * Each mesh has verticesCount vertices, each vertex has Sigma(elementsSize) of numbers. 
+ * The orde of layout location in shader program must be element first, then instance. 
+ * @param verticesCount Number of vertices
+ * @param indicesCount Number of indices for indexed draw or 0 for direct draw
+ * @param elementsSize Array, zero terminated, size of each elements (attribute) in a vertex
+ * @param instanceSize Array, zero terminated, size of each elements (attribute) in the instance buffer; pass NULL to disable instance
  * @param vertices The vertice array, leave NULL if no actual data is ready
  * @param indices For indexed draw: the indices array, leave NULL if no actual data is ready
+ * @param instance For instance draw, pass the instance array that will be used for this object, ignored if instance draw is disabled
  * @param mode The mode of the mesh, can be gl_meshmode_*, this affects how the GPU draw the mesh
  * @param usage A hint to the driver about the frequency of usage, can be gl_usage_*
  * @return Mesh
  */
-gl_mesh gl_mesh_create(const unsigned int count[static 3], const gl_index_t* const elementsSize, const gl_vertex_t* const vertices, const gl_index_t* const indices, const gl_meshmode mode, const gl_usage usage);
+gl_mesh gl_mesh_create(
+	const unsigned int verticesCount, const unsigned int indicesCount,
+	const gl_index_t* const elementsSize, const gl_index_t* const instanceSize,
+	const gl_vertex_t* const vertices, const gl_index_t* const indices, const gl_instance* const instance,
+	const gl_meshmode mode, const gl_usage usage
+);
 
 /** Check a mesh
  * @param mesh A mesh previously returned by gl_mesh_create()
@@ -326,11 +381,13 @@ int gl_mesh_check(const gl_mesh* const mesh);
  */
 void gl_mesh_update(const gl_mesh* const mesh, const gl_vertex_t* const vertices, const gl_index_t* const indices, const unsigned int offCnt[static 4]);
 
-/** Draw a mesh. 
+/** Draw a mesh or araw a mesh for a few times. 
+ * If the mesh is created with instance, that instance will be used; if without instance, only draw the mesh once.
  * @param mesh A mesh previously returned by gl_mesh_create()
- * @param size Number of vertices/indices used to draw, pass 0 to draw all (size when create)
+ * @param vSize Number of vertices/indices used to draw, pass 0 to draw all (size when create)
+ * @param iSize Number of instance to draw
  */
-void gl_mesh_draw(const gl_mesh* const mesh, const unsigned int size);
+void gl_mesh_draw(const gl_mesh* const mesh, const unsigned int vSize, const unsigned int iSize);
 
 /** Delete a mesh. 
  * @param mesh A mesh previously returned by gl_mesh_create()
@@ -408,11 +465,12 @@ void gl_pixelBuffer_delete(gl_pbo* const pbo);
 
 /** Create a framebuffe object (FBO) for off-screen rendering. 
  * Attach a list of texture to the frame buffer. 
- * @param internalBuffer A list of texture to be attached, texture type must be 2D texture, at least 1 is required
  * @param count Number of texture to attach
+ * @param internalBuffer A list of texture to be attached, texture type must be 2D texture, at least 1 is required
+ * @param type A list of attachment type used for each texture to be attached, can be gl_fboattach_* or any int >= 0 for color attachment, must be less than max number of attachment allowed by GL driver
  * @return FBO
  */
-gl_fbo gl_frameBuffer_create(const gl_tex internalBuffer[static 1], const unsigned int count);
+gl_fbo gl_frameBuffer_create(const unsigned int count, const gl_tex internalBuffer[static 1], const gl_fboattach type[static 1]);
 
 /** Check a FBO
  * @param fb A FBO previously returned by gl_frameBuffer_create()
@@ -423,7 +481,7 @@ int gl_frameBuffer_check(const gl_fbo* const fbo);
 /** Bind a FBO to current for drawing. 
  * To bind the default buffer (display window), pass NULL. 
  * @param fbo A FBO previously returned by gl_frameBuffer_create(), or NULL for display window
- * @param clear Use non-zero value to erase the content before drawing, use 0 to draw on exist content
+ * @param clear Bit mask used to clear buffers, use gl_frameBuffer_clear*
  */
 void gl_frameBuffer_bind(const gl_fbo* const fbo, const int clear);
 

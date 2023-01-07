@@ -18,7 +18,6 @@
 /* Program config */
 #define MAX_SPEED 200 //km/h
 #define FIFONAME "tmpframefifo.data" //Video input stream
-#define DBNAME "result.db" //Output database
 #define GL_SYNCH_TIMEOUT 5000000000LLU //For gl sync timeout
 
 /* Debug time delay */
@@ -395,12 +394,21 @@ int main(int argc, char* argv[]) {
 		gl_texformat format;
 	} fb;
 	#define DEFAULT_FB (fb){GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX, gl_texformat_RGBA32F}
-	fb fb_raw[2] = {DEFAULT_FB, DEFAULT_FB}; //Raw video data with minor pre-process
-	fb fb_object[INTERLACE + 1] = {[0 ... INTERLACE] = DEFAULT_FB}; //Object detection of current and previous frames
-	fb fb_speed = DEFAULT_FB; //Speed measure result, float range [0, 255]
-	fb fb_display = DEFAULT_FB; //Display human-readable text
-	fb fb_stageA = DEFAULT_FB;
-	fb fb_stageB = DEFAULT_FB;
+	fb fb_raw[2] = { //Raw video data with minor pre-process
+		{GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX, gl_texformat_RGBA8}, //Input video, RGBA8
+		{GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX, gl_texformat_RGBA8}
+	};
+	fb fb_object[INTERLACE + 1] = { //Object detection of current and previous frames
+		[0 ... INTERLACE] = {GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX, gl_texformat_RGBA8} //Enum < 256
+	};
+	fb fb_speed = { //Speed measure result, road-domain speed in km/h and screen-domain speed in px/frame
+		GL_INIT_DEFAULT_FBO,
+		GL_INIT_DEFAULT_TEX,
+		gl_texformat_RG32F //Float range [0, 255], 16F is good enough, but use 32 for easy download in IEEE754 format, 16F in GPU may not follow standard format
+	};
+	fb fb_display = {GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX, gl_texformat_RGBA8}; //Display human-readable text, video, RGBA8
+	fb fb_stageA = {GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX, gl_texformat_RGBA16F}; //General intermediate data, must be RGBA16F or RGBA32F
+	fb fb_stageB = {GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX, gl_texformat_RGBA16F};
 	gl_mesh mesh_display = GL_INIT_DEFAULT_MESH;
 
 	//Analysis and export data (CPU side)
@@ -501,8 +509,13 @@ int main(int argc, char* argv[]) {
 
 	/* Init OpenGL and viewer window */ {
 		info("Init openGL...");
-		gl_logStream(stderr);
-		if (!gl_init()) {
+		if (!gl_init((gl_config){
+			.vMajor = 3,
+			.vMinor = 2,
+			.gles = 1,
+			.winWidth = sizeData[0], .winHeight = sizeData[1],
+			.winName = "Viewer"
+		})) {
 			error("Cannot init OpenGL");
 			goto label_exit;
 		}
@@ -556,7 +569,7 @@ int main(int argc, char* argv[]) {
 		const unsigned int sizeRoadmap[3] = {roadinfo.width, roadinfo.height, 0};
 
 		/* Focus region */ {
-			const gl_index_t attributes[] = {2};
+			const gl_index_t attributes[] = {2, 0};
 			float (* vertices)[2] = (float(*)[2])roadmap_getRoadPoints(roadmap);
 			
 			road_focusRegionBox.left = vertices[roadinfo.pCnt-4][0];
@@ -564,8 +577,8 @@ int main(int argc, char* argv[]) {
 			road_focusRegionBox.top = vertices[roadinfo.pCnt-4][1];
 			road_focusRegionBox.bottom = vertices[roadinfo.pCnt-1][1];
 
-			mesh_persp = gl_mesh_create((const unsigned int[3]){2, roadinfo.pCnt-4, 0}, attributes, (gl_vertex_t*)vertices, NULL, gl_meshmode_triangleStrip, gl_usage_static);
-			mesh_ortho = gl_mesh_create((const unsigned int[3]){2, 4, 0}, attributes, (gl_vertex_t*)(vertices + roadinfo.pCnt-4), NULL, gl_meshmode_triangleStrip, gl_usage_static);
+			mesh_persp = gl_mesh_create(roadinfo.pCnt-4, 0, attributes, NULL, (gl_vertex_t*)vertices, NULL, NULL, gl_meshmode_triangleStrip, gl_usage_static);
+			mesh_ortho = gl_mesh_create(4, 0, attributes, NULL, (gl_vertex_t*)(vertices + roadinfo.pCnt-4), NULL, NULL, gl_meshmode_triangleStrip, gl_usage_static);
 			if ( !gl_mesh_check(&mesh_persp) || !gl_mesh_check(&mesh_ortho) ) {
 				roadmap_destroy(roadmap);
 				error("Fail to create mesh for roadmap - focus region");
@@ -628,9 +641,7 @@ int main(int argc, char* argv[]) {
 			0.0f, 1.0f,
 			0.0f, 0.0f
 		};
-		gl_index_t indices[] = {0, 3, 2, 0, 2, 1};
-		gl_index_t attributes[] = {2};
-		mesh_final = gl_mesh_create((const unsigned int[3]){2, 4, 6}, attributes, vertices, indices, gl_meshmode_triangles, gl_usage_static);
+		mesh_final = gl_mesh_create(4, 0, (const gl_index_t[]){2, 0}, NULL, vertices, NULL, NULL, gl_meshmode_triangleFan, gl_usage_static);
 		if (!gl_mesh_check(&mesh_final)) {
 			error("Fail to create mesh for final display");
 			goto label_exit;
@@ -641,13 +652,12 @@ int main(int argc, char* argv[]) {
 		info("Create GPU buffers...");
 
 		for (unsigned int i = 0; i < arrayLength(fb_raw); i++) {
-			fb_raw[i].format = gl_texformat_RGBA8; //Input video, RGBA8
 			fb_raw[i].tex = gl_texture_create(fb_raw[i].format, gl_textype_2d, sizeData);
 			if (!gl_texture_check(&fb_raw[i].tex)) {
 				error("Fail to create texture to store raw video data (%u)", i);
 				goto label_exit;
 			}
-			fb_raw[i].fbo = gl_frameBuffer_create(&fb_raw[i].tex, 1);
+			fb_raw[i].fbo = gl_frameBuffer_create(1, (const gl_tex[]){fb_raw[i].tex}, (const gl_fboattach[]){gl_fboattach_color0});
 			if (!gl_frameBuffer_check(&fb_raw[i].fbo) ) {
 				error("Fail to create FBO to store raw video data (%u)", i);
 				goto label_exit;
@@ -655,59 +665,54 @@ int main(int argc, char* argv[]) {
 		}
 
 		for (unsigned int i = 0; i < arrayLength(fb_object); i++) {
-			fb_object[i].format = gl_texformat_R8; //Enum < 256
 			fb_object[i].tex = gl_texture_create(fb_object[i].format, gl_textype_2d, sizeData);
 			if (!gl_texture_check(&fb_object[i].tex)) {
 				error("Fail to create texture to store object (%u)", i);
 				goto label_exit;
 			}
-			fb_object[i].fbo = gl_frameBuffer_create(&fb_object[i].tex, 1);
+			fb_object[i].fbo = gl_frameBuffer_create(1, (const gl_tex[]){fb_object[i].tex}, (const gl_fboattach[]){gl_fboattach_color0});
 			if (!gl_frameBuffer_check(&fb_object[i].fbo) ) {
 				error("Fail to create FBO to store object (%u)\n", i);
 				goto label_exit;
 			}
 		}
 
-		fb_speed.format = gl_texformat_RG32F; //Data, although mediump float (16F) is good enough, but we use 32F so it can be easily download
 		fb_speed.tex = gl_texture_create(fb_speed.format, gl_textype_2d, sizeData);
 		if (!gl_texture_check(&fb_speed.tex)) {
 			error("Fail to create texture to store speed");
 			goto label_exit;
 		}
-		fb_speed.fbo = gl_frameBuffer_create(&fb_speed.tex, 1);
+		fb_speed.fbo = gl_frameBuffer_create(1, (const gl_tex[]){fb_speed.tex}, (const gl_fboattach[]){gl_fboattach_color0});
 		if (!gl_frameBuffer_check(&fb_speed.fbo) ) {
 			error("Fail to create FBO to store speed");
 			goto label_exit;
 		}
 
-		fb_display.format = gl_texformat_RGBA8; //Ouput video, RGBA8
 		fb_display.tex = gl_texture_create(fb_display.format, gl_textype_2d, sizeData);
 		if (!gl_texture_check(&fb_display.tex)) {
 			error("Fail to create texture to store speed");
 			goto label_exit;
 		}
-		fb_display.fbo = gl_frameBuffer_create(&fb_display.tex, 1);
+		fb_display.fbo = gl_frameBuffer_create(1, (const gl_tex[]){fb_display.tex}, (const gl_fboattach[]){gl_fboattach_color0});
 		if (!gl_frameBuffer_check(&fb_display.fbo) ) {
 			error("Fail to create FBO to store speed");
 			goto label_exit;
 		}
 
-		fb_stageA.format = gl_texformat_RGBA32F; //Must use RGBA16F or RGBA32F;
-		fb_stageB.format = gl_texformat_RGBA32F;
 		fb_stageA.tex = gl_texture_create(fb_stageA.format, gl_textype_2d, sizeData); //Data
 		fb_stageB.tex = gl_texture_create(fb_stageB.format, gl_textype_2d, sizeData); //Data
 		if ( !gl_texture_check(&fb_stageA.tex) || !gl_texture_check(&fb_stageB.tex) ) {
 			error("Fail to create texture to store moving edge");
 			goto label_exit;
 		}
-		fb_stageA.fbo = gl_frameBuffer_create(&fb_stageA.tex, 1);
-		fb_stageB.fbo = gl_frameBuffer_create(&fb_stageB.tex, 1);
+		fb_stageA.fbo = gl_frameBuffer_create(1, (const gl_tex[]){fb_stageA.tex}, (const gl_fboattach[]){gl_fboattach_color0});
+		fb_stageB.fbo = gl_frameBuffer_create(1, (const gl_tex[]){fb_stageB.tex}, (const gl_fboattach[]){gl_fboattach_color0});
 		if ( !gl_frameBuffer_check(&fb_stageA.fbo) || !gl_frameBuffer_check(&fb_stageB.fbo) ) {
 			error("Fail to create FBO to store moving edge");
 			goto label_exit;
 		}
 
-		mesh_display = gl_mesh_create((const unsigned int[3]){4, SHADER_SPEEDOMETER_CNT * 6, 0}, (gl_index_t[1]){4}, NULL, NULL, gl_meshmode_triangles, gl_usage_stream); //Stream, updata every frames
+		mesh_display = gl_mesh_create(SHADER_SPEEDOMETER_CNT * 6, 0, (gl_index_t[]){4, 0}, NULL, NULL, NULL, NULL, gl_meshmode_triangles, gl_usage_stream); //Stream, updata every frames
 		if (!gl_mesh_check(&mesh_display)) {
 			error("Fail to create mesh to store speedometer");
 			goto label_exit;
@@ -1026,6 +1031,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	void ISR_SIGINT() {
+		info("INT");
 		gl_close(1);
 	}
 	signal(SIGINT, ISR_SIGINT);
@@ -1044,15 +1050,8 @@ int main(int argc, char* argv[]) {
 		const unsigned int hint_obj = (frameCnt + arrayLength(fb_object) - 1) % arrayLength(fb_object);
 		const unsigned int previous_obj = (frameCnt + arrayLength(fb_object) - INTERLACE) % arrayLength(fb_object);
 
-		int sizeWin[2], sizeFB[2];
-		double cursorPosWin[2];
-		int cursorPosFB[2]; //Window size and framebuffer size may differ if DPI is not 1, data
-		int cursorPosData[2]; //Cursor position relative to data may differ from it to framebuffer if window is not displayed in data size
-		gl_drawStart(cursorPosWin, sizeWin, sizeFB);
-		cursorPosFB[0] = cursorPosWin[0] * sizeFB[0] / sizeWin[0];
-		cursorPosFB[1] = cursorPosWin[1] * sizeFB[1] / sizeWin[1];
-		cursorPosData[0] = cursorPosFB[0] * sizeData[0] / sizeFB[0];
-		cursorPosData[1] = cursorPosFB[1] * sizeData[1] / sizeFB[1];
+		gl_winsizeNcursor winsizeNcursor = gl_getWinsizeCursor();
+		int cursorPosData[2] = {winsizeNcursor.curPos[0] * sizeData[0], winsizeNcursor.curPos[1] * sizeData[1]};
 
 		if (!inBox(cursorPosData[0], cursorPosData[1], 0, sizeData[0], 0, sizeData[1], -1)) {
 		
@@ -1083,7 +1082,7 @@ int main(int argc, char* argv[]) {
 				gl_program_use(&program_blurFilter.pid);
 				gl_texture_bind(&texture_orginalBuffer[current], program_blurFilter.src, 0);
 				gl_frameBuffer_bind(&fb_raw[current].fbo, 0);
-				gl_mesh_draw(&mesh_final, 0);
+				gl_mesh_draw(&mesh_final, 0, 0);
 				//Although we only need mesh_persp, we use mesh_final here to store the whole scene. So we can use previous frame when display speedometer (speedometer has one frame latency)
 				//Do not use texture_orginalBuffer[previous], it is actural next frame, updated in background
 			}
@@ -1097,7 +1096,7 @@ int main(int argc, char* argv[]) {
 				gl_program_setParam(program_roadmapCheck.cfgI1, 4, gl_datatype_int, (const int[4]){ROADMAP_CHECK, 0, 0, 0});
 				gl_program_setParam(program_roadmapCheck.cfgF1, 4, gl_datatype_float, (const float[4]){5.0, 5.0, 1.0, 1.0});
 				gl_frameBuffer_bind(&fb_stageA.fbo, 1);
-				gl_mesh_draw(&mesh_final, 0);
+				gl_mesh_draw(&mesh_final, 0, 0);
 			}
 			#define RESULT fb_stageA
 #else
@@ -1107,7 +1106,7 @@ int main(int argc, char* argv[]) {
 				gl_texture_bind(&fb_raw[current].tex, program_projectP2O.src, 0);
 				gl_texture_bind(&texture_roadmap2, program_projectP2O.roadmapT2, 1);
 				gl_frameBuffer_bind(&fb_stageB.fbo, 1);
-				gl_mesh_draw(&mesh_ortho, 0);
+				gl_mesh_draw(&mesh_ortho, 0, 0);
 			}*/
 
 			/* Finding changing to detect moving object*/ {
@@ -1115,7 +1114,7 @@ int main(int argc, char* argv[]) {
 				gl_texture_bind(&fb_raw[current].tex, program_changingSensor.current, 0);
 				gl_texture_bind(&fb_raw[previous].tex, program_changingSensor.previous, 1);
 				gl_frameBuffer_bind(&fb_stageA.fbo, 1);
-				gl_mesh_draw(&mesh_persp, 0);
+				gl_mesh_draw(&mesh_persp, 0, 0);
 			}
 
 			/* Fix object */ {
@@ -1123,13 +1122,13 @@ int main(int argc, char* argv[]) {
 				gl_texture_bind(&fb_stageA.tex, program_objectFix[0].src, 0);
 				gl_texture_bind(&texture_roadmap1, program_objectFix[0].roadmapT1, 1);
 				gl_frameBuffer_bind(&fb_stageB.fbo, 1);
-				gl_mesh_draw(&mesh_persp, 0);
+				gl_mesh_draw(&mesh_persp, 0, 0);
 
 				gl_program_use(&program_objectFix[1].pid);
 				gl_texture_bind(&fb_stageB.tex, program_objectFix[1].src, 0);
 				gl_texture_bind(&texture_roadmap1, program_objectFix[1].roadmapT1, 1);
 				gl_frameBuffer_bind(&fb_stageA.fbo, 1);
-				gl_mesh_draw(&mesh_persp, 0);
+				gl_mesh_draw(&mesh_persp, 0, 0);
 			}
 
 			/* Refine edge, thinning the thick edge */ {
@@ -1137,7 +1136,7 @@ int main(int argc, char* argv[]) {
 				gl_texture_bind(&fb_stageA.tex, program_edgeRefine.src, 0);
 				gl_texture_bind(&texture_roadmap1, program_edgeRefine.roadmapT1, 1);
 				gl_frameBuffer_bind(&fb_stageB.fbo, 1);
-				gl_mesh_draw(&mesh_persp, 0);
+				gl_mesh_draw(&mesh_persp, 0, 0);
 			}
 
 			/* Project from perspective to orthographic */ {
@@ -1145,7 +1144,7 @@ int main(int argc, char* argv[]) {
 				gl_texture_bind(&fb_stageB.tex, program_projectP2O.src, 0);
 				gl_texture_bind(&texture_roadmap2, program_projectP2O.roadmapT2, 1);
 				gl_frameBuffer_bind(&fb_object[current_obj].fbo, 1);
-				gl_mesh_draw(&mesh_ortho, 0);
+				gl_mesh_draw(&mesh_ortho, 0, 0);
 			}
 
 			/* Measure the distance of edge moving between current frame and previous frame */ {
@@ -1156,7 +1155,7 @@ int main(int argc, char* argv[]) {
 				gl_texture_bind(&texture_roadmap1, program_measure.roadmapT1, 3);
 				gl_texture_bind(&texture_roadmap2, program_measure.roadmapT2, 4);
 				gl_frameBuffer_bind(&fb_stageA.fbo, 1);
-				gl_mesh_draw(&mesh_ortho, 0);
+				gl_mesh_draw(&mesh_ortho, 0, 0);
 			}
 
 			/* Project from orthographic to perspective */ {
@@ -1164,21 +1163,21 @@ int main(int argc, char* argv[]) {
 				gl_texture_bind(&fb_stageA.tex, program_projectO2P.src, 0);
 				gl_texture_bind(&texture_roadmap2, program_projectO2P.roadmapT2, 1);
 				gl_frameBuffer_bind(&fb_stageB.fbo, 1);
-				gl_mesh_draw(&mesh_persp, 0);
+				gl_mesh_draw(&mesh_persp, 0, 0);
 			}
 
 			/* Sample measure result, get single point */ {
 				gl_program_use(&program_sample.pid);
 				gl_texture_bind(&fb_stageB.tex, program_sample.src, 0);
 				gl_frameBuffer_bind(&fb_speed.fbo, 1);
-				gl_mesh_draw(&mesh_persp, 0);
+				gl_mesh_draw(&mesh_persp, 0, 0);
 			}
 
 			/* Process speed data of previous frame on CPU side and draw speedometer display */ {
 
 				/* Note:
 				* Tile-based rendering speedometer base on speedmap is expensive, for every pixel in the video, requires process speedometer size neighbor pixels (O() = videoSize * speedometerSize). 
-				* Therefore, we need to download the speedmap, construct a VAO then upload it to GPU. This takes videoSize iterations (O() = videoSize). 
+				* Therefore, we need to download the speedmap, construct a VAO then upload it to GPU. This takes videoSize iterations (O() = videoSize). But the cost is an extra frame of delay. 
 				* 
 				* At this moment, all the render cmds are queued, but may not fully processed. Instead of waiting the GPU finishing processing current frame, 
 				* we can have the CPU processing last frame while GPU processing current frame.
@@ -1247,7 +1246,7 @@ int main(int argc, char* argv[]) {
 				if (displayLimit) {
 					gl_program_use(&program_display.pid);
 					gl_texture_bind(&texture_speedometer, program_display.glyphmap, 0);
-					gl_mesh_draw(&mesh_display, displayLimit * 6); //4/vertex, 6/box
+					gl_mesh_draw(&mesh_display, displayLimit * 6, 0); //4/vertex, 6/box
 				}
 				if (objectCnt) {
 					fprintf(stdout, "F %u : %u\n", frameCnt-1, objectCnt);
@@ -1267,12 +1266,12 @@ int main(int argc, char* argv[]) {
 #endif /* #ifdef ROADMAP_CHECK */
 
 			/* Draw final result on screen */ {
-				gl_setViewport(zeros, sizeFB);
+				gl_setViewport(zeros, winsizeNcursor.framesize);
 				gl_program_use(&program_final.pid);
 				gl_texture_bind(&fb_raw[previous].tex, program_final.orginal, 0);
 				gl_texture_bind(&RESULT.tex, program_final.result, 1);
 				gl_frameBuffer_bind(NULL, 0);
-				gl_mesh_draw(&mesh_final, 0);
+				gl_mesh_draw(&mesh_final, 0, 0);
 			}
 			
 			gl_frameBuffer_download(&fb_speed.fbo, speedData, fb_speed.format, 0, zeros, sizeData); //Blocking, wait the GPU prepare the speed data of current frame
