@@ -598,11 +598,12 @@ void __gl_unloadFileFromMemory(char* const buffer) {
 
 /* == Mesh (vertices) ======================================================================= */
 
-gl_instance gl_instance_create(const unsigned int size) {
+gl_instance gl_instance_create(const unsigned int size, const gl_usage usage) {
+	const GLenum usageLookup[] = {GL_STREAM_DRAW, GL_STATIC_DRAW, GL_DYNAMIC_DRAW};
 	GLuint instance;
 	glGenBuffers(1, &instance);
 	glBindBuffer(GL_ARRAY_BUFFER, instance);
-	glBufferData(GL_ARRAY_BUFFER, size, NULL, GL_STREAM_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, size, NULL, usageLookup[usage]);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	return instance;
 }

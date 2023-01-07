@@ -21,7 +21,7 @@
 #define GL_SYNCH_TIMEOUT 5000000000LLU //For gl sync timeout
 
 /* Debug time delay */
-#define FRAME_DELAY (50 * 1000)
+#define FRAME_DELAY 0 //(50 * 1000)
 #define FRAME_DEBUGSKIPSECOND 0
 
 /* Speed avg */
@@ -383,6 +383,19 @@ int main(int argc, char* argv[]) {
 
 	//To display human readable text on screen
 	gl_tex texture_speedometer = GL_INIT_DEFAULT_TEX;
+	float* instance_speedometer_data = NULL;
+	gl_instance instance_speedometer = GL_INIT_DEFAULT_INSTANCE;
+	gl_mesh mesh_display = GL_INIT_DEFAULT_MESH;
+
+	//Analysis and export data (CPU side)
+	float (* speedData)[sizeData[0]][2] = NULL; //FBO download, height(sizeData[1]) * width(sizeData[0]) * Channel(2)
+	typedef struct AnalysisObject {
+		float rx, ry; //Road- and screen-domain coord of current frame
+		unsigned int sx, sy;
+		float speed; //Speed (avged by shader)
+		unsigned int osy; //Old screen y-coord 
+	} analysisObj;
+	analysisObj* speedAnalysisObj = NULL;
 
 	//Final display on screen
 	gl_mesh mesh_final = GL_INIT_DEFAULT_MESH;
@@ -409,16 +422,6 @@ int main(int argc, char* argv[]) {
 	fb fb_display = {GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX, gl_texformat_RGBA8}; //Display human-readable text, video, RGBA8
 	fb fb_stageA = {GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX, gl_texformat_RGBA16F}; //General intermediate data, must be RGBA16F or RGBA32F
 	fb fb_stageB = {GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX, gl_texformat_RGBA16F};
-	gl_mesh mesh_display = GL_INIT_DEFAULT_MESH;
-
-	//Analysis and export data (CPU side)
-	float (* speedData)[sizeData[0]][2] = NULL; //FBO download, height(sizeData[1]) * width(sizeData[0]) * Channel(2)
-	typedef struct AnalysisObject {
-		float rx, ry; //Road- and screen-domain coord of current frame
-		unsigned int sx, sy;
-		float speed; //Speed (avged by shader)
-		unsigned int osy; //Old screen y-coord 
-	} analysisObj;
 
 	//Program - Roadmap check
 	struct {
@@ -632,6 +635,49 @@ int main(int argc, char* argv[]) {
 		gl_texture_update(&texture_speedometer, glyph, zeros, glyphSize);
 
 		speedometer_destroy(speedometer); //Free speedometer memory after data uploading finished
+
+		instance_speedometer_data = malloc(SHADER_SPEEDOMETER_CNT * 3 * sizeof(float));
+		if (!instance_speedometer_data) {
+			error("Fail to allocate memory for speedometer instance buffer");
+			goto label_exit;
+		}
+		instance_speedometer = gl_instance_create(SHADER_SPEEDOMETER_CNT * 3 * sizeof(float), gl_usage_stream);
+		if (!gl_instance_check(&instance_speedometer)) {
+			error("Fail to create instance array for speedometer");
+			goto label_exit;
+		}
+		mesh_display = gl_mesh_create(
+			4, 0,
+			(gl_index_t[]){4, 0},
+			(gl_index_t[]){3, 0},
+			(const gl_vertex_t[]){
+				+SHADER_SPEEDOMETER_WIDTH, -SHADER_SPEEDOMETER_HEIGHT, 1.0f, 0.0f,
+				+SHADER_SPEEDOMETER_WIDTH, +SHADER_SPEEDOMETER_HEIGHT, 1.0f, 1.0f,
+				-SHADER_SPEEDOMETER_WIDTH, +SHADER_SPEEDOMETER_HEIGHT, 0.0f, 1.0f,
+				-SHADER_SPEEDOMETER_WIDTH, -SHADER_SPEEDOMETER_HEIGHT, 0.0f, 0.0f
+			},
+			NULL,
+			&instance_speedometer,
+			gl_meshmode_triangleFan,
+			gl_usage_static
+		);
+		if (!gl_mesh_check(&mesh_display)) {
+			error("Fail to create mesh to store speedometer");
+			goto label_exit;
+		}
+	}
+
+	/* Create buffer for post process on CPU side */ {
+		speedData = malloc(sizeData[0] * sizeData[1] * 2 * sizeof(float)); //FBO dump
+		if (!speedData) {
+			error("Fail to create buffer to download speed framebuffer");
+			goto label_exit;
+		}
+		speedAnalysisObj = malloc(SHADER_SPEEDOMETER_CNT * sizeof(analysisObj));
+		if (!speedAnalysisObj) {
+			error("Fail to create buffer to store analysis objects");
+			goto label_exit;
+		}
 	}
 
 	/* Create final display mesh */ {
@@ -709,17 +755,6 @@ int main(int argc, char* argv[]) {
 		fb_stageB.fbo = gl_frameBuffer_create(1, (const gl_tex[]){fb_stageB.tex}, (const gl_fboattach[]){gl_fboattach_color0});
 		if ( !gl_frameBuffer_check(&fb_stageA.fbo) || !gl_frameBuffer_check(&fb_stageB.fbo) ) {
 			error("Fail to create FBO to store moving edge");
-			goto label_exit;
-		}
-
-		mesh_display = gl_mesh_create(SHADER_SPEEDOMETER_CNT * 6, 0, (gl_index_t[]){4, 0}, NULL, NULL, NULL, NULL, gl_meshmode_triangles, gl_usage_stream); //Stream, updata every frames
-		if (!gl_mesh_check(&mesh_display)) {
-			error("Fail to create mesh to store speedometer");
-			goto label_exit;
-		}
-		speedData = malloc(sizeData[0] * sizeData[1] * 2 * sizeof(float));
-		if (!speedData) {
-			error("Fail to create buffer to store speed data");
 			goto label_exit;
 		}
 	}
@@ -1044,6 +1079,8 @@ int main(int argc, char* argv[]) {
 	
 	/* Main process loop here */
 	while(!gl_close(-1)) {
+		if (frameCnt > 500) break;
+
 		const unsigned int current = (unsigned int)frameCnt & (unsigned int)0b1 ? 1 : 0; //Front
 		const unsigned int previous = 1 - current; //Back
 		const unsigned int current_obj = frameCnt % arrayLength(fb_object);
@@ -1188,30 +1225,13 @@ int main(int argc, char* argv[]) {
 				* The size of speedometer mesh, the result of CPU processing, is not large. We do not need to add another stage of pipeline for the uploaidng. 
 				*/
 
-				unsigned int objectCnt = 0;
-				analysisObj* objects = NULL;
-				gl_vertex_t (* vDisplay)[6][4] = NULL;
-
+				analysisObj* objPtr = speedAnalysisObj;
+				float* instancePtr = instance_speedometer_data;
+				int limit = SHADER_SPEEDOMETER_CNT;
 				unsigned int edgeTop = road_focusRegionBox.top * sizeData[1], edgeBottom = road_focusRegionBox.bottom * sizeData[1];
 				unsigned int edgeLeft = road_focusRegionBox.left * sizeData[0], edgeRight = road_focusRegionBox.right * sizeData[0];
-				for (unsigned int y = edgeTop; y <= edgeBottom; y++) { //Get number speed data from downloaded framebuffer
-					for (unsigned int x = edgeLeft; x <= edgeRight; x++) {
-						float speed = speedData[y][x][0];
-						if (speed >= 1.0 && speed <= 255.0)
-							objectCnt++;
-					}
-				}
-				if ( !( objects = malloc(sizeof(analysisObj) * objectCnt) ) || !( vDisplay = malloc(sizeof(gl_vertex_t) * objectCnt * 6 * 4) ) ) {
-					free(objects);
-					free(vDisplay);
-					error("Fail to alloc memory for analysis and display rendering");
-					goto label_exit;
-				}
-				
-				analysisObj* objPtr = objects;
-				gl_vertex_t* vdPtr = (gl_vertex_t*)vDisplay;
-				for (unsigned int y = edgeTop; y <= edgeBottom; y++) { //Get actual speed data from downloaded framebuffer
-					for (unsigned int x = edgeLeft; x <= edgeRight; x++) {
+				for (unsigned int y = edgeTop; y <= edgeBottom && limit; y++) { //Get number speed data from downloaded framebuffer
+					for (unsigned int x = edgeLeft; x <= edgeRight && limit; x++) {
 						float speed = speedData[y][x][0];
 						if (speed >= 1.0 && speed <= 255.0) {
 							vec2 coordNorm = { (float)x / sizeData[0] , (float)y / sizeData[1] };
@@ -1226,35 +1246,25 @@ int main(int argc, char* argv[]) {
 								.speed = speed,
 								.osy = speedData[y][x][1]
 							};
-
-							float left = coordNorm.x - SHADER_SPEEDOMETER_WIDTH / 2, right = coordNorm.x + SHADER_SPEEDOMETER_WIDTH / 2;
-							float top = coordNorm.y - SHADER_SPEEDOMETER_HEIGHT / 2, bottom = coordNorm.y + SHADER_SPEEDOMETER_HEIGHT / 2;
-							*vdPtr++ = left;	*vdPtr++ = top;		*vdPtr++ = speed;	vdPtr++; //Top-left
-							*vdPtr++ = left;	*vdPtr++ = bottom;	*vdPtr++ = speed;	vdPtr++; //Bottom-left
-							*vdPtr++ = right;	*vdPtr++ = top;		*vdPtr++ = speed;	vdPtr++; //Top-right
-							*vdPtr++ = left;	*vdPtr++ = bottom;	*vdPtr++ = speed;	vdPtr++; //Bottom-left
-							*vdPtr++ = right;	*vdPtr++ = bottom;	*vdPtr++ = speed;	vdPtr++; //Bottom-right
-							*vdPtr++ = right;	*vdPtr++ = top;		*vdPtr++ = speed;	vdPtr++; //Top-right
+							*instancePtr++ = coordNorm.x;
+							*instancePtr++ = coordNorm.y;
+							*instancePtr++ = speed;
+							limit--;
 						}
 					}
 				}
-
-				unsigned int displayLimit = objectCnt < SHADER_SPEEDOMETER_CNT ? objectCnt : SHADER_SPEEDOMETER_CNT;
-				gl_mesh_update(&mesh_display, (gl_vertex_t*)vDisplay, NULL, (const unsigned int[4]){0, displayLimit * 6 * 4, 0, 0}); //register DMA, non-blocking
+				int objCnt = SHADER_SPEEDOMETER_CNT - limit;
+				gl_instance_update(&instance_speedometer, 0, objCnt * 3 * sizeof(float), instance_speedometer_data);
 				gl_rsync(); //Request process immediately
-				gl_frameBuffer_bind(&fb_display.fbo, 1); //If no object detected, clean the framebuffer without draw anything
-				if (displayLimit) {
+				gl_frameBuffer_bind(&fb_display.fbo, 1);
+				if (objCnt) {
 					gl_program_use(&program_display.pid);
 					gl_texture_bind(&texture_speedometer, program_display.glyphmap, 0);
-					gl_mesh_draw(&mesh_display, displayLimit * 6, 0); //4/vertex, 6/box
-				}
-				if (objectCnt) {
-					fprintf(stdout, "F %u : %u\n", frameCnt-1, objectCnt);
-					for (analysisObj* ptr = objects; ptr < objects + objectCnt; ptr++)
+					gl_mesh_draw(&mesh_display, 0, objCnt);
+					fprintf(stdout, "F %u : %u\n", frameCnt-1, objCnt);
+					for (analysisObj* ptr = speedAnalysisObj; ptr < speedAnalysisObj + objCnt; ptr++)
 						fprintf(stdout, "O S %.2f : R %.2f,%.2f : S %u,%u : dy %d\n", ptr->speed, ptr->rx, ptr->ry, ptr->sx, ptr->sy, ptr->sy - ptr->osy);
 				}
-				free(objects);
-				free(vDisplay);
 			}
 
 //			#define RESULT fb_stageA
@@ -1333,9 +1343,6 @@ label_exit:
 	gl_program_delete(&program_projectP2O.pid);
 	gl_program_delete(&program_roadmapCheck.pid);
 
-	free(speedData);
-
-	gl_mesh_delete(&mesh_display);
 	gl_texture_delete(&fb_stageB.tex);
 	gl_frameBuffer_delete(&fb_stageB.fbo);
 	gl_texture_delete(&fb_stageA.tex);
@@ -1355,6 +1362,12 @@ label_exit:
 	
 	gl_mesh_delete(&mesh_final);
 
+	free(speedAnalysisObj);
+	free(speedData);
+
+	gl_mesh_delete(&mesh_display);
+	gl_instance_delete(&instance_speedometer);
+	free(instance_speedometer_data);
 	gl_texture_delete(&texture_speedometer);
 
 	gl_texture_delete(&texture_roadmap2);

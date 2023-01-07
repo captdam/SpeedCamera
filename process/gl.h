@@ -323,7 +323,7 @@ void gl_unifromBuffer_delete(gl_ubo* const ubo);
  * @param size Size of the buffer in byte
  * @return An instance buffer
  */
-gl_instance gl_instance_create(const unsigned int size);
+gl_instance gl_instance_create(const unsigned int size, const gl_usage usage);
 
 /** Check an instance buffer. 
  * @param instance An instance buffer previously returned by gl_instance_create()
