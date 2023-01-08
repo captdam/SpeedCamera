@@ -913,60 +913,6 @@ void gl_texture_delete(gl_tex* const tex) {
 	tex->texture = GL_INIT_DEFAULT_TEX.texture;
 }
 
-gl_pbo gl_pixelBuffer_create(const unsigned int size, const gl_usage usage) {
-	const GLenum usageLookup[] = {GL_STREAM_DRAW, GL_STATIC_DRAW, GL_DYNAMIC_DRAW};
-	if (usage < 0 || usage >= gl_usage_placeholderEnd)
-		return GL_INIT_DEFAULT_PBO;
-
-	gl_pbo pbo;
-	glGenBuffers(1, &pbo);
-	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
-	glBufferData(GL_PIXEL_UNPACK_BUFFER, size, NULL, usageLookup[usage]);
-	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, GL_INIT_DEFAULT_PBO);
-	return pbo;
-}
-
-int gl_pixelBuffer_check(const gl_pbo* const pbo) {
-	return *pbo != GL_INIT_DEFAULT_PBO;
-}
-
-void* gl_pixelBuffer_updateStart(const gl_pbo* const pbo, const unsigned int size) {
-	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, *pbo);
-	return glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, size, GL_MAP_WRITE_BIT/* | GL_MAP_INVALIDATE_BUFFER_BIT*/ | GL_MAP_UNSYNCHRONIZED_BIT);
-}
-
-void gl_pixelBuffer_updateFinish() {
-	glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
-	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, GL_INIT_DEFAULT_PBO);
-}
-
-void gl_pixelBuffer_updateToTexture(const gl_pbo* const pbo, const gl_tex* const tex) {
-	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, *pbo);
-	switch (tex->type) {
-		case gl_textype_2d:
-			glBindTexture(GL_TEXTURE_2D, tex->texture);
-			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, tex->width, tex->height, __gl_texformat_lookup[tex->format].format, __gl_texformat_lookup[tex->format].type, 0);
-			glBindTexture(GL_TEXTURE_2D, GL_INIT_DEFAULT_TEX.texture);
-			break;
-		case gl_textype_2dArray:
-			glBindTexture(GL_TEXTURE_2D_ARRAY, tex->texture);
-			glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, 0, tex->width, tex->height, tex->depth, __gl_texformat_lookup[tex->format].format, __gl_texformat_lookup[tex->format].type, 0);
-			glBindTexture(GL_TEXTURE_2D_ARRAY, GL_INIT_DEFAULT_TEX.texture);
-			break;
-		case gl_textype_3d:
-			glBindTexture(GL_TEXTURE_3D, tex->texture);
-			glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, 0, tex->width, tex->height, tex->depth, __gl_texformat_lookup[tex->format].format, __gl_texformat_lookup[tex->format].type, 0);
-			glBindTexture(GL_TEXTURE_3D, GL_INIT_DEFAULT_TEX.texture);
-			break;
-	}
-	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, GL_INIT_DEFAULT_PBO);
-}
-
-void gl_pixelBuffer_delete(gl_pbo* const pbo) {
-	glDeleteBuffers(1, pbo);
-	*pbo = GL_INIT_DEFAULT_PBO;
-}
-
 gl_fbo gl_frameBuffer_create(const unsigned int count, const gl_tex internalBuffer[static 1], const gl_fboattach type[static 1]) {
 	for (uint i = 0; i < count; i++) {
 		if (internalBuffer[i].type != gl_textype_2d)
@@ -1031,17 +977,97 @@ void gl_frameBuffer_bind(const gl_fbo* const fbo, const int clear) {
 	}
 }
 
-void gl_frameBuffer_download(const gl_fbo* const fbo, void* const dest, const gl_texformat format, const unsigned int attachment, const unsigned int offset[static 2], const unsigned int size[static 2]) {
+void gl_frameBuffer_download(void* const dest, const gl_fbo* const fbo, const gl_texformat format, const unsigned attachment, const unsigned int offset[static 2], const unsigned int size[static 2]) {
 	if (format < 0 || format >= gl_texformat_placeholderEnd)
 		return;
 	
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, *fbo);
 	glReadBuffer(GL_COLOR_ATTACHMENT0 + attachment);
-	
 	glReadPixels(offset[0], offset[1], size[0], size[1], __gl_texformat_lookup[format].format, __gl_texformat_lookup[format].type, dest);
 }
 
 void gl_frameBuffer_delete(gl_fbo* const fbo) {
 	glDeleteFramebuffers(1, fbo);
 	*fbo = GL_INIT_DEFAULT_FBO;
+}
+
+gl_pbo gl_pixelBuffer_create(const unsigned int size, const int type, const gl_usage usage) {
+	const GLenum usageLookupDraw[] = {GL_STREAM_DRAW, GL_STATIC_DRAW, GL_DYNAMIC_DRAW};
+	const GLenum usageLookupRead[] = {GL_STREAM_READ, GL_STATIC_READ, GL_DYNAMIC_READ};
+	if (usage < 0 || usage >= gl_usage_placeholderEnd)
+		return GL_INIT_DEFAULT_PBO;
+
+	gl_pbo pbo;
+	glGenBuffers(1, &pbo);
+	if (type) {
+		glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
+		glBufferData(GL_PIXEL_PACK_BUFFER, size, NULL, usageLookupRead[usage]);
+		glBindBuffer(GL_PIXEL_PACK_BUFFER, GL_INIT_DEFAULT_PBO);
+	} else {
+		glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+		glBufferData(GL_PIXEL_UNPACK_BUFFER, size, NULL, usageLookupDraw[usage]);
+		glBindBuffer(GL_PIXEL_UNPACK_BUFFER, GL_INIT_DEFAULT_PBO);
+	}
+	return pbo;
+}
+
+int gl_pixelBuffer_check(const gl_pbo* const pbo) {
+	return *pbo != GL_INIT_DEFAULT_PBO;
+}
+
+void* gl_pixelBuffer_updateStart(const gl_pbo* const pbo, const unsigned int size) {
+	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, *pbo);
+	return glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, size, GL_MAP_WRITE_BIT/* | GL_MAP_INVALIDATE_BUFFER_BIT*/ | GL_MAP_UNSYNCHRONIZED_BIT);
+}
+
+void gl_pixelBuffer_updateFinish() {
+	glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, GL_INIT_DEFAULT_PBO);
+}
+
+void gl_pixelBuffer_updateToTexture(const gl_pbo* const pbo, const gl_tex* const tex) {
+	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, *pbo);
+	switch (tex->type) {
+		case gl_textype_2d:
+			glBindTexture(GL_TEXTURE_2D, tex->texture);
+			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, tex->width, tex->height, __gl_texformat_lookup[tex->format].format, __gl_texformat_lookup[tex->format].type, 0);
+			glBindTexture(GL_TEXTURE_2D, GL_INIT_DEFAULT_TEX.texture);
+			break;
+		case gl_textype_2dArray:
+			glBindTexture(GL_TEXTURE_2D_ARRAY, tex->texture);
+			glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, 0, tex->width, tex->height, tex->depth, __gl_texformat_lookup[tex->format].format, __gl_texformat_lookup[tex->format].type, 0);
+			glBindTexture(GL_TEXTURE_2D_ARRAY, GL_INIT_DEFAULT_TEX.texture);
+			break;
+		case gl_textype_3d:
+			glBindTexture(GL_TEXTURE_3D, tex->texture);
+			glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, 0, tex->width, tex->height, tex->depth, __gl_texformat_lookup[tex->format].format, __gl_texformat_lookup[tex->format].type, 0);
+			glBindTexture(GL_TEXTURE_3D, GL_INIT_DEFAULT_TEX.texture);
+			break;
+	}
+	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, GL_INIT_DEFAULT_PBO);
+}
+
+void gl_pixelBuffer_downloadStart(const gl_pbo* pbo, const gl_fbo* const fbo, const gl_texformat format, const unsigned int attachment, const unsigned int offset[static 2], const unsigned int size[static 2]) {
+	if (format < 0 || format >= gl_texformat_placeholderEnd)
+		return;
+		
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, *fbo);
+	glReadBuffer(GL_COLOR_ATTACHMENT0 + attachment);
+	glBindBuffer(GL_PIXEL_PACK_BUFFER, *pbo);
+	glReadPixels(offset[0], offset[1], size[0], size[1], __gl_texformat_lookup[format].format, __gl_texformat_lookup[format].type, 0);
+}
+
+void* gl_pixelBuffer_downloadFinish(const unsigned int size) {
+	void* ptr = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, size, GL_MAP_READ_BIT);
+	return ptr;
+}
+
+void gl_pixelBuffer_downloadDiscard() {
+	glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+	glBindBuffer(GL_PIXEL_PACK_BUFFER, GL_INIT_DEFAULT_PBO);
+}
+
+void gl_pixelBuffer_delete(gl_pbo* const pbo) {
+	glDeleteBuffers(1, pbo);
+	*pbo = GL_INIT_DEFAULT_PBO;
 }

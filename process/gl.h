@@ -223,13 +223,11 @@ void gl_fsync();
 void gl_rsync();
 
 /** Set a point in the GPU command queue for a later gl_synchWait() call. 
- * No effect on platform that does not support synch barrier. 
  * @return A synch point
  */
 gl_synch gl_synchSet();
 
 /** Wait GPU command queue. 
- * Equivalent to gl_fsynch() on platform that does not support synch barrier. 
  * @param s A synch point previously returned by gl_synchSet()
  * @param timeout Timeout in nano seconds
  * @return Synch status
@@ -237,7 +235,6 @@ gl_synch gl_synchSet();
 gl_synch_status gl_synchWait(const gl_synch s, const uint64_t timeout);
 
 /** Delete a synch point if no longer need. 
- * No effect on platform that does not support synch barrier. 
  * @param s A synch point previously returned by gl_synchSet()
  */
 void gl_synchDelete(const gl_synch s);
@@ -394,7 +391,7 @@ void gl_mesh_draw(const gl_mesh* const mesh, const unsigned int vSize, const uns
  */
 void gl_mesh_delete(gl_mesh* const mesh);
 
-/* == Texture, PBO for texture transfer and FBO for off-screen rendering ==================== */
+/* == Texture, FBO for off-screen rendering and PBO for texture transfer ==================== */
 
 /** Create a texture whit empty content. 
  * @param format Format of the texture, can be gl_texformat_*
@@ -430,39 +427,6 @@ void gl_texture_bind(const gl_tex* const tex, const gl_param paramId, const unsi
  */
 void gl_texture_delete(gl_tex* const tex);
 
-/** Create a pixel buffer object (PBO) that is used to manually transfer texture data. 
- * @param size Size of the PBO/texture data in bytes (number _of_pixel * bytes_per_pixel)
- * @param usage A hint to the driver about the frequency of usage, can be gl_usage_*
- */
-gl_pbo gl_pixelBuffer_create(const unsigned int size, const gl_usage usage);
-
-/** Check a PBO. 
- * @param pbo A PBO previously returned by gl_pixelBuffer_create()
- * @return 1 if good, 0 if not
- */
-int gl_pixelBuffer_check(const gl_pbo* const pbo);
-
-/** Start a CPU-to-GPU transfer by obtain the pointer to the GPU memory. 
- * @param pbo A PBO previously returned by gl_pixelBuffer_create()
- * @param size Size of the PBO/texture data in bytes
- */
-void* gl_pixelBuffer_updateStart(const gl_pbo* const pbo, const unsigned int size);
-
-/** Finish the data transfer started by gl_pixelBuffer_updateStart(). 
- */
-void gl_pixelBuffer_updateFinish();
-
-/** Transfer data from PBO to actual texture 
- * @param pbo A PBO previously returned by gl_pixelBuffer_create()
- * @param tex Dest gl_tex object previously created by gl_texture_create()
- */
-void gl_pixelBuffer_updateToTexture(const gl_pbo* const pbo, const gl_tex* const tex);
-
-/** Delete a PBO. 
- * @param pbo A PBO previously returned by gl_pixelBuffer_create()
- */
-void gl_pixelBuffer_delete(gl_pbo* const pbo);
-
 /** Create a framebuffe object (FBO) for off-screen rendering. 
  * Attach a list of texture to the frame buffer. 
  * @param count Number of texture to attach
@@ -485,19 +449,77 @@ int gl_frameBuffer_check(const gl_fbo* const fbo);
  */
 void gl_frameBuffer_bind(const gl_fbo* const fbo, const int clear);
 
-/** Download a portion of fram buffer from GPU. 
- * @param fbo A FBO previously created by gl_frameBuffer_create()
+/** Download a portion of a color attachment of a FBO from GPU. 
  * @param dest Where to save the data, the memory space should be enough to hold the download content
+ * @param fbo A FBO previously returned by gl_frameBuffer_create()
  * @param format Format of data downloading
- * @param id Which attached texture to download
+ * @param attachment Which attached texture to download (0 to MAX_ATTACHMENT), not valid for depth and stencil buffer
  * @param offset Start point of framebuffer to be update {x,y}
  * @param size Size of framebuffer to be download {width,height}
  */
-void gl_frameBuffer_download(const gl_fbo* const fbo, void* const dest, const gl_texformat format, const unsigned int attachment, const unsigned int offset[static 2], const unsigned int size[static 2]);
+void gl_frameBuffer_download(void* const dest, const gl_fbo* const fbo, const gl_texformat format, const unsigned int attachment, const unsigned int offset[static 2], const unsigned int size[static 2]);
 
 /** Delete a FBO. 
- * @param fb A FBO previously returned by gl_frameBuffer_create()
+ * @param fbo A FBO previously returned by gl_frameBuffer_create()
  */
 void gl_frameBuffer_delete(gl_fbo* const fbo);
+
+/** Create a pixel buffer object (PBO) that is used to manually transfer texture data. 
+ * @param size Size of the PBO/texture data in bytes (number _of_pixel * bytes_per_pixel)
+ * @param type 0 for upload (unpack), 1 for download (pack)
+ * @param usage A hint to the driver about the frequency of usage, can be gl_usage_*
+ */
+gl_pbo gl_pixelBuffer_create(const unsigned int size, const int type, const gl_usage usage);
+
+/** Check a PBO. 
+ * @param pbo A PBO previously returned by gl_pixelBuffer_create()
+ * @return 1 if good, 0 if not
+ */
+int gl_pixelBuffer_check(const gl_pbo* const pbo);
+
+/** Start a CPU-to-GPU transfer, obtain the pointer to the GPU memory. 
+ * @param pbo A PBO previously returned by gl_pixelBuffer_create()
+ * @param size Size of the PBO/texture data in bytes
+ */
+void* gl_pixelBuffer_updateStart(const gl_pbo* const pbo, const unsigned int size);
+
+/** Finish the data transfer started by gl_pixelBuffer_updateStart(). 
+ */
+void gl_pixelBuffer_updateFinish();
+
+/** Transfer data from PBO to actual texture 
+ * @param pbo A PBO previously returned by gl_pixelBuffer_create()
+ * @param tex Dest gl_tex object previously created by gl_texture_create()
+ */
+void gl_pixelBuffer_updateToTexture(const gl_pbo* const pbo, const gl_tex* const tex);
+
+/** Start a GPU-to-CPU transfer, download texture of an framebuffer to PBO. 
+ * No other download operation is allowed between gl_pixelBuffer_downloadStart()-gl_pixelBuffer_downloadFinish()-gl_pixelBuffer_downloadDiscard() calls. 
+ * @param pbo A PBO previously returned by gl_pixelBuffer_create()
+ * @param fbo A FBO previously returned by gl_frameBuffer_create()
+ * @param format Format of data downloading
+ * @param attachment Which attached texture to download (0 to MAX_ATTACHMENT), not valid for depth and stencil buffer
+ * @param offset Start point of framebuffer to be update {x,y}
+ * @param size Size of framebuffer to be download {width,height}
+ */
+void gl_pixelBuffer_downloadStart(const gl_pbo* pbo, const gl_fbo* const fbo, const gl_texformat format, const unsigned int attachment, const unsigned int offset[static 2], const unsigned int size[static 2]);
+
+/** Obtain the data address after finishing the data transfer started by gl_pixelBuffer_updateStart(). 
+ * A synch object can be used to test if the download has been finished. 
+ * This function will map the internal buffer to user space, call gl_pixelBuffer_downloadDiscard() to unmap after the data has been processed. 
+ * @param pbo A PBO previously returned by gl_pixelBuffer_create()
+ * @param size Size of the PBO/texture data in bytes
+ * @return Address of the downloaded data
+ */
+void* gl_pixelBuffer_downloadFinish(const unsigned int size);
+
+/** Discard the pointer returned by gl_pixelBuffer_downloadFinish()
+ */
+void gl_pixelBuffer_downloadDiscard();
+
+/** Delete a PBO. 
+ * @param pbo A PBO previously returned by gl_pixelBuffer_create()
+ */
+void gl_pixelBuffer_delete(gl_pbo* const pbo);
 
 #endif /* #ifndef INCLUDE_GL_H */
