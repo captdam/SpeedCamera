@@ -23,7 +23,7 @@
 #define FRAME_DEBUGSKIPSECOND 0
 
 /* Speed avg */
-#define INTERLACE 3
+#define INTERLACE 7
 
 /* Shader config */
 #define SHADER_CHANGINGSENSOR_THRESHOLD "0.05" //minimum changing in RGB to pass test
@@ -33,8 +33,8 @@
 #define SHADER_EDGEREFINE_BOTTOMDENOISE "0.2" //Bottom and side clerance of edge in meter
 #define SHADER_EDGEREFINE_SIDEDNOISE "0.6"
 #define SHADER_SPEEDOMETER_CNT 32 //Max number of speedometer
-#define SHADER_SPEEDOMETER_WIDTH 0.04 //Relative NTC
-#define SHADER_SPEEDOMETER_HEIGHT 0.025
+#define SHADER_SPEEDOMETER_WIDTH 0.02 //Relative NTC
+#define SHADER_SPEEDOMETER_HEIGHT 0.0125
 #define SHADER_FINAL_RAWLUMA "0.3" //Blend intensity of raw
 
 /* Speedometer */
@@ -47,7 +47,9 @@ volatile char debug_threadSpeed = ' '; //Which thread takes longer
 
 /* Video data upload to GPU and processed data download to CPU */
 //#define USE_PBO_UPLOAD //Not big gain: uploading is asynch op, driver will copy data to internal buffer tand then upload
-#define USE_PBO_DOWNLOAD //Big gain: download is synch op 
+#define USE_PBO_DOWNLOAD //Big gain: download is synch op
+#define FB_SPEED_CNT 4 //Number of speed framebuffer, use 1, 2 or 4 for single FBO, front/back buffer or round-robin FBO
+#define FB_SPEED_LATENCY 1 //Download fb_speed X frames before. Higher number means higher chance the FBO is ready when download, lower stall but higher latency as well
 
 #define info(format, ...) {fprintf(stderr, "Log:\t"format"\n" __VA_OPT__(,) __VA_ARGS__);} //Write log
 #define error(format, ...) {fprintf(stderr, "Err:\t"format"\n" __VA_OPT__(,) __VA_ARGS__);} //Write error log
@@ -134,9 +136,9 @@ int main(int argc, char* argv[]) {
 	gl_mesh mesh_display = GL_INIT_DEFAULT_MESH;
 
 	//Analysis and export data (CPU side)
-	float (* speedData)[sizeData[0]][2] = NULL; //FBO download, height(sizeData[1]) * width(sizeData[0]) * Channel(2)
+	uint8_t (* speedData)[sizeData[0]][2] = NULL; //FBO download, height(sizeData[1]) * width(sizeData[0]) * RG8, no performance difference with RGBA8 and RG8 on VC6
 	#ifdef USE_PBO_DOWNLOAD
-		gl_synch pboDownloadSynch = NULL;
+//		gl_synch pboDownloadSynch = NULL;
 		gl_pbo pboDownload = GL_INIT_DEFAULT_PBO;
 	#endif
 	typedef struct AnalysisObject {
@@ -164,10 +166,13 @@ int main(int argc, char* argv[]) {
 	fb fb_object[INTERLACE + 1] = { //Object detection of current and previous frames
 		[0 ... INTERLACE] = {GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX, gl_texformat_RGBA8} //Enum < 256
 	};
-	fb fb_speed = { //Speed measure result, road-domain speed in km/h and screen-domain speed in px/frame
-		GL_INIT_DEFAULT_FBO,
-		GL_INIT_DEFAULT_TEX,
-		gl_texformat_RG32F //Float range [0, 255], 16F is good enough, but use 32 for easy download in IEEE754 format, 16F in GPU may not follow standard format
+	fb fb_speed[FB_SPEED_CNT] = { //Speed measure result, road-domain speed in km/h and screen-domain speed in px/frame
+		[0 ... (FB_SPEED_CNT-1)] = 
+		{
+			GL_INIT_DEFAULT_FBO,
+			GL_INIT_DEFAULT_TEX,
+			gl_texformat_RG8 //Range uint8 [0, 255]
+		}
 	};
 	fb fb_display = {GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX, gl_texformat_RGBA8}; //Display human-readable text, video, RGBA8
 	fb fb_stageA = {GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX, gl_texformat_RGBA16F}; //General intermediate data, must be RGBA16F or RGBA32F
@@ -419,13 +424,13 @@ int main(int argc, char* argv[]) {
 
 	/* Create buffer for post process on CPU side */ {
 		#ifdef USE_PBO_DOWNLOAD
-			pboDownload = gl_pixelBuffer_create(sizeData[0] * sizeData[1] * 2 * sizeof(float), 1, gl_usage_stream);
+			pboDownload = gl_pixelBuffer_create(sizeData[0] * sizeData[1] * sizeof(speedData[0][0]), 1, gl_usage_stream);
 			if (!gl_pixelBuffer_check(&pboDownload)) {
 				error("Fail to create pixel buffer for speed downloading");
 				goto label_exit;
 			}
 		#else
-			speedData = malloc(sizeData[0] * sizeData[1] * 2 * sizeof(float)); //FBO dump
+			speedData = malloc(sizeData[0] * sizeData[1] * sizeof(speedData[0][0])); //FBO dump
 			if (!speedData) {
 				error("Fail to create buffer to download speed framebuffer");
 				goto label_exit;
@@ -481,25 +486,27 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-		fb_speed.tex = gl_texture_create(fb_speed.format, gl_textype_2d, sizeData);
-		if (!gl_texture_check(&fb_speed.tex)) {
-			error("Fail to create texture to store speed");
-			goto label_exit;
-		}
-		fb_speed.fbo = gl_frameBuffer_create(1, (const gl_tex[]){fb_speed.tex}, (const gl_fboattach[]){gl_fboattach_color0});
-		if (!gl_frameBuffer_check(&fb_speed.fbo) ) {
-			error("Fail to create FBO to store speed");
-			goto label_exit;
+		for (uint i = 0; i < arrayLength(fb_speed); i++) {
+			fb_speed[i].tex = gl_texture_create(fb_speed[i].format, gl_textype_2d, sizeData);
+			if (!gl_texture_check(&fb_speed[i].tex)) {
+				error("Fail to create texture to store speed (%u)", i);
+				goto label_exit;
+			}
+			fb_speed[i].fbo = gl_frameBuffer_create(1, (const gl_tex[]){fb_speed[i].tex}, (const gl_fboattach[]){gl_fboattach_color0});
+			if (!gl_frameBuffer_check(&fb_speed[i].fbo) ) {
+				error("Fail to create FBO to store speed (%u)", i);
+				goto label_exit;
+			}
 		}
 
 		fb_display.tex = gl_texture_create(fb_display.format, gl_textype_2d, sizeData);
 		if (!gl_texture_check(&fb_display.tex)) {
-			error("Fail to create texture to store speed");
+			error("Fail to create texture to store speed display");
 			goto label_exit;
 		}
 		fb_display.fbo = gl_frameBuffer_create(1, (const gl_tex[]){fb_display.tex}, (const gl_fboattach[]){gl_fboattach_color0});
 		if (!gl_frameBuffer_check(&fb_display.fbo) ) {
-			error("Fail to create FBO to store speed");
+			error("Fail to create FBO to store speed display");
 			goto label_exit;
 		}
 
@@ -840,6 +847,17 @@ int main(int argc, char* argv[]) {
 		gl_drawStart();
 		char winTitle[200];
 
+		const uint robin2[2] = {
+			(uint)(frameCnt - 0) & (uint)1,
+			(uint)(frameCnt - 1) & (uint)1
+		};
+		const uint robin4[4] = {
+			(uint)(frameCnt - 0) & (uint)3,
+			(uint)(frameCnt - 1) & (uint)3,
+			(uint)(frameCnt - 2) & (uint)3,
+			(uint)(frameCnt - 3) & (uint)3
+		};
+
 		const unsigned int current = (unsigned int)frameCnt & (unsigned int)0b1 ? 1 : 0; //Front
 		const unsigned int previous = 1 - current; //Back
 		const unsigned int current_obj = frameCnt % arrayLength(fb_object);
@@ -965,7 +983,7 @@ int main(int argc, char* argv[]) {
 			/* Sample measure result, get single point */ {
 				gl_program_use(&program_sample.pid);
 				gl_texture_bind(&fb_stageB.tex, program_sample.src, 0);
-				gl_frameBuffer_bind(&fb_speed.fbo, gl_frameBuffer_clearColor);
+				gl_frameBuffer_bind(&fb_speed[ robin4[0] ].fbo, gl_frameBuffer_clearColor);
 				gl_mesh_draw(&mesh_persp, 0, 0);
 			}
 
@@ -984,11 +1002,13 @@ int main(int argc, char* argv[]) {
 				* The size of speedometer mesh, the result of CPU processing, is not large. We do not need to add another stage of pipeline for the uploaidng. 
 				*/
 
+				uint64_t t1 = 0;
+
 				if (frameCnt) { //Do not process frame 0: no history data
 					#ifdef USE_PBO_DOWNLOAD
-						gl_synchWait(pboDownloadSynch, GL_SYNCH_TIMEOUT);
-						gl_synchDelete(pboDownloadSynch);
-						speedData = gl_pixelBuffer_downloadFinish(sizeData[0] * sizeData[1] * 2 * sizeof(float));
+//						gl_synchWait(pboDownloadSynch, GL_SYNCH_TIMEOUT);
+//						gl_synchDelete(pboDownloadSynch);
+						speedData = gl_pixelBuffer_downloadFinish(sizeData[0] * sizeData[1] * sizeof(speedData[0][0]));
 					#endif
 					analysisObj* objPtr = speedAnalysisObj;
 					float* instancePtr = instance_speedometer_data;
@@ -1024,7 +1044,6 @@ int main(int argc, char* argv[]) {
 
 					int objCnt = SHADER_SPEEDOMETER_CNT - limit;
 					gl_instance_update(&instance_speedometer, 0, objCnt * 3 * sizeof(float), instance_speedometer_data);
-					gl_rsync(); //Request process immediately
 					gl_frameBuffer_bind(&fb_display.fbo, gl_frameBuffer_clearColor);
 					if (objCnt) {
 						gl_program_use(&program_display.pid);
@@ -1035,13 +1054,18 @@ int main(int argc, char* argv[]) {
 							fprintf(stdout, "O S %.2f : R %.2f,%.2f : S %u,%u : dy %d\n", ptr->speed, ptr->rx, ptr->ry, ptr->sx, ptr->sy, ptr->sy - ptr->osy);
 					}
 				}
+				
+				t1 = nanotime();
 
 				#ifdef USE_PBO_DOWNLOAD
-					gl_pixelBuffer_downloadStart(&pboDownload, &fb_speed.fbo, fb_speed.format, 0, zeros, sizeData);
-					pboDownloadSynch = gl_synchSet();
+					gl_pixelBuffer_downloadStart(&pboDownload, &fb_speed[ robin4[FB_SPEED_LATENCY] ].fbo, fb_speed->format, 0, zeros, sizeData); //Format is same in all FBO in the array
+//					pboDownloadSynch = gl_synchSet();
 				#else
-					gl_frameBuffer_download(speedData, &fb_speed.fbo, fb_speed.format, 0, zeros, sizeData); //Download current speed data so we can process in next iteration (blocking op)
+					gl_frameBuffer_download(speedData, &fb_speed[ robin4[FB_SPEED_LATENCY] ].fbo, fb_speed->format, 0, zeros, sizeData); //Download current speed data so we can process in next iteration (blocking op)
 				#endif
+
+				uint64_t t2 = nanotime();
+				info("%"PRIu64, t2 - t1);
 
 			}
 
@@ -1049,7 +1073,7 @@ int main(int argc, char* argv[]) {
 //			#define RESULT fb_stageB
 //			#define RESULT fb_raw[current]
 //			#define RESULT fb_object[current_obj]
-//			#define RESULT fb_speed
+//			#define RESULT fb_speed[ robin4[0] ]
 			#define RESULT fb_display
 #endif /* #ifdef ROADMAP_CHECK */
 
@@ -1122,8 +1146,10 @@ label_exit:
 	gl_frameBuffer_delete(&fb_stageA.fbo);
 	gl_texture_delete(&fb_display.tex);
 	gl_frameBuffer_delete(&fb_display.fbo);
-	gl_texture_delete(&fb_speed.tex);
-	gl_frameBuffer_delete(&fb_speed.fbo);
+	for (uint i = arrayLength(fb_speed); i; i--) {
+		gl_texture_delete(&fb_speed[i-1].tex);
+		gl_frameBuffer_delete(&fb_speed[i-1].fbo);
+	}
 	for (unsigned int i = arrayLength(fb_object); i; i--) {
 		gl_texture_delete(&fb_object[i-1].tex);
 		gl_frameBuffer_delete(&fb_object[i-1].fbo);
@@ -1136,10 +1162,11 @@ label_exit:
 	gl_mesh_delete(&mesh_final);
 
 	free(speedAnalysisObj);
-	free(speedData);
 	#ifdef USE_PBO_DOWNLOAD
 		gl_pixelBuffer_delete(&pboDownload);
-		gl_synchDelete(pboDownloadSynch);
+//		gl_synchDelete(pboDownloadSynch);
+	#else
+		free(speedData);
 	#endif
 
 	gl_mesh_delete(&mesh_display);

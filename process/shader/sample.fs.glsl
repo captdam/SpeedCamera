@@ -1,5 +1,5 @@
 in highp vec2 pxPos;
-out mediump vec2 result; //Data: vec2(speed, target_yCoord)
+out lowp vec2 result; //Data: vec2(speed, target_yCoord), resolution is 1/256
 #define CH_ROADDISTANCE x
 #define CH_TARGETYCOORD y
 
@@ -67,5 +67,5 @@ void main() {
 		}
 	}
 
-	result = res;
+	result = res / 256.0f; //Normalize to RB8 format [0,1]
 }
