@@ -7,21 +7,19 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <signal.h>
-#include <pthread.h>
-#include <semaphore.h>
 
 #include "common.h"
 #include "gl.h"
 #include "roadmap.h"
 #include "speedometer.h"
+#include "th_reader.h"
 
 /* Program config */
 #define MAX_SPEED 200 //km/h
-#define FIFONAME "tmpframefifo.data" //Video input stream
 #define GL_SYNCH_TIMEOUT 5000000000LLU //For gl sync timeout
 
 /* Debug time delay */
-#define FRAME_DELAY 0 //(50 * 1000)
+#define FRAME_DELAY (50 * 1000)
 #define FRAME_DEBUGSKIPSECOND 0
 
 /* Speed avg */
@@ -47,264 +45,12 @@
 volatile char debug_threadSpeed = ' '; //Which thread takes longer
 #endif
 
-/* Video data upload to GPU */
-//#define USE_PBO_UPLOAD
+/* Video data upload to GPU and processed data download to CPU */
+//#define USE_PBO_UPLOAD //Not big gain: uploading is asynch op, driver will copy data to internal buffer tand then upload
+#define USE_PBO_DOWNLOAD //Big gain: download is synch op 
 
 #define info(format, ...) {fprintf(stderr, "Log:\t"format"\n" __VA_OPT__(,) __VA_ARGS__);} //Write log
 #define error(format, ...) {fprintf(stderr, "Err:\t"format"\n" __VA_OPT__(,) __VA_ARGS__);} //Write error log
-
-/* -- Reader thread ------------------------------------------------------------------------- */
-
-#define BLOCKSIZE 64 //Height and width are multiple of 8, so frame size is multiple of 64. Read a block (64px) at once can increase performance
-
-struct {
-	//Interface - Main thread side
-	pthread_t tid; //Reader thread ID
-	sem_t sem_readerStart; //Fired by main thread: when pointer to pbo is ready, reader can begin to upload
-	sem_t sem_readerDone; //Fired by reader thread: when uploading is done, main thread can use
-	volatile void volatile* rawDataPtr; //Video raw data goes here. Main thread write pointer here, reader thread put data into this address
-	int valid : 1;
-	//Private - For reader thread function param passing
-	struct { unsigned int r, g, b, a; } colorChannel; //Private, for reader read function
-	unsigned int blockCnt; //Private, for reader read function
-	FILE* fp; //Private, for reader read function
-} th_reader_mangment = { .valid = 0, .rawDataPtr = NULL, .fp = NULL };
-
-struct th_reader_arg {
-	unsigned int size; //Number of pixels in one frame
-	const char* colorScheme; //Color scheme of the input raw data (numberOfChannel[1,3or4],orderOfChannelRGBA)
-};
-
-
-void* th_reader(void* arg); //Reader thread private function - reader thread
-int th_reader_readLuma(); //Reader thread private function - read luma video
-int th_reader_readRGB(); //Reader thread private function - read RGB video
-int th_reader_readRGBA(); //Reader thread private function - read RGBA video
-int th_reader_readRGBADirect();//Reader thread private function - read RGBA video with channel = RGBA (in order)
-
-/** Reader thread init.
- * Prepare semaphores, launch thread. 
- * @param size Size of video in px
- * @param colorScheme A string represents the color format
- * @param statue If not NULL, return error message in case this function fail
- * @param ecode If not NULL, return error code in case this function fail
- * @return If success, return 1; if fail, release all resources and return 0
- */
-int th_reader_init(const unsigned int size, const char* colorScheme, char** statue, int* ecode) {
-	if (sem_init(&th_reader_mangment.sem_readerStart, 0, 0)) {
-		if (ecode)
-			*ecode = errno;
-		if (statue)
-			*statue = "Fail to create main-reader master semaphore";
-		return 0;
-	}
-
-	if (sem_init(&th_reader_mangment.sem_readerDone, 0, 0)) {
-		if (ecode)
-			*ecode = errno;
-		if (statue)
-			*statue = "Fail to create main-reader secondary semaphore";
-		sem_destroy(&th_reader_mangment.sem_readerStart);
-		return 0;
-	}
-
-	pthread_attr_t attr;
-	pthread_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-	struct th_reader_arg arg = {.size = size, .colorScheme = colorScheme};
-	int err = pthread_create(&th_reader_mangment.tid, &attr, th_reader, &arg);
-	if (err) {
-		if (ecode)
-			*ecode = err;
-		if (statue)
-			*statue = "Fail to create thread";
-		sem_destroy(&th_reader_mangment.sem_readerDone);
-		sem_destroy(&th_reader_mangment.sem_readerStart);
-		return 0;
-	}
-	sem_wait(&th_reader_mangment.sem_readerStart); //Wait for the thread start. Prevent this function return before thread ready
-
-	th_reader_mangment.valid = 1;
-	return 1;
-}
-
-/** Call this function when the main thread issue new address for video uploading. 
- * Reader will begin data uploading after this call. 
- * @param addr Address to upload video data
- */
-void th_reader_start(void* addr) {
-	th_reader_mangment.rawDataPtr = addr;
-	sem_post(&th_reader_mangment.sem_readerStart);
-}
-
-/** Call this function to block the main thread until reader thread finishing video reading. 
- */
-void th_reader_wait() {
-	sem_wait(&th_reader_mangment.sem_readerDone);
-}
-
-/** Terminate reader thread and release associate resources
- */
-void th_reader_destroy() {
-	if (!th_reader_mangment.valid--)
-		return;
-	
-	pthread_cancel(th_reader_mangment.tid);
-	pthread_join(th_reader_mangment.tid, NULL);
-
-	sem_destroy(&th_reader_mangment.sem_readerDone);
-	sem_destroy(&th_reader_mangment.sem_readerStart);
-}
-
-void* th_reader(void* arg) {
-	struct th_reader_arg* this = arg;
-	unsigned int size = this->size;
-	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
-	int (*readFunction)();
-
-	info("[Reader] Frame size: %u pixels. Number of color channel: %c", size, this->colorScheme[0]);
-
-	if (this->colorScheme[1] != '\0') {
-		th_reader_mangment.colorChannel.r = this->colorScheme[1] - '0';
-		if (this->colorScheme[2] != '\0') {
-			th_reader_mangment.colorChannel.g = this->colorScheme[2] - '0';
-			if (this->colorScheme[3] != '\0') {
-				th_reader_mangment.colorChannel.b = this->colorScheme[3] - '0';
-				if (this->colorScheme[4] != '\0')
-					th_reader_mangment.colorChannel.a = this->colorScheme[4] - '0';
-			}
-		}
-	}
-	if (this->colorScheme[0] == '1') {
-		info("[Reader] Color scheme: RGB = idx0, A = 0xFF");
-		th_reader_mangment.blockCnt = size / BLOCKSIZE;
-		readFunction = th_reader_readLuma;
-	} else if (this->colorScheme[0] == '3') {
-		info("[Reader] Color scheme: R = idx%d, G = idx%d, B = idx%d, A = 0xFF", th_reader_mangment.colorChannel.r, th_reader_mangment.colorChannel.g, th_reader_mangment.colorChannel.b);
-		th_reader_mangment.blockCnt = size / BLOCKSIZE;
-		readFunction = th_reader_readRGB;
-	} else {
-		info("[Reader] Color scheme: R = idx%d, G = idx%d, B = idx%d, A = idx%d", th_reader_mangment.colorChannel.r, th_reader_mangment.colorChannel.g, th_reader_mangment.colorChannel.b, th_reader_mangment.colorChannel.a);
-		if (th_reader_mangment.colorChannel.r != 0 || th_reader_mangment.colorChannel.g != 1 || th_reader_mangment.colorChannel.b != 2 || th_reader_mangment.colorChannel.a != 3) {
-			th_reader_mangment.blockCnt = size / BLOCKSIZE;
-			readFunction = th_reader_readRGBA;
-		} else {
-			readFunction = th_reader_readRGBADirect;
-			th_reader_mangment.blockCnt = size;
-		}
-	}
-
-	unlink(FIFONAME); //Delete if exist
-	if (mkfifo(FIFONAME, 0777) == -1) {
-		error("[Reader] Fail to create FIFO '"FIFONAME"' (errno = %d)", errno);
-		return NULL;
-	}
-
-	info("[Reader] Ready. FIFO '"FIFONAME"' can accept frame data now"); //Ready
-	sem_post(&th_reader_mangment.sem_readerStart); //Unblock the main thread
-
-	th_reader_mangment.fp = fopen(FIFONAME, "rb"); //Stall until some data writed into FIFO
-	if (!th_reader_mangment.fp) {
-		error("[Reader] Fail to open FIFO '"FIFONAME"' (errno = %d)", errno);
-		unlink(FIFONAME);
-		return NULL;
-	}
-	info("[Reader] FIFO '"FIFONAME"' data received");
-
-	int cont = 1;
-	while (cont) {
-		sem_wait(&th_reader_mangment.sem_readerStart); //Wait until main thread issue new memory address for next frame
-
-		if (!readFunction())
-			cont = 0;
-
-		#ifdef DEBUG_THREADSPEED
-			debug_threadSpeed = 'R';
-		#endif
-		
-		sem_post(&th_reader_mangment.sem_readerDone); //Uploading done, allow main thread to use it
-	}
-
-	fclose(th_reader_mangment.fp);
-	unlink(FIFONAME);
-	info("[Reader] End of file or broken pipe! Please close the viewer window to terminate the program");
-
-	while (1) { //Send dummy data to keep the main thread running
-		sem_wait(&th_reader_mangment.sem_readerStart); //Wait until main thread issue new memory address for next frame
-		
-		memset((void*)th_reader_mangment.rawDataPtr, 0, size * 4);
-
-		#ifdef DEBUG_THREADSPEED
-			debug_threadSpeed = 'R';
-		#endif
-
-		sem_post(&th_reader_mangment.sem_readerDone); //Uploading done, allow main thread to use it
-	}
-
-	return NULL;
-}
-
-int th_reader_readLuma() {
-	uint8_t* dest = (uint8_t*)th_reader_mangment.rawDataPtr;
-	uint8_t luma[BLOCKSIZE];
-	for (unsigned int i = th_reader_mangment.blockCnt; i; i--) { //Block count = frame size / block size
-		if (!fread(luma, 1, BLOCKSIZE, th_reader_mangment.fp)) {
-			return 0; //Fail to read, or end of file
-		}
-		for (uint8_t* p = luma; p < luma + BLOCKSIZE; p++) {
-			*(dest++) = *p; //R
-			*(dest++) = *p; //G
-			*(dest++) = *p; //B
-			*(dest++) = 0xFF; //A
-		}
-	}
-	return 1;
-}
-
-int th_reader_readRGB() {
-	uint8_t* dest = (uint8_t*)th_reader_mangment.rawDataPtr;
-	uint8_t rgb[BLOCKSIZE * 3];
-	for (unsigned int i = th_reader_mangment.blockCnt; i; i--) {
-		if (!fread(rgb, 3, BLOCKSIZE, th_reader_mangment.fp)) {
-			return 0;
-		}
-		for (uint8_t* p = rgb; p < rgb + BLOCKSIZE * 3; p += 3) {
-			*(dest++) = p[th_reader_mangment.colorChannel.r]; //R
-			*(dest++) = p[th_reader_mangment.colorChannel.g]; //G
-			*(dest++) = p[th_reader_mangment.colorChannel.b]; //B
-			*(dest++) = 0xFF; //A
-		}
-	}
-	return 1;
-}
-
-int th_reader_readRGBA() {
-	uint8_t* dest = (uint8_t*)th_reader_mangment.rawDataPtr;
-	uint8_t rgba[BLOCKSIZE * 4];
-	for (unsigned int i = th_reader_mangment.blockCnt; i; i--) {
-		if (!fread(rgba, 4, BLOCKSIZE, th_reader_mangment.fp)) {
-			return 0;
-		}
-		for (uint8_t* p = rgba; p < rgba + BLOCKSIZE * 4; p += 4) {
-			*(dest++) = p[th_reader_mangment.colorChannel.r]; //R
-			*(dest++) = p[th_reader_mangment.colorChannel.g]; //G
-			*(dest++) = p[th_reader_mangment.colorChannel.b]; //B
-			*(dest++) = p[th_reader_mangment.colorChannel.a]; //A
-		}
-	}
-	return 1;
-}
-
-int th_reader_readRGBADirect() {
-	if (!fread((void*)th_reader_mangment.rawDataPtr, 4, th_reader_mangment.blockCnt, th_reader_mangment.fp)) //Block count = frame size / block size
-		return 0;
-	return 1;
-}
-
-#undef BLOCKSIZE
-
-/* -- Main thread --------------------------------------------------------------------------- */
 
 int main(int argc, char* argv[]) {
 	const unsigned int zeros[4] = {0, 0, 0, 0}; //Zero array with 4 elements (can be used as zeros[1], zeros[2] or zeros[3] as well, it is just a pointer in C)
@@ -362,7 +108,7 @@ int main(int argc, char* argv[]) {
 
 	//PBO or memory space for orginal video raw data uploading, and textures to store orginal video data
 	#ifdef USE_PBO_UPLOAD
-		gl_pbo pbo[2] = {GL_INIT_DEFAULT_PBO, GL_INIT_DEFAULT_PBO};
+		gl_pbo pboUpload[2] = {GL_INIT_DEFAULT_PBO, GL_INIT_DEFAULT_PBO};
 	#else
 		void* rawData[2] = {NULL, NULL};
 	#endif
@@ -382,13 +128,17 @@ int main(int argc, char* argv[]) {
 	} road_geoMap = {.map = NULL};
 
 	//To display human readable text on screen
-	gl_tex texture_speedometer = GL_INIT_DEFAULT_TEX;
-	float* instance_speedometer_data = NULL;
+	gl_tex texture_speedometer = GL_INIT_DEFAULT_TEX; //Glyph
+	float* instance_speedometer_data = NULL; //Speed data to be draw (sx, sy, speed)
 	gl_instance instance_speedometer = GL_INIT_DEFAULT_INSTANCE;
 	gl_mesh mesh_display = GL_INIT_DEFAULT_MESH;
 
 	//Analysis and export data (CPU side)
 	float (* speedData)[sizeData[0]][2] = NULL; //FBO download, height(sizeData[1]) * width(sizeData[0]) * Channel(2)
+	#ifdef USE_PBO_DOWNLOAD
+		gl_synch pboDownloadSynch = NULL;
+		gl_pbo pboDownload = GL_INIT_DEFAULT_PBO;
+	#endif
 	typedef struct AnalysisObject {
 		float rx, ry; //Road- and screen-domain coord of current frame
 		unsigned int sx, sy;
@@ -514,7 +264,7 @@ int main(int argc, char* argv[]) {
 		info("Init openGL...");
 		if (!gl_init((gl_config){
 			.vMajor = 3,
-			.vMinor = 2,
+			.vMinor = 1,
 			.gles = 1,
 			.winWidth = sizeData[0], .winHeight = sizeData[1],
 			.winName = "Viewer"
@@ -527,9 +277,9 @@ int main(int argc, char* argv[]) {
 	/* Use a texture to store raw frame data & Start reader thread */ {
 		info("Prepare video upload buffer...");
 		#ifdef USE_PBO_UPLOAD
-			pbo[0] = gl_pixelBuffer_create(sizeData[0] * sizeData[1] * 4, gl_usage_stream); //Always use RGBA8 (good performance)
-			pbo[1] = gl_pixelBuffer_create(sizeData[0] * sizeData[1] * 4, gl_usage_stream);
-			if ( !gl_pixelBuffer_check(&(pbo[0])) || !gl_pixelBuffer_check(&(pbo[1])) ) {
+			pboUpload[0] = gl_pixelBuffer_create(sizeData[0] * sizeData[1] * 4, 0, gl_usage_stream); //Always use RGBA8 (good performance)
+			pboUpload[1] = gl_pixelBuffer_create(sizeData[0] * sizeData[1] * 4, 0, gl_usage_stream);
+			if ( !gl_pixelBuffer_check(&(pboUpload[0])) || !gl_pixelBuffer_check(&(pboUpload[1])) ) {
 				error("Fail to create pixel buffers for orginal frame data uploading");
 				goto label_exit;
 			}
@@ -668,11 +418,19 @@ int main(int argc, char* argv[]) {
 	}
 
 	/* Create buffer for post process on CPU side */ {
-		speedData = malloc(sizeData[0] * sizeData[1] * 2 * sizeof(float)); //FBO dump
-		if (!speedData) {
-			error("Fail to create buffer to download speed framebuffer");
-			goto label_exit;
-		}
+		#ifdef USE_PBO_DOWNLOAD
+			pboDownload = gl_pixelBuffer_create(sizeData[0] * sizeData[1] * 2 * sizeof(float), 1, gl_usage_stream);
+			if (!gl_pixelBuffer_check(&pboDownload)) {
+				error("Fail to create pixel buffer for speed downloading");
+				goto label_exit;
+			}
+		#else
+			speedData = malloc(sizeData[0] * sizeData[1] * 2 * sizeof(float)); //FBO dump
+			if (!speedData) {
+				error("Fail to create buffer to download speed framebuffer");
+				goto label_exit;
+			}
+		#endif
 		speedAnalysisObj = malloc(SHADER_SPEEDOMETER_CNT * sizeof(analysisObj));
 		if (!speedAnalysisObj) {
 			error("Fail to create buffer to store analysis objects");
@@ -1079,7 +837,8 @@ int main(int argc, char* argv[]) {
 	
 	/* Main process loop here */
 	while(!gl_close(-1)) {
-		if (frameCnt > 500) break;
+		gl_drawStart();
+		char winTitle[200];
 
 		const unsigned int current = (unsigned int)frameCnt & (unsigned int)0b1 ? 1 : 0; //Front
 		const unsigned int previous = 1 - current; //Back
@@ -1095,8 +854,8 @@ int main(int argc, char* argv[]) {
 			/* Asking the read thread to upload next frame while the main thread processing current frame */ {
 				void* addr;
 				#ifdef USE_PBO_UPLOAD
-					gl_pixelBuffer_updateToTexture(&pbo[current], &texture_orginalBuffer[previous]);
-					addr = gl_pixelBuffer_updateStart(&pbo[previous], sizeData[0] * sizeData[1] * 4);
+					gl_pixelBuffer_updateToTexture(&pboUpload[current], &texture_orginalBuffer[previous]);
+					addr = gl_pixelBuffer_updateStart(&pboUpload[previous], sizeData[0] * sizeData[1] * 4);
 				#else
 					gl_texture_update(&texture_orginalBuffer[previous], rawData[current], zeros, sizeData);
 					addr = rawData[previous];
@@ -1150,7 +909,7 @@ int main(int argc, char* argv[]) {
 				gl_program_use(&program_changingSensor.pid);
 				gl_texture_bind(&fb_raw[current].tex, program_changingSensor.current, 0);
 				gl_texture_bind(&fb_raw[previous].tex, program_changingSensor.previous, 1);
-				gl_frameBuffer_bind(&fb_stageA.fbo, 1);
+				gl_frameBuffer_bind(&fb_stageA.fbo, gl_frameBuffer_clearColor);
 				gl_mesh_draw(&mesh_persp, 0, 0);
 			}
 
@@ -1158,13 +917,13 @@ int main(int argc, char* argv[]) {
 				gl_program_use(&program_objectFix[0].pid);
 				gl_texture_bind(&fb_stageA.tex, program_objectFix[0].src, 0);
 				gl_texture_bind(&texture_roadmap1, program_objectFix[0].roadmapT1, 1);
-				gl_frameBuffer_bind(&fb_stageB.fbo, 1);
+				gl_frameBuffer_bind(&fb_stageB.fbo, gl_frameBuffer_clearColor);
 				gl_mesh_draw(&mesh_persp, 0, 0);
 
 				gl_program_use(&program_objectFix[1].pid);
 				gl_texture_bind(&fb_stageB.tex, program_objectFix[1].src, 0);
 				gl_texture_bind(&texture_roadmap1, program_objectFix[1].roadmapT1, 1);
-				gl_frameBuffer_bind(&fb_stageA.fbo, 1);
+				gl_frameBuffer_bind(&fb_stageA.fbo, gl_frameBuffer_clearColor);
 				gl_mesh_draw(&mesh_persp, 0, 0);
 			}
 
@@ -1172,7 +931,7 @@ int main(int argc, char* argv[]) {
 				gl_program_use(&program_edgeRefine.pid);
 				gl_texture_bind(&fb_stageA.tex, program_edgeRefine.src, 0);
 				gl_texture_bind(&texture_roadmap1, program_edgeRefine.roadmapT1, 1);
-				gl_frameBuffer_bind(&fb_stageB.fbo, 1);
+				gl_frameBuffer_bind(&fb_stageB.fbo, gl_frameBuffer_clearColor);
 				gl_mesh_draw(&mesh_persp, 0, 0);
 			}
 
@@ -1180,7 +939,7 @@ int main(int argc, char* argv[]) {
 				gl_program_use(&program_projectP2O.pid);
 				gl_texture_bind(&fb_stageB.tex, program_projectP2O.src, 0);
 				gl_texture_bind(&texture_roadmap2, program_projectP2O.roadmapT2, 1);
-				gl_frameBuffer_bind(&fb_object[current_obj].fbo, 1);
+				gl_frameBuffer_bind(&fb_object[current_obj].fbo, gl_frameBuffer_clearColor);
 				gl_mesh_draw(&mesh_ortho, 0, 0);
 			}
 
@@ -1191,7 +950,7 @@ int main(int argc, char* argv[]) {
 				gl_texture_bind(&fb_object[previous_obj].tex, program_measure.previous, 2);
 				gl_texture_bind(&texture_roadmap1, program_measure.roadmapT1, 3);
 				gl_texture_bind(&texture_roadmap2, program_measure.roadmapT2, 4);
-				gl_frameBuffer_bind(&fb_stageA.fbo, 1);
+				gl_frameBuffer_bind(&fb_stageA.fbo, gl_frameBuffer_clearColor);
 				gl_mesh_draw(&mesh_ortho, 0, 0);
 			}
 
@@ -1199,14 +958,14 @@ int main(int argc, char* argv[]) {
 				gl_program_use(&program_projectO2P.pid);
 				gl_texture_bind(&fb_stageA.tex, program_projectO2P.src, 0);
 				gl_texture_bind(&texture_roadmap2, program_projectO2P.roadmapT2, 1);
-				gl_frameBuffer_bind(&fb_stageB.fbo, 1);
+				gl_frameBuffer_bind(&fb_stageB.fbo, gl_frameBuffer_clearColor);
 				gl_mesh_draw(&mesh_persp, 0, 0);
 			}
 
 			/* Sample measure result, get single point */ {
 				gl_program_use(&program_sample.pid);
 				gl_texture_bind(&fb_stageB.tex, program_sample.src, 0);
-				gl_frameBuffer_bind(&fb_speed.fbo, 1);
+				gl_frameBuffer_bind(&fb_speed.fbo, gl_frameBuffer_clearColor);
 				gl_mesh_draw(&mesh_persp, 0, 0);
 			}
 
@@ -1225,46 +984,65 @@ int main(int argc, char* argv[]) {
 				* The size of speedometer mesh, the result of CPU processing, is not large. We do not need to add another stage of pipeline for the uploaidng. 
 				*/
 
-				analysisObj* objPtr = speedAnalysisObj;
-				float* instancePtr = instance_speedometer_data;
-				int limit = SHADER_SPEEDOMETER_CNT;
-				unsigned int edgeTop = road_focusRegionBox.top * sizeData[1], edgeBottom = road_focusRegionBox.bottom * sizeData[1];
-				unsigned int edgeLeft = road_focusRegionBox.left * sizeData[0], edgeRight = road_focusRegionBox.right * sizeData[0];
-				for (unsigned int y = edgeTop; y <= edgeBottom && limit; y++) { //Get number speed data from downloaded framebuffer
-					for (unsigned int x = edgeLeft; x <= edgeRight && limit; x++) {
-						float speed = speedData[y][x][0];
-						if (speed >= 1.0 && speed <= 255.0) {
-							vec2 coordNorm = { (float)x / sizeData[0] , (float)y / sizeData[1] };
-							ivec2 coordScreen = {x,y};
-							ivec2 coordRoadmap = { x * road_geoMap.width / sizeData[0] , y * road_geoMap.height / sizeData[1] };
-							roadmap_t1 geoData = road_geoMap.map[ coordRoadmap.y * road_geoMap.width + coordRoadmap.x ];
-							*objPtr++ = (analysisObj){
-								.rx = geoData.px,
-								.ry = geoData.py,
-								.sx = coordScreen.x,
-								.sy = coordScreen.y,
-								.speed = speed,
-								.osy = speedData[y][x][1]
-							};
-							*instancePtr++ = coordNorm.x;
-							*instancePtr++ = coordNorm.y;
-							*instancePtr++ = speed;
-							limit--;
+				if (frameCnt) { //Do not process frame 0: no history data
+					#ifdef USE_PBO_DOWNLOAD
+						gl_synchWait(pboDownloadSynch, GL_SYNCH_TIMEOUT);
+						gl_synchDelete(pboDownloadSynch);
+						speedData = gl_pixelBuffer_downloadFinish(sizeData[0] * sizeData[1] * 2 * sizeof(float));
+					#endif
+					analysisObj* objPtr = speedAnalysisObj;
+					float* instancePtr = instance_speedometer_data;
+					int limit = SHADER_SPEEDOMETER_CNT;
+					unsigned int edgeTop = road_focusRegionBox.top * sizeData[1], edgeBottom = road_focusRegionBox.bottom * sizeData[1];
+					unsigned int edgeLeft = road_focusRegionBox.left * sizeData[0], edgeRight = road_focusRegionBox.right * sizeData[0];
+					for (unsigned int y = edgeTop; y <= edgeBottom && limit; y++) { //Get number speed data from downloaded framebuffer
+						for (unsigned int x = edgeLeft; x <= edgeRight && limit; x++) {
+							float speed = speedData[y][x][0];
+							if (speed >= 1.0 && speed <= 255.0) {
+								vec2 coordNorm = { (float)x / sizeData[0] , (float)y / sizeData[1] };
+								ivec2 coordScreen = {x,y};
+								ivec2 coordRoadmap = { x * road_geoMap.width / sizeData[0] , y * road_geoMap.height / sizeData[1] };
+								roadmap_t1 geoData = road_geoMap.map[ coordRoadmap.y * road_geoMap.width + coordRoadmap.x ];
+								*objPtr++ = (analysisObj){
+									.rx = geoData.px,
+									.ry = geoData.py,
+									.sx = coordScreen.x,
+									.sy = coordScreen.y,
+									.speed = speed,
+									.osy = speedData[y][x][1]
+								};
+								*instancePtr++ = coordNorm.x;
+								*instancePtr++ = coordNorm.y;
+								*instancePtr++ = speed;
+								limit--;
+							}
 						}
 					}
+					#ifdef USE_PBO_DOWNLOAD
+						gl_pixelBuffer_downloadDiscard();
+					#endif
+
+					int objCnt = SHADER_SPEEDOMETER_CNT - limit;
+					gl_instance_update(&instance_speedometer, 0, objCnt * 3 * sizeof(float), instance_speedometer_data);
+					gl_rsync(); //Request process immediately
+					gl_frameBuffer_bind(&fb_display.fbo, gl_frameBuffer_clearColor);
+					if (objCnt) {
+						gl_program_use(&program_display.pid);
+						gl_texture_bind(&texture_speedometer, program_display.glyphmap, 0);
+						gl_mesh_draw(&mesh_display, 0, objCnt);
+						fprintf(stdout, "F %u : %u\n", frameCnt-1, objCnt);
+						for (analysisObj* ptr = speedAnalysisObj; ptr < speedAnalysisObj + objCnt; ptr++)
+							fprintf(stdout, "O S %.2f : R %.2f,%.2f : S %u,%u : dy %d\n", ptr->speed, ptr->rx, ptr->ry, ptr->sx, ptr->sy, ptr->sy - ptr->osy);
+					}
 				}
-				int objCnt = SHADER_SPEEDOMETER_CNT - limit;
-				gl_instance_update(&instance_speedometer, 0, objCnt * 3 * sizeof(float), instance_speedometer_data);
-				gl_rsync(); //Request process immediately
-				gl_frameBuffer_bind(&fb_display.fbo, 1);
-				if (objCnt) {
-					gl_program_use(&program_display.pid);
-					gl_texture_bind(&texture_speedometer, program_display.glyphmap, 0);
-					gl_mesh_draw(&mesh_display, 0, objCnt);
-					fprintf(stdout, "F %u : %u\n", frameCnt-1, objCnt);
-					for (analysisObj* ptr = speedAnalysisObj; ptr < speedAnalysisObj + objCnt; ptr++)
-						fprintf(stdout, "O S %.2f : R %.2f,%.2f : S %u,%u : dy %d\n", ptr->speed, ptr->rx, ptr->ry, ptr->sx, ptr->sy, ptr->sy - ptr->osy);
-				}
+
+				#ifdef USE_PBO_DOWNLOAD
+					gl_pixelBuffer_downloadStart(&pboDownload, &fb_speed.fbo, fb_speed.format, 0, zeros, sizeData);
+					pboDownloadSynch = gl_synchSet();
+				#else
+					gl_frameBuffer_download(speedData, &fb_speed.fbo, fb_speed.format, 0, zeros, sizeData); //Download current speed data so we can process in next iteration (blocking op)
+				#endif
+
 			}
 
 //			#define RESULT fb_stageA
@@ -1283,27 +1061,22 @@ int main(int argc, char* argv[]) {
 				gl_frameBuffer_bind(NULL, 0);
 				gl_mesh_draw(&mesh_final, 0, 0);
 			}
-			
-			gl_frameBuffer_download(&fb_speed.fbo, speedData, fb_speed.format, 0, zeros, sizeData); //Blocking, wait the GPU prepare the speed data of current frame
-			/* This blocking cmd is also a synch point */
 
 			#ifdef DEBUG_THREADSPEED
 				debug_threadSpeed = 'M'; //Not critical, no need to use mutex
 			#endif
 
-			char title[100];
 			#ifdef VERBOSE_TIME
 				uint64_t timestampRenderEnd = nanotime();
 				#ifdef DEBUG_THREADSPEED
-					snprintf(title, sizeof(title), "Viewer - frame %u - %c - %.3lf/%.3lf", frameCnt, debug_threadSpeed, (timestampRenderEnd - timestampRenderStart) / (double)1e6, (timestampRenderEnd - timestamp) / (double)1e6);
+					snprintf(winTitle, sizeof(winTitle), "Viewer - frame %u - %c - %.3lf/%.3lf", frameCnt, debug_threadSpeed, (timestampRenderEnd - timestampRenderStart) / (double)1e6, (timestampRenderEnd - timestamp) / (double)1e6);
 				#else
-					snprintf(title, sizeof(title), "Viewer - frame %u - %.3lf/%.3lf", frameCnt, (timestampRenderEnd - timestampRenderStart) / (double)1e6, (timestampRenderEnd - timestamp) / (double)1e6);
+					snprintf(winTitle, sizeof(winTitle), "Viewer - frame %u - %.3lf/%.3lf", frameCnt, (timestampRenderEnd - timestampRenderStart) / (double)1e6, (timestampRenderEnd - timestamp) / (double)1e6);
 				#endif
 				timestamp = timestampRenderEnd;
 			#else
-				snprintf(title, sizeof(title), "Viewer - frame %u", frameCnt);
+				snprintf(winTitle, sizeof(winTitle), "Viewer - frame %u", frameCnt);
 			#endif
-			gl_drawEnd(title);
 			
 			th_reader_wait(); //Wait reader thread finish uploading frame data
 			#ifdef USE_PBO_UPLOAD
@@ -1316,13 +1089,13 @@ int main(int argc, char* argv[]) {
 
 			frameCnt++;
 		} else {
-			char title[200];
-			float color[4];
-			gl_frameBuffer_download(&RESULT.fbo, color, RESULT.format, 0, cursorPosData, (const uint[2]){1,1});
-			sprintf(title, "Viewer - frame %u, Cursor=(%d,%d), result=(%.4f|%.4f|%.4f|%.4f)", frameCnt, cursorPosData[0], cursorPosData[1], color[0], color[1], color[2], color[3]);
-			gl_drawEnd(title);
-			usleep(25000);
+		//	float color[4];
+		//	gl_frameBuffer_download(color, &RESULT.fbo, RESULT.format, 0, cursorPosData, (const uint[2]){1,1});
+		//	snprintf(winTitle, sizeof(winTitle), "Viewer - frame %u, Cursor=(%d,%d), result=(%.4f|%.4f|%.4f|%.4f)", frameCnt, cursorPosData[0], cursorPosData[1], color[0], color[1], color[2], color[3]);
+			usleep(50000);
 		}
+
+		gl_drawEnd(winTitle);
 	}
 
 	/* Free all resources, house keeping */
@@ -1364,6 +1137,10 @@ label_exit:
 
 	free(speedAnalysisObj);
 	free(speedData);
+	#ifdef USE_PBO_DOWNLOAD
+		gl_pixelBuffer_delete(&pboDownload);
+		gl_synchDelete(pboDownloadSynch);
+	#endif
 
 	gl_mesh_delete(&mesh_display);
 	gl_instance_delete(&instance_speedometer);
@@ -1381,8 +1158,8 @@ label_exit:
 	gl_texture_delete(&texture_orginalBuffer[1]);
 	gl_texture_delete(&texture_orginalBuffer[0]);
 	#ifdef USE_PBO_UPLOAD
-		gl_pixelBuffer_delete(&pbo[1]);
-		gl_pixelBuffer_delete(&pbo[0]);
+		gl_pixelBuffer_delete(&pboUpload[1]);
+		gl_pixelBuffer_delete(&pboUpload[0]);
 	#else
 		free(rawData[0]);
 		free(rawData[1]);
