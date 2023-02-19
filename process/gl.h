@@ -12,9 +12,10 @@
 
 /** Init config */
 typedef struct GL_Config {
-	unsigned int vMajor : 3;	//OpenGl version major
-	unsigned int vMinor : 3;	//OpenGL version minor
-	unsigned int gles : 1;		//OpenGL-ES (1) or OpenGL (0)
+	uint8_t vMajor;			//OpenGl version major
+	uint8_t vMinor;			//OpenGL version minor
+	uint8_t gles;			//OpenGL-ES (1) or OpenGL (0)
+	uint8_t vsynch;			//Limit FPS to v-synch points
 	uint16_t winWidth, winHeight;	//Window size
 	char* winName;			//Window name
 } gl_config;
@@ -93,24 +94,30 @@ typedef struct GL_ProgramArg {
 
 /* == Mesh (vertices) ======================================================================= */
 
+/** Mesh geometry type */
+typedef unsigned int gl_meshmode;
+#define gl_meshmode_points		((gl_meshmode)0x0000)
+#define gl_meshmode_lines		((gl_meshmode)0x0001)
+#define gl_meshmode_lineLoop		((gl_meshmode)0x0002)
+#define gl_meshmode_lineStrip		((gl_meshmode)0x0003)
+#define gl_meshmode_triangles		((gl_meshmode)0x0004)
+#define gl_meshmode_triangleStrip	((gl_meshmode)0x0005)
+#define gl_meshmode_triangleFan		((gl_meshmode)0x0006)
+//#define gl_meshmode_quads		((gl_meshmode)0x0007)
+//#define gl_meshmode_quadStrip		((gl_meshmode)0x0008)
+//#define gl_meshmode_polygon		((gl_meshmode)0x0009)
+
 /** Geometry objects (mesh) */
 typedef struct GL_Mesh {
-	unsigned int vao, vbo, ebo, ibo;
-	unsigned int drawSize;
-	unsigned int mode;
+	unsigned int vao, vbo; //Vertex array object (the mesh), vertex buffer object (vertices form the mesh)
+	unsigned int ebo, ibo; //Indices buffer object (for indexed draw); Instance object bound to this mesh for instanced draw
+	unsigned int drawSize; //Number of vertices or indices in the mesh
+	gl_meshmode mode;
 } gl_mesh;
 #define GL_INIT_DEFAULT_MESH (gl_mesh){0, 0, 0, 0, 0, 0}
 
 typedef float gl_vertex_t; //Mesh vertices
 typedef unsigned int gl_index_t; //Mesh index
-
-/** Mesh geometry type */
-typedef enum GL_MeshMode {
-	gl_meshmode_points, gl_meshmode_lines, gl_meshmode_triangles, gl_meshmode_triangleFan, gl_meshmode_triangleStrip,
-gl_meshmode_placeholderEnd} gl_meshmode;
-
-typedef unsigned int gl_instance; //Draw instance buffer
-#define GL_INIT_DEFAULT_INSTANCE (gl_instance)0
 
 /* == Texture, PBO for texture transfer and FBO for off-screen rendering ==================== */
 
@@ -130,19 +137,42 @@ typedef enum GL_TexFormat {
 gl_texformat_placeholderEnd} gl_texformat;
 
 /** Texture type */
-typedef enum GL_TexType {
-	gl_textype_2d, gl_textype_3d, gl_textype_2dArray,
-gl_textype_placeholderEnd} gl_textype;
+typedef unsigned int gl_textype;
+#define gl_textype_2d		((gl_textype)0)
+#define gl_textype_3d		((gl_textype)1)
+#define gl_textype_2dArray	((gl_textype)2)
+#define gl_textype_renderBuffer	((gl_textype)10)
 
-/* Texture object */
+/** Texture object */
 typedef struct GL_Texture {
 	unsigned int texture;
 	unsigned int width, height;
 	union { unsigned int depth; unsigned int layer; };
 	gl_texformat format;
-	gl_textype type;
+	gl_textype type : 8;
+	unsigned int mipmap : 1;
 } gl_tex;
-#define GL_INIT_DEFAULT_TEX (gl_tex){0, 0, 0, 0, 0, 0}
+#define GL_INIT_DEFAULT_TEX (gl_tex){0, 0, 0, 0, 0, 0, 0}
+
+/** Texture constructor argument */
+typedef unsigned int gl_tex_dimWrapping;
+#define gl_tex_dimWrapping_repeat	((gl_tex_dimWrapping)0x2901)
+#define gl_tex_dimWrapping_edge		((gl_tex_dimWrapping)0x812F)
+#define gl_tex_dimWrapping_mirrorRepeat	((gl_tex_dimWrapping)0x8370)
+
+typedef unsigned int gl_tex_dimFilter;
+#define gl_tex_dimFilter_nearest		((gl_tex_dimFilter)0x2600)
+#define gl_tex_dimFilter_linear			((gl_tex_dimFilter)0x2601)
+#define gl_tex_dimFilter_nearestMipmapNearest	((gl_tex_dimFilter)0x2700)
+#define gl_tex_dimFilter_linearMipmapNearest	((gl_tex_dimFilter)0x2701)
+#define gl_tex_dimFilter_nearestMipmapLinear	((gl_tex_dimFilter)0x2702)
+#define gl_tex_dimFilter_linearMipmapLinear	((gl_tex_dimFilter)0x2703)
+
+typedef struct GL_Texture_Dim {
+	unsigned int size; //Size in pixel
+	gl_tex_dimWrapping wrapping;
+} gl_tex_dim;
+
 
 /** Pixel buffer object for texture data transfer */
 typedef unsigned int gl_pbo;
@@ -159,9 +189,10 @@ typedef enum GL_FramebufferAttachment {
 } gl_fboattach;
 
 /** Framebuffer clear mask */
-#define gl_frameBuffer_clearColor (1<<0)
-#define gl_frameBuffer_clearDepth (1<<1)
-#define gl_frameBuffer_clearStencil (1<<2)
+#define gl_frameBuffer_clearColor 0x4000
+#define gl_frameBuffer_clearDepth 0x0100
+#define gl_frameBuffer_clearStencil 0x0400
+#define gl_frameBuffer_clearAll 0x4500
 
 /* == Window and driver management ========================================================== */
 
@@ -248,27 +279,27 @@ void gl_synchDelete(const gl_synch s);
  */
 void gl_program_setCommonHeader(const char* const header);
 
-/** Create a shader program. 
- * @param src A list of gl_programSrc indicates the source code. The last gl_programSrc should have a NULL .src to indicate the end of list
+/** Create a shader program from file or memory. 
+ * @param src A string representing the program, use "fDIR" (e.g. "f./myshader.glsl") for file, use "mSRC" (e.g. "m@VS\nlayout...") for in-memory code
  * @param args A list of gl_programArg used to return the ID of each param. The last gl_programArg should have a NULL .name to indicate the end of list
  * @return Shader program
  */
-gl_program gl_program_create(const gl_programSrc* const srcs, gl_programArg* const args);
+gl_program gl_program_load(char* src, gl_programArg* const args);
 
 /** Check a shader program.
- * @param program A shader program previously returned by gl_program_create()
+ * @param program A shader program previously returned by gl_program_load()
  * @return 1 if good, 0 if not
  */
 int gl_program_check(const gl_program* const program);
 
 /** Use a shader program (bind a shader program to current)
- * @param program A shader program previously returned by gl_program_create()
+ * @param program A shader program previously returned by gl_program_load()
  */
 void gl_program_use(const gl_program* const program);
 
 /** Set parameter of the current shader program. 
  * Call gl_program_use() to bind the shader program before set the parameter. 
- * @param paramId ID of parameter previously returned by gl_program_create()
+ * @param paramId ID of parameter previously returned by gl_program_load()
  * @param length Number of vector in a parameter (vecX, can be 1, 2, 3 or 4, use 1 for non-verctor params, e.g. sampler)
  * @param type Type of the data: gl_datatype_*
  * @param data Pointer to the data to be pass
@@ -276,7 +307,7 @@ void gl_program_use(const gl_program* const program);
 void gl_program_setParam(const gl_param paramId, const unsigned int length, const gl_datatype type, const void* data);
 
 /** Delete a shader program, the shader program will be reset to GL_INIT_DEFAULT_SHADER. 
- * @param program A shader program previously returned by gl_program_create()
+ * @param program A shader program previously returned by gl_program_load()
  */
 void gl_program_delete(gl_program* const program);
 
@@ -296,8 +327,8 @@ int gl_uniformBuffer_check(const gl_ubo* const ubo);
 
 /** Bind a shader program's block param to a uniform buffer in the binding point. 
  * @param bindingPoint Binding point to bind, same as the one used with gl_uniformBuffer_create()
- * @param program A shader program previously returned by gl_program_create()
- * @param paramId ID of parameter previously returned by gl_program_create()
+ * @param program A shader program previously returned by gl_program_load()
+ * @param paramId ID of parameter previously returned by gl_program_load()
  */
 void gl_uniformBuffer_bindShader(const unsigned int bindingPoint, const gl_program* const program, const gl_param paramId);
 
@@ -316,51 +347,24 @@ void gl_unifromBuffer_delete(gl_ubo* const ubo);
 
 /* == Mesh (vertices) ======================================================================= */
 
-/** Create an instance buffer for mesh instanced draw. 
- * @param size Size of the buffer in byte
- * @return An instance buffer
- */
-gl_instance gl_instance_create(const unsigned int size, const gl_usage usage);
-
-/** Check an instance buffer. 
- * @param instance An instance buffer previously returned by gl_instance_create()
- * @return 1 if good, 0 if not
- */
-int gl_instance_check(const gl_instance* const instance);
-
-/** Update a portion of instance buffer. 
- * Since in most case the instance array is updated and used immediately, this function will keep the instance binded. Use gl_instance_bind() to rebind or unbind. 
- * @param instance An instance buffer previously returned by gl_instance_create()
- * @param start Starting offset of the update in bytes
- * @param len Length of the update in bytes
- * @param data Pointer to the update data
- */
-void gl_instance_update(const gl_instance* const instance, const unsigned int start, const unsigned int len, const void* const data);
-
-/** Delete an instance buffer. 
- * @param mesh instance An instance buffer previously returned by gl_instance_create()
- */
-void gl_instance_delete(gl_instance* const instance);
-
-/** Create and bind gl_mesh object (geometry). 
- * Each mesh has verticesCount vertices, each vertex has Sigma(elementsSize) of numbers. 
- * The orde of layout location in shader program must be element first, then instance. 
- * @param verticesCount Number of vertices
- * @param indicesCount Number of indices for indexed draw or 0 for direct draw
- * @param elementsSize Array, zero terminated, size of each elements (attribute) in a vertex
- * @param instanceSize Array, zero terminated, size of each elements (attribute) in the instance buffer; pass NULL to disable instance
- * @param vertices The vertice array, leave NULL if no actual data is ready
- * @param indices For indexed draw: the indices array, leave NULL if no actual data is ready
- * @param instance For instance draw, pass the instance array that will be used for this object, ignored if instance draw is disabled
+/** Create and bind gl_mesh object. 
+ * Each mesh has vCnt vertices, each vertex has Sigma(vStride) of numbers. 
+ * The order of layout location in shader program must be vertices first, then instances, no gap between. 
+ * @param vCnt Number of vertices, each vertices contains sum(vSize) gl_vertex
+ * @param eCnt Number of indices (NOT face, indices/face for strip is undefined) for indexed draw or 0 for non-indexed draw, an index is an gl_index
+ * @param iCnt Max number of instances or 0 for non-instanced draw, each instance contains sum(iSize) gl_vertex
  * @param mode The mode of the mesh, can be gl_meshmode_*, this affects how the GPU draw the mesh
- * @param usage A hint to the driver about the frequency of usage, can be gl_usage_*
+ * @param vSize Zero terminated array, size of each attribute (number of gl_vertex_t) in a vertex
+ * @param iSize Zero terminated array, size of each attribute (number of gl_vertex_t) in a instance, ignored if iBufSize is 0
+ * @param vertices The vertice array, leave NULL if no actual data is ready
+ * @param indices The indices array, leave NULL if no actual data is ready, ignored if eCnt is 0, use index -1 for restart in strip
+ * @param shareInstance Share instance buffer with another gl_mesh object. Useful for model with multiple meshes, instead of creating new buffer, the same buffer data can be reused
  * @return Mesh
  */
 gl_mesh gl_mesh_create(
-	const unsigned int verticesCount, const unsigned int indicesCount,
-	const gl_index_t* const elementsSize, const gl_index_t* const instanceSize,
-	const gl_vertex_t* const vertices, const gl_index_t* const indices, const gl_instance* const instance,
-	const gl_meshmode mode, const gl_usage usage
+	const unsigned int vCnt, const unsigned int eCnt, const unsigned int iCnt, const gl_meshmode mode,
+	const gl_index_t* const vSize, const gl_index_t* const iSize,
+	const gl_vertex_t* const vertices, const gl_index_t* const indices, const gl_mesh* const shareInstance
 );
 
 /** Check a mesh
@@ -369,16 +373,31 @@ gl_mesh gl_mesh_create(
  */
 int gl_mesh_check(const gl_mesh* const mesh);
 
-/** Update portion of a mesh. 
- * This function update the VBO (if not NULL, and offCnt[1] is not 0) and EBO (if not NULL, and offCnt[3] is not 0, and used when created) of the mesh. 
+/** Update portion of a mesh's vertices array (VBO inside mesh). 
  * @param mesh  A mesh previously returned by gl_mesh_create()
  * @param vertice A pointer to the new vertices
- * @param indices A pointer to the new indices
- * @param offCnt {Offset of the update in vertices array, Number of vertices in the array, Offset of the update in indices array, Number of indices in the array}
+ * @param start Offset of the update in vertices array (in unit of gl_vertex_t)
+ * @param offCnt Number of vertices in the array (in unit of gl_vertex_t)
  */
-void gl_mesh_update(const gl_mesh* const mesh, const gl_vertex_t* const vertices, const gl_index_t* const indices, const unsigned int offCnt[static 4]);
+void gl_mesh_updateVertices(const gl_mesh* const mesh, const gl_vertex_t* const vertices, const unsigned int start, const unsigned int len) __attribute__ ((deprecated));
 
-/** Draw a mesh or araw a mesh for a few times. 
+/** Update portion of a mesh's indices array (EBO bind to VAO inside mesh). 
+ * @param mesh  A mesh previously returned by gl_mesh_create()
+ * @param indices A pointer to the new indices
+ * @param start Offset of the update in indices array (in unit of gl_index_t)
+ * @param offCnt Number of indices in the array (in unit of gl_index_t)
+ */
+void gl_mesh_updateIndices(const gl_mesh* const mesh, const gl_index_t* const indices, const unsigned int start, const unsigned int len) __attribute__ ((deprecated));
+
+/** Update portion of a mesh's instances array (IBO inside mesh). 
+ * @param mesh  A mesh previously returned by gl_mesh_create()
+ * @param instances A pointer to the new instances
+ * @param start Offset of the update in instances array (in unit of gl_vertex_t)
+ * @param offCnt Number of instances in the array (in unit of gl_vertex_t)
+ */
+void gl_mesh_updateInstances(const gl_mesh* const mesh, const gl_vertex_t* const instances, const unsigned int start, const unsigned int len);
+
+/** Draw a mesh once or for a few times. 
  * If the mesh is created with instance, that instance will be used; if without instance, only draw the mesh once.
  * @param mesh A mesh previously returned by gl_mesh_create()
  * @param vSize Number of vertices/indices used to draw, pass 0 to draw all (size when create)
@@ -391,15 +410,21 @@ void gl_mesh_draw(const gl_mesh* const mesh, const unsigned int vSize, const uns
  */
 void gl_mesh_delete(gl_mesh* const mesh);
 
-/* == Texture, FBO for off-screen rendering and PBO for texture transfer ==================== */
+/* == Texture, PBO for texture transfer and FBO for off-screen rendering ==================== */
 
-/** Create a texture whit empty content. 
+/** Create a texture or renderbuffer whit empty content. 
+ * A render buffer is like texture, but with no content and on accessible for framebuffer. 
+ * Render buffer has no sampler, so using renderbuffer in FBO is favored if texture is not required. Renderbuffer has limited format support. 
+ * In favor of GLES, no 1D texture. 
+ * Mipmap will be generated if minFilter request mipmap; otherwise, no mipmap is used. (magFilter cannot use mipmap). 
  * @param format Format of the texture, can be gl_texformat_*
  * @param type Texture type, can be gl_textype_*
- * @param size Width, height and depth of texture, depth is ignored for 2D texture
+ * @param minFilter Minify filter, can be gl_tex_dimFilter_*
+ * @param magFilter Magnify filter, can be gl_tex_dimFilter_* (no mipmap)
+ * @param dim Array of 3 dimensions properties, one member for each dimension (always pass 3 members! higher dimension will be ignored); For array texture, only size is used for highest dimension
  * @return Texture
  */
-gl_tex gl_texture_create(const gl_texformat format, const gl_textype type, const unsigned int size[static 3]);
+gl_tex gl_texture_create(const gl_texformat format, const gl_textype type, const gl_tex_dimFilter minFilter, const gl_tex_dimFilter magFilter, const gl_tex_dim dim[static 3]);
 
 /** Check a texture. 
  * @param tex A texture previously returned by gl_texture_create()
@@ -407,7 +432,9 @@ gl_tex gl_texture_create(const gl_texformat format, const gl_textype type, const
  */
 int gl_texture_check(const gl_tex* const tex);
 
-/** Update a portion of a texture
+/** Update a portion of a texture. 
+ * Do NOT use on renderbuffer. 
+ * Use uint8_t for X8/X8UI/S8; int8_t for X8I; uint6_t for X16UI; int16_t for X16I; uint32_t for X32UI; int32_t for X32I; f32_t for X16/X32. 
  * @param tex A texture previously returned by gl_texture_create()
  * @param data Pointer to the texture data
  * @param offset Start point of texture to be update, z-coord is ignored if texture is 2D
@@ -415,22 +442,34 @@ int gl_texture_check(const gl_tex* const tex);
  */
 void gl_texture_update(const gl_tex* const tex, const void* const data, const unsigned int offset[static 3], const unsigned int size[static 3]);
 
-/** Bind a texture to OpenGL engine texture unit 
+/** Bind a texture to OpenGL engine texture unit. 
+ * Do NOT use on renderbuffer. 
  * @param tex A texture previously returned by gl_texture_create()
- * @param paramId ID of parameter previously returned by gl_program_create()
+ * @param paramId ID of parameter previously returned by gl_program_load()
  * @param unit A OpenGL texture unit, a texture unit can only hold one textre at a time
  */
 void gl_texture_bind(const gl_tex* const tex, const gl_param paramId, const unsigned int unit);
 
-/** Delete a texture
+/** Delete a texture. 
  * @param tex A texture previously returned by gl_texture_create()
  */
 void gl_texture_delete(gl_tex* const tex);
 
+/** Transfer data from PBO to actual texture 
+ * @param pbo A PBO previously returned by gl_pixelBuffer_create()
+ * @param tex Dest gl_tex object previously created by gl_texture_create()
+ */
+void gl_pixelBuffer_updateToTexture(const gl_pbo* const pbo, const gl_tex* const tex);
+
+/** Delete a PBO. 
+ * @param pbo A PBO previously returned by gl_pixelBuffer_create()
+ */
+void gl_pixelBuffer_delete(gl_pbo* const pbo);
+
 /** Create a framebuffe object (FBO) for off-screen rendering. 
  * Attach a list of texture to the frame buffer. 
  * @param count Number of texture to attach
- * @param internalBuffer A list of texture to be attached, texture type must be 2D texture, at least 1 is required
+ * @param internalBuffer A list of texture to be attached, texture type must be 2D texture or renderbuffer, at least 1 is required
  * @param type A list of attachment type used for each texture to be attached, can be gl_fboattach_* or any int >= 0 for color attachment, must be less than max number of attachment allowed by GL driver
  * @return FBO
  */
@@ -449,18 +488,18 @@ int gl_frameBuffer_check(const gl_fbo* const fbo);
  */
 void gl_frameBuffer_bind(const gl_fbo* const fbo, const int clear);
 
-/** Download a portion of a color attachment of a FBO from GPU. 
+/** Download a portion of fram buffer from GPU. 
+ * @param fbo A FBO previously created by gl_frameBuffer_create()
  * @param dest Where to save the data, the memory space should be enough to hold the download content
- * @param fbo A FBO previously returned by gl_frameBuffer_create()
  * @param format Format of data downloading
- * @param attachment Which attached texture to download (0 to MAX_ATTACHMENT), not valid for depth and stencil buffer
+ * @param id Which attached texture to download
  * @param offset Start point of framebuffer to be update {x,y}
  * @param size Size of framebuffer to be download {width,height}
  */
-void gl_frameBuffer_download(void* const dest, const gl_fbo* const fbo, const gl_texformat format, const unsigned int attachment, const unsigned int offset[static 2], const unsigned int size[static 2]);
+void gl_frameBuffer_download(const gl_fbo* const fbo, void* const dest, const gl_texformat format, const unsigned int attachment, const unsigned int offset[static 2], const unsigned int size[static 2]);
 
 /** Delete a FBO. 
- * @param fbo A FBO previously returned by gl_frameBuffer_create()
+ * @param fb A FBO previously returned by gl_frameBuffer_create()
  */
 void gl_frameBuffer_delete(gl_fbo* const fbo);
 

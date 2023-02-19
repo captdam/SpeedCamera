@@ -1,11 +1,25 @@
-in highp vec2 pxPos;
-out lowp float result; //lowp for enum
+@VS
+
+layout (location = 0) in highp vec2 meshROI;
+out mediump vec2 pxPos;
+
+void main() {
+	gl_Position = vec4(meshROI.x * 2.0 - 1.0, meshROI.y * 2.0 - 1.0, 0.0, 1.0);
+	pxPos = meshROI.xy;
+}
+
+@FS
+
+#define HUMAN
 
 uniform lowp sampler2D src; //lowp for enum
-uniform mediump sampler2D roadmapT1;
+uniform mediump sampler2DArray roadmap;
 
-/* Defined by client: DENOISE_BOTTOM */
-/* Defined by client: DENOISE_SIDE */
+in mediump vec2 pxPos;
+out lowp float result; //lowp for enum
+
+#define SHADER_EDGEREFINE_BOTTOMDENOISE 0.2
+#define SHADER_EDGEREFINE_SIDEMARGIN 0.6
 
 #define RESULT_NOTOBJ 0.0
 #define RESULT_OBJECT 0.3
@@ -55,42 +69,31 @@ bvec2 minPath(lowp sampler2D map, mediump ivec2 start, lowp float threshold, med
 	return bvec2(start.x - lPtr.x >= goal, rPtr.x - start.x >= goal);
 }
 
-void main() {
+lowp float refine() {
 	mediump ivec2 srcSize = textureSize(src, 0);
 	mediump vec2 srcSizeF = vec2(srcSize);
+	mediump ivec2 pxIdx = ivec2(srcSizeF * pxPos);
 
-	ivec2 pxIdx = ivec2(srcSizeF * pxPos);
+	//Not object
+	if (texelFetch(src, pxIdx, 0).r < 0.1)
+		return RESULT_NOTOBJ;
 
-	lowp float refined;
+	mediump float pixelWidth = texture(roadmap, vec3(pxPos, 0.0)).w;
+	mediump int limitSide = int(SHADER_EDGEREFINE_SIDEMARGIN * pixelWidth);
+	mediump int limitBottom = int(SHADER_EDGEREFINE_BOTTOMDENOISE * pixelWidth);
 
-	do {
-		//Not object
-		refined = RESULT_NOTOBJ;
+	//Bottom clearence fail, so this is not bottom edge
+	if (searchBottom( src , pxIdx + ivec2(0,1) , limitBottom + pxIdx.y + 1 )) //Atleast search 1, do not include self
+		return RESULT_OBJECT;
 
-		if (texelFetch(src, pxIdx, 0).r == 0.0)
-			break;
+	//If any side has space (edge not at center pertion), then this is not center portion
+	if (!all( minPath(src, pxIdx, 0.5, limitSide) ))
+		return RESULT_BOTTOM;
+	
+	//Centered bottom edge
+	return RESULT_CBEDGE;
+}
 
-		//Object, but maybe not edge
-		refined = RESULT_OBJECT;
-
-		mediump float pixelWidth = texture(roadmapT1, pxPos).w; //Use pixel width for both width and height, pixel height is actually close-far axis, object height is proportional to width
-		
-		mediump int bottomSearchLimit = int(DENOISE_BOTTOM / pixelWidth) + pxIdx.y + 1; //Atleast search 1, at far distance, pixelWidth is very large
-		if (searchBottom( src , pxIdx + ivec2(0,1) , min(srcSize.y, bottomSearchLimit) )) //Do not include self
-			break;
-
-		//Bottom edge, but maybe not centered bottom edge
-		refined = RESULT_BOTTOM;
-
-		//If any side has space (edge not at center pertion)
-		mediump int sideSearchDistance = int(DENOISE_SIDE / pixelWidth);
-		bvec2 centerEdge = minPath(src, pxIdx, 0.5, int(sideSearchDistance));
-		if (!all(centerEdge))
-			break;
-		
-		//Centered bottom edge
-		refined = RESULT_CBEDGE;
-	} while (false);
-
-	result = refined;
+void main() {
+	result = refine();
 }
