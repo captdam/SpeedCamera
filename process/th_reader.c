@@ -82,12 +82,12 @@ void th_reader_destroy() {
 	if (!valid)
 		return;
 	valid = 0;
-	
-	pthread_cancel(tid);
-	pthread_join(tid, NULL);
 
 	sem_destroy(&sem_readerDone);
 	sem_destroy(&sem_readerStart);
+	
+	pthread_cancel(tid);
+	pthread_join(tid, NULL);
 }
 
 void* th_reader(void* arg) {
@@ -146,19 +146,12 @@ void* th_reader(void* arg) {
 	}
 	reader_info("FIFO '"FIFONAME"' data received");
 
-	int cont = 1;
-	while (cont) {
+	int readerShouldContinue = 1;
+	do {
 		sem_wait(&sem_readerStart); //Wait until main thread issue new memory address for next frame
-
-		if (!readFunction())
-			cont = 0;
-
-		#ifdef DEBUG_THREADSPEED
-			debug_threadSpeed = 'R';
-		#endif
-		
+		readerShouldContinue = readFunction();
 		sem_post(&sem_readerDone); //Uploading done, allow main thread to use it
-	}
+	} while (readerShouldContinue);
 
 	fclose(fp);
 	unlink(FIFONAME);
@@ -166,13 +159,7 @@ void* th_reader(void* arg) {
 
 	while (1) { //Send dummy data to keep the main thread running
 		sem_wait(&sem_readerStart); //Wait until main thread issue new memory address for next frame
-		
 		memset((void*)rawDataPtr, 0, size * 4);
-
-		#ifdef DEBUG_THREADSPEED
-			debug_threadSpeed = 'R';
-		#endif
-
 		sem_post(&sem_readerDone); //Uploading done, allow main thread to use it
 	}
 
