@@ -117,6 +117,6 @@ void main() {
 
 	result = vec2(
 		displaceRoad * bias / 255.0, //Normalize to [0,1], offset at 0.0
-		0.5 + float(displaceScreen - pxIdx.y) / 127.0 //Normalize to [1,0], offset at 0.5
+		0.5 + float(displaceScreen - pxIdx.y) / 255.0 //Normalize to [1,0], offset at 0.5
 	);
 }

@@ -24,14 +24,8 @@ out highp vec4 result;
 #define CH_ROADMAP2_LOOKUP_P2O z
 #define CH_ROADMAP2_LOOKUP_O2P w
 
-#define GRID_X 10.0
+#define GRID_X 3.3
 #define GRID_Y 10.0
-
-#define MODE MODE_T2
-#define MODE_T1 1
-#define MODE_T2 2
-#define MODE_PERSPGRID 3
-#define MODE_OTHORGRID 4
 
 void main() {
 	highp ivec2 pxIdx = ivec2(vec2(textureSize(roadmap, 0)) * pxPos);
@@ -47,25 +41,23 @@ void main() {
 
 	highp vec4 color = vec4(0.0);
 
-	if (MODE == MODE_T1) {
-		color = roadPosCurrent;
-	} else if (MODE == MODE_T2) {
-		color = roadInfoCurrent;
-	} else if (MODE == MODE_PERSPGRID) {
-		if ( sign(roadPosUp.CH_ROADMAP1_PY) != sign(roadPosDown.CH_ROADMAP1_PY) )
-			color = vec4(1.0, 0.2, 0.2, 1.0);
-		else if ( floor(roadPosLeft.CH_ROADMAP1_PX / GRID_X) != floor(roadPosRight.CH_ROADMAP1_PX / GRID_X) )
-			color = vec4(0.1, 0.1, 0.8, 1.0);
-		else if ( floor(roadPosUp.CH_ROADMAP1_PY / GRID_Y) != floor(roadPosDown.CH_ROADMAP1_PY / GRID_Y) )
-			color = vec4(0.1, 0.8, 0.1, 1.0);
-	} else if (MODE == MODE_OTHORGRID) {
-		if ( sign(roadPosUp.CH_ROADMAP1_OY) != sign(roadPosDown.CH_ROADMAP1_OY) )
-			color = vec4(1.0, 0.2, 0.2, 1.0);
-		else if ( floor(roadPosLeft.CH_ROADMAP1_OX / GRID_X) != floor(roadPosRight.CH_ROADMAP1_OX / GRID_X) )
-			color = vec4(0.1, 0.1, 0.8, 1.0);
-		else if ( floor(roadPosUp.CH_ROADMAP1_OY / GRID_Y) != floor(roadPosDown.CH_ROADMAP1_OY / GRID_Y) )
-			color = vec4(0.1, 0.8, 0.1, 1.0);
-	}
+	//color = roadPosCurrent.xyzw;
 
-	result = /*vec4(*/color/*, 1.0)*/;
+	//color = roadInfoCurrent.xyzw;
+
+	if ( sign(roadPosUp.CH_ROADMAP1_PY) != sign(roadPosDown.CH_ROADMAP1_PY) )
+		color = vec4(1.0, 0.2, 0.2, 1.0);
+	else if ( floor(roadPosLeft.CH_ROADMAP1_PX / GRID_X) != floor(roadPosRight.CH_ROADMAP1_PX / GRID_X) )
+		color = vec4(0.1, 0.1, 0.8, 1.0);
+	else if ( floor(roadPosUp.CH_ROADMAP1_PY / GRID_Y) != floor(roadPosDown.CH_ROADMAP1_PY / GRID_Y) )
+		color = vec4(0.1, 0.8, 0.1, 1.0);
+		
+	/*if ( sign(roadPosUp.CH_ROADMAP1_OY) != sign(roadPosDown.CH_ROADMAP1_OY) )
+		color = vec4(1.0, 0.2, 0.2, 1.0);
+	else if ( floor(roadPosLeft.CH_ROADMAP1_OX / GRID_X) != floor(roadPosRight.CH_ROADMAP1_OX / GRID_X) )
+		color = vec4(0.1, 0.1, 0.8, 1.0);
+	else if ( floor(roadPosUp.CH_ROADMAP1_OY / GRID_Y) != floor(roadPosDown.CH_ROADMAP1_OY / GRID_Y) )
+		color = vec4(0.1, 0.8, 0.1, 1.0);*/
+
+	result = color;
 }

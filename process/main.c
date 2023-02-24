@@ -26,7 +26,7 @@
 //#define HEADLESS
 #define SHADER_DIR "fshader/"
 #define SHADER_MEASURE_INTERLACE 7 //Must be 2^n - 1 (1, 3, 7, 15...), this create a 2^n level queue
-#define SHADER_SPEED_DOWNLOADLATENCY 7 //Must be 2^n - 1 (1, 3, 7, 15...), this create a 2^n level queue. Higher number means higher chance the FBO is ready when download, lower stall but higher latency as well
+#define SHADER_SPEED_DOWNLOADLATENCY 1 //Must be 2^n - 1 (1, 3, 7, 15...), this create a 2^n level queue. Higher number means higher chance the FBO is ready when download, lower stall but higher latency as well
 #define SHADER_SPEEDOMETER_CNT 32 //Max number of speedometer
 
 /* Speedometer */
@@ -147,7 +147,7 @@ int main(int argc, char* argv[]) {
 	fb fb_display = {GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX, gl_texformat_RGBA8}; //Display human-readable text, video, RGBA8
 	fb fb_stageA = {GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX, gl_texformat_RG8}; //General intermediate data, normalized, max 2 ch
 	fb fb_stageB = {GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX, gl_texformat_RG8};
-	//fb fb_check = {GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX, gl_texformat_RGBA16F};
+	fb fb_check = {GL_INIT_DEFAULT_FBO, GL_INIT_DEFAULT_TEX, gl_texformat_RGBA16F};
 
 	//Program - Roadmap check
 	struct { gl_program pid; } program_roadmapCheck = {.pid = GL_INIT_DEFAULT_PROGRAM};
@@ -411,8 +411,8 @@ int main(int argc, char* argv[]) {
 			goto label_exit;
 		}
 
-		//fb_check.tex = gl_texture_create(fb_check.format, gl_textype_2d, gl_tex_dimFilter_nearest, gl_tex_dimFilter_nearest, dim);
-		//fb_check.fbo = gl_frameBuffer_create(1, (const gl_tex[]){fb_check.tex}, (const gl_fboattach[]){gl_fboattach_color0});
+		fb_check.tex = gl_texture_create(fb_check.format, gl_textype_2d, gl_tex_dimFilter_nearest, gl_tex_dimFilter_nearest, dim);
+		fb_check.fbo = gl_frameBuffer_create(1, (const gl_tex[]){fb_check.tex}, (const gl_fboattach[]){gl_fboattach_color0});
 	}
 
 	/* Load shader programs */ {
@@ -780,16 +780,16 @@ int main(int argc, char* argv[]) {
 //			#define RESULT fb_stageB
 //			#define RESULT fb_raw[current]
 //			#define RESULT fb_object[current_obj]
-			#define RESULT fb_speed[current_speed]
-//			#define RESULT fb_display
-			//#define RESULT fb_check
+//			#define RESULT fb_speed[current_speed]
+			#define RESULT fb_display
+//			#define RESULT fb_check
 
 			// Draw final result on screen
 			#ifndef HEADLESS //Draw result on display, disabled in headless mode
 				gl_setViewport(zeros, winsizeNcursor.framesize);
 				gl_frameBuffer_bind(NULL, 0);
 				gl_program_use(&program_final.pid);
-				gl_texture_bind(&fb_raw[previous].tex, program_final.orginal, 0);
+				gl_texture_bind(&fb_raw[current].tex, program_final.orginal, 0);
 				gl_texture_bind(&RESULT.tex, program_final.result, 1);
 				gl_mesh_draw(&mesh_final, 0, 0);
 			#endif
@@ -844,6 +844,8 @@ label_exit:
 	gl_program_delete(&program_projectP2O.pid);
 	gl_program_delete(&program_roadmapCheck.pid);
 
+	gl_texture_delete(&fb_check.tex);
+	gl_frameBuffer_delete(&fb_check.fbo);
 	gl_texture_delete(&fb_stageB.tex);
 	gl_frameBuffer_delete(&fb_stageB.fbo);
 	gl_texture_delete(&fb_stageA.tex);
