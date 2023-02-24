@@ -183,7 +183,7 @@ int main(int argc, char* argv[]) {
 
 				pPairCnt++;
 			} else {
-				err("Unknown info: %s", buffer);
+				err("Unknown info: %s\n", buffer);
 				return EXIT_FAILURE;
 			}
 
