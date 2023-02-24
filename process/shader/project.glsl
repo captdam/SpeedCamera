@@ -12,6 +12,7 @@ void main() {
 
 uniform mediump sampler2D src; //mediump for general data
 uniform mediump sampler2DArray roadmap;
+uniform lowp int mode; //RGBA index: 3=P2O 4=O2P
 
 in mediump vec2 pxPos;
 out mediump vec4 result; //mediump for general data
@@ -20,14 +21,10 @@ void main() {
 	//Road surface is linear, so does the projection table, ok to use texture filter
 	//Data may not be linear, so do not use filter
 
-	/*mediump ivec2 srcSize = textureSize(src, 0);
+	mediump ivec2 srcSize = textureSize(src, 0);
 	mediump vec2 srcSizeF = vec2(srcSize);
 
 	mediump ivec2 projIdx = ivec2( srcSizeF * pxPos );
-	projIdx.x = int( srcSizeF.x * texture(roadmap, vec3(pxPos, 1.0)).z );
-	result = texelFetch(src, projIdx, 0);*/
-
-	mediump vec2 projPos = pxPos;
-	projPos.x = texture(roadmap, vec3(pxPos, 1.0)).z;
-	result = texture(src, projPos);
+	projIdx.x = int( srcSizeF.x * texture(roadmap, vec3(pxPos, 1.0))[mode] );
+	result = texelFetch(src, projIdx, 0);
 }

@@ -151,8 +151,7 @@ int main(int argc, char* argv[]) {
 
 	//Program - Roadmap check
 	struct { gl_program pid; } program_roadmapCheck = {.pid = GL_INIT_DEFAULT_PROGRAM};
-	struct { gl_program pid; gl_param src; } program_projectP2O = {.pid = GL_INIT_DEFAULT_PROGRAM};
-	struct { gl_program pid; gl_param src; } program_projectO2P = {.pid = GL_INIT_DEFAULT_PROGRAM};
+	struct { gl_program pid; gl_param src; gl_param mode; } program_project = {.pid = GL_INIT_DEFAULT_PROGRAM};
 	struct { gl_program pid; gl_param src; } program_blurFilter = {.pid = GL_INIT_DEFAULT_PROGRAM};
 	struct { gl_program pid; gl_param src; } program_edgeFilter = {.pid = GL_INIT_DEFAULT_PROGRAM};
 	struct { gl_program pid; gl_param current; gl_param previous; } program_changingSensor = {.pid = GL_INIT_DEFAULT_PROGRAM};
@@ -439,25 +438,18 @@ int main(int argc, char* argv[]) {
 			gl_programArg arg[] = {
 				{gl_programArgType_normal,	"src"},
 				{gl_programArgType_normal,	"roadmap"},
+				{gl_programArgType_normal,	"mode"},
 				{.name = NULL}
 			};
 
-			if (!( program_projectP2O.pid = gl_program_load(SHADER_DIR"projectP2O.glsl", arg) )) {
+			if (!( program_project.pid = gl_program_load(SHADER_DIR"project.glsl", arg) )) {
 				error("Fail to create shader program: Project perspective to orthographic");
 				goto label_exit;
 			}
-			program_projectP2O.src = arg[0].id;
+			program_project.src = arg[0].id;
+			program_project.mode = arg[2].id;
 
-			gl_program_use(&program_projectP2O.pid);
-			gl_texture_bind(&texture_roadmap, arg[1].id, TEXUNIT_ROADMAP);
-
-			if (!( program_projectO2P.pid = gl_program_load(SHADER_DIR"projectO2P.glsl", arg) )) {
-				error("Fail to create shader program: Project orthographic to perspective");
-				goto label_exit;
-			}
-			program_projectO2P.src = arg[0].id;
-
-			gl_program_use(&program_projectO2P.pid);
+			gl_program_use(&program_project.pid);
 			gl_texture_bind(&texture_roadmap, arg[1].id, TEXUNIT_ROADMAP);
 		}
 
@@ -692,8 +684,9 @@ int main(int argc, char* argv[]) {
 
 			// Project from perspective to orthographic
 			gl_frameBuffer_bind(&fb_object[current_obj].fbo, gl_frameBuffer_clearAll);
-			gl_program_use(&program_projectP2O.pid);
-			gl_texture_bind(&fb_stageB.tex, program_projectP2O.src, 0);
+			gl_program_use(&program_project.pid);
+			gl_program_setParam(program_project.mode, 1, gl_datatype_int, (const int[1]){2});
+			gl_texture_bind(&fb_stageB.tex, program_project.src, 0);
 			gl_mesh_draw(&mesh_ortho, 0, 0);
 
 			// Measure the distance of edge moving between current frame and previous frame
@@ -706,8 +699,9 @@ int main(int argc, char* argv[]) {
 
 			// Project from orthographic to perspective
 			gl_frameBuffer_bind(&fb_stageB.fbo, gl_frameBuffer_clearAll);
-			gl_program_use(&program_projectO2P.pid);
-			gl_texture_bind(&fb_stageA.tex, program_projectO2P.src, 0);
+			gl_program_use(&program_project.pid);
+			gl_program_setParam(program_project.mode, 1, gl_datatype_int, (const int[1]){3});
+			gl_texture_bind(&fb_stageA.tex, program_project.src, 0);
 			gl_mesh_draw(&mesh_persp, 0, 0);
 
 			// Sample measure result, get single point
@@ -840,8 +834,7 @@ label_exit:
 	gl_program_delete(&program_changingSensor.pid);
 	gl_program_delete(&program_edgeFilter.pid);
 	gl_program_delete(&program_blurFilter.pid);
-	gl_program_delete(&program_projectO2P.pid);
-	gl_program_delete(&program_projectP2O.pid);
+	gl_program_delete(&program_project.pid);
 	gl_program_delete(&program_roadmapCheck.pid);
 
 	gl_texture_delete(&fb_check.tex);
