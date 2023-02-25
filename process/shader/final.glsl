@@ -17,11 +17,11 @@ uniform lowp sampler2D processedTexture;
 in mediump vec2 pxPos;
 out lowp vec4 result; //lowp for RGBA8 video
 
-#define RAW_WEIGHT 0.8
+#define RAW_WEIGHT 0.3
 #define PROCESSED_WEIGHT 0.9 //data.a
 
 void main() {
 	lowp vec4 data = texture(processedTexture, pxPos); //Use texture instead of texelFetch because the window size may differ from data size
 	lowp vec4 raw = texture(orginalTexture, pxPos); //Therefore we need to use texture sampling function provided by GPU
-	result = RAW_WEIGHT * raw + PROCESSED_WEIGHT * data;
+	result = RAW_WEIGHT * max(raw, vec4(0.0)) + PROCESSED_WEIGHT * max(data, vec4(0.0));
 }

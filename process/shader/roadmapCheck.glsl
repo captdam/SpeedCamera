@@ -41,16 +41,16 @@ void main() {
 
 	highp vec4 color = vec4(0.0);
 
-	//color = roadPosCurrent.xyzw;
+	color = roadPosCurrent.xyzw;
 
 	//color = roadInfoCurrent.xyzw;
 
-	if ( sign(roadPosUp.CH_ROADMAP1_PY) != sign(roadPosDown.CH_ROADMAP1_PY) )
+	/*if ( sign(roadPosUp.CH_ROADMAP1_PY) != sign(roadPosDown.CH_ROADMAP1_PY) )
 		color = vec4(1.0, 0.2, 0.2, 1.0);
 	else if ( floor(roadPosLeft.CH_ROADMAP1_PX / GRID_X) != floor(roadPosRight.CH_ROADMAP1_PX / GRID_X) )
 		color = vec4(0.1, 0.1, 0.8, 1.0);
 	else if ( floor(roadPosUp.CH_ROADMAP1_PY / GRID_Y) != floor(roadPosDown.CH_ROADMAP1_PY / GRID_Y) )
-		color = vec4(0.1, 0.8, 0.1, 1.0);
+		color = vec4(0.1, 0.8, 0.1, 1.0);*/
 		
 	/*if ( sign(roadPosUp.CH_ROADMAP1_OY) != sign(roadPosDown.CH_ROADMAP1_OY) )
 		color = vec4(1.0, 0.2, 0.2, 1.0);
