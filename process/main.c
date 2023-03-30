@@ -25,7 +25,7 @@
 /* Shader config */
 //#define HEADLESS
 #define SHADER_DIR "fshader/"
-#define SHADER_MEASURE_INTERLACE 7 //Must be 2^n - 1 (1, 3, 7, 15...), this create a 2^n level queue
+#define SHADER_MEASURE_INTERLACE 3 //Must be 2^n - 1 (1, 3, 7, 15...), this create a 2^n level queue
 #define SHADER_SPEED_DOWNLOADLATENCY 1 //Must be 2^n - 1 (1, 3, 7, 15...), this create a 2^n level queue. Higher number means higher chance the FBO is ready when download, lower stall but higher latency as well
 #define SHADER_SPEEDOMETER_CNT 32 //Max number of speedometer
 
@@ -434,7 +434,7 @@ int main(int argc, char* argv[]) {
 			gl_texture_bind(&texture_roadmap, arg[0].id, TEXUNIT_ROADMAP);
 		}
 
-		/* Create program: Project P2O and P2O */ {
+		/* Create program: Project P2O and O2P */ {
 			gl_programArg arg[] = {
 				{gl_programArgType_normal,	"src"},
 				{gl_programArgType_normal,	"roadmap"},
@@ -598,6 +598,11 @@ int main(int argc, char* argv[]) {
 	
 	#ifdef VERBOSE_TIME
 		uint64_t timestamp = 0;
+		uint64_t (* benchmark)[16] = malloc(sizeof(uint64_t) * 600 * 16); //600 frame, 16 stages
+		if (!benchmark) {
+			error("Fail to create benchmark record");
+			goto label_exit;
+		}
 	#endif
 	info("Program ready!");
 	fprintf(stdout, "R %u*%u : I %u\n", sizeData[0], sizeData[1], SHADER_MEASURE_INTERLACE);
@@ -613,7 +618,13 @@ int main(int argc, char* argv[]) {
 		gl_winsizeNcursor winsizeNcursor = gl_getWinsizeCursor();
 		int cursorPosData[2] = {winsizeNcursor.curPos[0] * sizeData[0], winsizeNcursor.curPos[1] * sizeData[1]};
 
-		if (!inBox(cursorPosData[0], cursorPosData[1], 0, sizeData[0], 0, sizeData[1], -1)) {
+		if ( /*frameCnt != 330*/ /*!inBox(cursorPosData[0], cursorPosData[1], 0, sizeData[0], 0, sizeData[1], -1)*/ 1 == 1 ) {
+			#ifdef VERBOSE_TIME
+				uint64_t benchmark_current[16] = {[0 ... 15] = 0};
+				int benchmark_currentIdx = 0;
+				benchmark_current[benchmark_currentIdx++] = nanotime(); //Start of frame
+			#endif
+
 			current = (uint)frameCnt & (uint)0b1 ? 1 : 0; //Front
 			previous = 1 - current; //Back
 			current_obj = (uint)frameCnt & (uint)SHADER_MEASURE_INTERLACE;
@@ -642,6 +653,9 @@ int main(int argc, char* argv[]) {
 			#ifdef VERBOSE_TIME
 				uint64_t timestampRenderStart = nanotime();
 			#endif
+			#ifdef VERBOSE_TIME
+				benchmark_current[benchmark_currentIdx++] = nanotime(); //Start upload and download
+			#endif
 			//gl_rsync(); //Request the GL driver start the queue
 
 			gl_setViewport(zeros, sizeData);
@@ -649,13 +663,16 @@ int main(int argc, char* argv[]) {
 			// Debug use ONLY: Check roadmap
 			/*gl_frameBuffer_bind(&fb_check.fbo, gl_frameBuffer_clearAll);
 			gl_program_use(&program_roadmapCheck.pid);
-			gl_mesh_draw(&mesh_final, 0, 0);*/
+			gl_mesh_draw(&mesh_ortho, 0, 0);*/
 
 			// Blur the raw to remove noise
 			gl_frameBuffer_bind(&fb_raw[current].fbo, gl_frameBuffer_clearAll); //Mesa: Clear buffer allows the driver to discard old buffer (the doc says it is faster)
 			gl_program_use(&program_blurFilter.pid);
 			gl_texture_bind(&texture_orginalBuffer[current], program_blurFilter.src, 0);
 			gl_mesh_draw(&mesh_final, 0, 0); //Process the entire scene. Although we only need to process ROI, but we want to display the entir scene
+			#ifdef VERBOSE_TIME
+				gl_synch synch_blur = gl_synchSet();
+			#endif
 
 			// Finding changing to detect moving object
 			gl_frameBuffer_bind(&fb_stageA.fbo, gl_frameBuffer_clearAll);
@@ -663,6 +680,9 @@ int main(int argc, char* argv[]) {
 			gl_texture_bind(&fb_raw[current].tex, program_changingSensor.current, 0);
 			gl_texture_bind(&fb_raw[previous].tex, program_changingSensor.previous, 1);
 			gl_mesh_draw(&mesh_persp, 0, 0);
+			#ifdef VERBOSE_TIME
+				gl_synch synch_changingDetect = gl_synchSet();
+			#endif
 
 			// Fix object
 			gl_frameBuffer_bind(&fb_stageB.fbo, gl_frameBuffer_clearAll);
@@ -675,12 +695,18 @@ int main(int argc, char* argv[]) {
 			gl_program_setParam(program_objectFix.direction, 2, gl_datatype_float, (const float[2]){0, 1}); //Most gap removed by h-fix, less gap and higher chance of intercepted
 			gl_texture_bind(&fb_stageB.tex, program_objectFix.src, 0);
 			gl_mesh_draw(&mesh_persp, 0, 0);
+			#ifdef VERBOSE_TIME
+				gl_synch synch_changingFix = gl_synchSet();
+			#endif
 
 			// Refine edge, thinning the thick edge
 			gl_frameBuffer_bind(&fb_stageB.fbo, gl_frameBuffer_clearAll);
 			gl_program_use(&program_edgeRefine.pid);
 			gl_texture_bind(&fb_stageA.tex, program_edgeRefine.src, 0);
 			gl_mesh_draw(&mesh_persp, 0, 0);
+			#ifdef VERBOSE_TIME
+				gl_synch synch_edgeRefine = gl_synchSet();
+			#endif
 
 			// Project from perspective to orthographic
 			gl_frameBuffer_bind(&fb_object[current_obj].fbo, gl_frameBuffer_clearAll);
@@ -688,6 +714,9 @@ int main(int argc, char* argv[]) {
 			gl_program_setParam(program_project.mode, 1, gl_datatype_int, (const int[1]){2});
 			gl_texture_bind(&fb_stageB.tex, program_project.src, 0);
 			gl_mesh_draw(&mesh_ortho, 0, 0);
+			#ifdef VERBOSE_TIME
+				gl_synch synch_p2o = gl_synchSet();
+			#endif
 
 			// Measure the distance of edge moving between current frame and previous frame
 			gl_frameBuffer_bind(&fb_stageA.fbo, gl_frameBuffer_clearAll);
@@ -696,6 +725,9 @@ int main(int argc, char* argv[]) {
 			gl_texture_bind(&fb_object[hint_obj].tex, program_measure.hint, 1);
 			gl_texture_bind(&fb_object[previous_obj].tex, program_measure.previous, 2);
 			gl_mesh_draw(&mesh_ortho, 0, 0);
+			#ifdef VERBOSE_TIME
+				gl_synch synch_measure = gl_synchSet();
+			#endif
 
 			// Project from orthographic to perspective
 			gl_frameBuffer_bind(&fb_stageB.fbo, gl_frameBuffer_clearAll);
@@ -703,12 +735,49 @@ int main(int argc, char* argv[]) {
 			gl_program_setParam(program_project.mode, 1, gl_datatype_int, (const int[1]){3});
 			gl_texture_bind(&fb_stageA.tex, program_project.src, 0);
 			gl_mesh_draw(&mesh_persp, 0, 0);
+			#ifdef VERBOSE_TIME
+				gl_synch synch_o2p = gl_synchSet();
+			#endif
 
 			// Sample measure result, get single point
 			gl_frameBuffer_bind(&fb_speed[current_speed].fbo, gl_frameBuffer_clearAll);
 			gl_program_use(&program_sample.pid);
 			gl_texture_bind(&fb_stageB.tex, program_sample.src, 0);
 			gl_mesh_draw(&mesh_persp, 0, 0);
+			#ifdef VERBOSE_TIME
+				gl_synch synch_sample = gl_synchSet();
+			#endif
+
+			#ifdef VERBOSE_TIME
+				gl_synchWait(synch_blur, GL_SYNCH_TIMEOUT); //Here we are benchmark, let's assume it will success, we are sure after the function test
+				gl_synchDelete(synch_blur);
+				benchmark_current[benchmark_currentIdx++] = nanotime();
+
+				gl_synchWait(synch_changingDetect, GL_SYNCH_TIMEOUT);
+				gl_synchDelete(synch_changingDetect);
+				benchmark_current[benchmark_currentIdx++] = nanotime();
+				gl_synchWait(synch_changingFix, GL_SYNCH_TIMEOUT);
+				gl_synchDelete(synch_changingFix);
+				benchmark_current[benchmark_currentIdx++] = nanotime();
+
+				gl_synchWait(synch_edgeRefine, GL_SYNCH_TIMEOUT);
+				gl_synchDelete(synch_edgeRefine);
+				benchmark_current[benchmark_currentIdx++] = nanotime();
+
+				gl_synchWait(synch_p2o, GL_SYNCH_TIMEOUT);
+				gl_synchDelete(synch_p2o);
+				benchmark_current[benchmark_currentIdx++] = nanotime();
+				gl_synchWait(synch_measure, GL_SYNCH_TIMEOUT);
+				gl_synchDelete(synch_measure);
+				benchmark_current[benchmark_currentIdx++] = nanotime();
+				gl_synchWait(synch_o2p, GL_SYNCH_TIMEOUT);
+				gl_synchDelete(synch_o2p);
+				benchmark_current[benchmark_currentIdx++] = nanotime();
+
+				gl_synchWait(synch_sample, GL_SYNCH_TIMEOUT);
+				gl_synchDelete(synch_sample);
+				benchmark_current[benchmark_currentIdx++] = nanotime();
+			#endif
 
 			// Download data from previous frame
 			#ifdef USE_PBO_DOWNLOAD //Background download starts at beginning of frame
@@ -717,6 +786,10 @@ int main(int argc, char* argv[]) {
 				speedData = gl_pixelBuffer_downloadFinish(sizeData[0] * sizeData[1] * sizeof(speedData[0][0]));
 			#else //Command queue of previous frame should be finished by now
 				gl_frameBuffer_download(speedData, &fb_speed[previous_speed].fbo, fb_speed->format, 0, zeros, sizeData); //Download current speed data so we can process in next iteration (blocking op)
+			#endif
+
+			#ifdef VERBOSE_TIME
+				benchmark_current[benchmark_currentIdx++] = nanotime(); //Download
 			#endif
 
 			// Analysis the processed data
@@ -747,12 +820,17 @@ int main(int argc, char* argv[]) {
 						*instancePtr++ = coordNorm.x;
 						*instancePtr++ = coordNorm.y;
 						*instancePtr++ = speed;
+//						*instancePtr++ = abs(screenDy - 128);
 						limit--;
 					}
 				}
 			}
 			#ifdef USE_PBO_DOWNLOAD
 				gl_pixelBuffer_downloadDiscard();
+			#endif
+
+			#ifdef VERBOSE_TIME
+				benchmark_current[benchmark_currentIdx++] = nanotime(); //All done except display
 			#endif
 
 			// Render the analysis result and write to output
@@ -799,6 +877,12 @@ int main(int argc, char* argv[]) {
 			th_reader_wait(); //Wait reader thread finish uploading frame data
 			#ifdef USE_PBO_UPLOAD
 				gl_pixelBuffer_updateFinish();
+			#endif
+
+			#ifdef VERBOSE_TIME
+				benchmark_current[benchmark_currentIdx++] = nanotime(); //All done include display
+				memcpy(benchmark + frameCnt, benchmark_current, sizeof(benchmark_current));
+				if (frameCnt == 600) gl_close(1);
 			#endif
 
 			frameCnt++;
@@ -890,6 +974,18 @@ label_exit:
 	#endif
 
 	gl_destroy();
+
+	#ifdef VERBOSE_TIME
+		FILE* fd = fopen("benchmark.csv", "w");
+		for (int i = 0; i < 600; i++) {
+			for (int j = 0; j < 15; j++) {
+				fprintf(fd, "%f,", benchmark[i][j] / 1e6); //ns to ms
+			}
+			fprintf(fd, "%f\n", benchmark[i][15] / 1e6);
+		}
+		fclose(fd);
+		free(benchmark);
+	#endif
 
 	info("\n%u frames displayed.\n", frameCnt);
 	return status;

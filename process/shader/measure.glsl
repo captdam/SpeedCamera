@@ -111,8 +111,8 @@ void main() {
 			}
 		}
 
-		displaceScreen = hintTargetY;
-//		displaceScreen = searchTargetY;
+//		displaceScreen = hintTargetY;
+		displaceScreen = searchTargetY;
 	}
 
 	result = vec2(

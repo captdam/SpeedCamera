@@ -16,7 +16,11 @@ uniform lowp sampler2D src; //lowp for enum
 uniform mediump sampler2DArray roadmap;
 
 in mediump vec2 pxPos;
+#ifndef HUMAN 
 out lowp float result; //lowp for enum
+#else
+out lowp vec2 result;
+#endif
 
 #define SHADER_EDGEREFINE_BOTTOMDENOISE 0.2
 #define SHADER_EDGEREFINE_SIDEMARGIN 0.6
@@ -95,5 +99,17 @@ lowp float refine() {
 }
 
 void main() {
-	result = refine();
+	#ifndef HUMAN
+		result = refine();
+	#else
+		lowp float x = refine();
+		if (x >= RESULT_CBEDGE)
+			result = vec2(RESULT_CBEDGE, 1.0);
+		else if (x >= RESULT_BOTTOM)
+			result = vec2(RESULT_BOTTOM, 1.0);
+		else if (x >= RESULT_OBJECT)
+			result = vec2(RESULT_OBJECT, 0.1);
+		else
+			result = vec2(0.0);
+	#endif
 }

@@ -41,7 +41,7 @@ void main() {
 
 	highp vec4 color = vec4(0.0);
 
-	color = roadPosCurrent.xyzw;
+	//color = roadPosCurrent.xyzw;
 
 	//color = roadInfoCurrent.xyzw;
 
@@ -58,6 +58,8 @@ void main() {
 		color = vec4(0.1, 0.1, 0.8, 1.0);
 	else if ( floor(roadPosUp.CH_ROADMAP1_OY / GRID_Y) != floor(roadPosDown.CH_ROADMAP1_OY / GRID_Y) )
 		color = vec4(0.1, 0.8, 0.1, 1.0);*/
+
+	color = vec4(vec3(1.0), roadPosCurrent.w);
 
 	result = color;
 }

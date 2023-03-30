@@ -71,9 +71,9 @@ void* th_output(void* arg) {
 		output_data data[header.count];
 		!read(p[0], data, header.count * sizeof(output_data));
 
-		fprintf(stdout, "F %u : %u\n", header.frame, header.count);
+		fprintf(stdout, "F %u %u\n", header.frame, header.count);
 		for (output_data* ptr = data; ptr < data + header.count; ptr++) {
-			fprintf(stdout, "O S %d : R %.2f,%.2f : S %u,%u : dy %d\n", ptr->speed, ptr->rx, ptr->ry, ptr->sx, ptr->sy, ptr->osy);
+			fprintf(stdout, "O %d %.2f,%.2f %u,%u %d\n", ptr->speed, ptr->rx, ptr->ry, ptr->sx, ptr->sy, ptr->osy);
 		}
 	}
 

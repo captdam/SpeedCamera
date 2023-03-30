@@ -3,10 +3,6 @@
 #include <inttypes.h>
 #include <string.h>
 
-#ifdef VERBOSE
-#include <errno.h>
-#endif
-
 #include "speedometer.h"
 
 struct Speedometer_ClassDataStructure {
